@@ -13,8 +13,9 @@ import {
 import { resolveBoardDrop, snapshotBoard } from '../../dnd/boardDnd';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import type { BoardColumn, Card } from '../../types/models';
+import type { BoardColumn, Card, Id } from '../../types/models';
 import ConfirmDialog from '../common/ConfirmDialog';
+import ScheduleSheet from '../timeline/ScheduleSheet';
 import AddColumnPanel from './AddColumnPanel';
 import BoardColumnView from './BoardColumnView';
 import CardEditSheet, { type CardFormValues } from './CardEditSheet';
@@ -24,6 +25,7 @@ import ColumnEditSheet, { type ColumnFormValues } from './ColumnEditSheet';
 type Dialog =
   | { kind: 'card-create'; column: BoardColumn }
   | { kind: 'card-edit'; card: Card }
+  | { kind: 'card-schedule'; card: Card }
   | { kind: 'column-edit'; column: BoardColumn }
   | { kind: 'column-delete'; column: BoardColumn }
   | null;
@@ -118,6 +120,15 @@ export default function BoardView() {
     return map;
   }, [columns, workspace.cards]);
 
+  /** cardId → timeline entries, for the 🗓 badge on each card. */
+  const scheduledCounts = useMemo(() => {
+    const counts: Record<Id, number> = {};
+    for (const entry of Object.values(workspace.entries)) {
+      counts[entry.cardId] = (counts[entry.cardId] ?? 0) + 1;
+    }
+    return counts;
+  }, [workspace.entries]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
@@ -185,6 +196,7 @@ export default function BoardView() {
               column={column}
               cards={cardsByColumn[column.id] ?? []}
               currency={trip.currency}
+              scheduledCounts={scheduledCounts}
               onAddCard={(target) => setDialog({ kind: 'card-create', column: target })}
               onOpenCard={(card) => setDialog({ kind: 'card-edit', card })}
               onEditColumn={(target) => setDialog({ kind: 'column-edit', column: target })}
@@ -221,13 +233,19 @@ export default function BoardView() {
         <CardEditSheet
           card={dialog.card}
           columnName={columnNameOf(dialog.card.columnId)}
+          scheduledCount={scheduledCounts[dialog.card.id] ?? 0}
           onSubmit={submitCard}
+          onSchedule={() => setDialog({ kind: 'card-schedule', card: dialog.card })}
           onDelete={() => {
             deleteCard(dialog.card.id);
             setDialog(null);
           }}
           onClose={() => setDialog(null)}
         />
+      ) : null}
+
+      {dialog?.kind === 'card-schedule' ? (
+        <ScheduleSheet card={dialog.card} onClose={() => setDialog(null)} />
       ) : null}
 
       {dialog?.kind === 'column-edit' ? (

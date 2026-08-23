@@ -22,7 +22,14 @@ interface CardEditSheetProps {
   card?: Card;
   /** Shown in the header so the user knows which category they are in. */
   columnName: string;
+  /** Timeline entries this card already has; shown next to 시간표에 추가. */
+  scheduledCount?: number;
   onSubmit: (values: CardFormValues) => void;
+  /**
+   * Opens the schedule sheet. This is the dependable way onto the timeline on
+   * touch devices, where the desktop rail-to-grid drag is not available.
+   */
+  onSchedule?: () => void;
   onDelete?: () => void;
   onClose: () => void;
 }
@@ -38,7 +45,9 @@ const numberOrUndefined = (raw: string): number | undefined => {
 export default function CardEditSheet({
   card,
   columnName,
+  scheduledCount = 0,
   onSubmit,
+  onSchedule,
   onDelete,
   onClose,
 }: CardEditSheetProps) {
@@ -202,6 +211,22 @@ export default function CardEditSheet({
             className={INPUT_CLASS}
           />
         </div>
+
+        {card && onSchedule ? (
+          <button
+            type="button"
+            data-testid="card-schedule"
+            onClick={onSchedule}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-stone-100 px-4 py-2.5 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-200"
+          >
+            🗓 시간표에 추가
+            {scheduledCount > 0 ? (
+              <span className="rounded-full bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-stone-500">
+                {scheduledCount}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
 
         <p className="rounded-xl bg-stone-50 px-3 py-2.5 text-xs leading-relaxed text-stone-400">
           📍 위치는 지도 탭에서 추가할 수 있어요. (준비 중)

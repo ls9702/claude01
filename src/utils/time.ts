@@ -26,3 +26,84 @@ export function formatClock(minFromMidnight: number): string {
   const m = total % MIN_PER_HOUR;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
+
+/* ------------------------------------------------------------------ *
+ * Timeline grid math (M2a)
+ * ------------------------------------------------------------------ */
+
+/** Minutes in one timeline day. A day column spans `0 … DAY_MIN`. */
+export const DAY_MIN = 1440;
+
+/** Every start time and every duration lands on this grid. */
+export const SNAP_MIN = 15;
+
+/** Shortest entry the grid can express. */
+export const MIN_ENTRY_MIN = 15;
+
+/**
+ * Rounds to the nearest `step`-minute grid line. `step` is coerced to a sane
+ * positive integer so a bad caller cannot produce `NaN` start times.
+ */
+export function snapMin(min: number, step: number = SNAP_MIN): number {
+  const size = Number.isFinite(step) && step >= 1 ? Math.round(step) : SNAP_MIN;
+  if (!Number.isFinite(min)) return 0;
+  return Math.round(min / size) * size;
+}
+
+/** A start/duration pair that is guaranteed to fit inside one day. */
+export interface EntrySpan {
+  startMin: number;
+  durationMin: number;
+}
+
+/**
+ * Forces `(startMin, durationMin)` inside `0 … DAY_MIN`:
+ *
+ * - `startMin` lands in `[0, DAY_MIN - MIN_ENTRY_MIN]`;
+ * - `durationMin` is at least {@link MIN_ENTRY_MIN} and never runs past
+ *   midnight — an entry that would overflow gets shortened, never moved.
+ */
+export function clampEntry(startMin: number, durationMin: number): EntrySpan {
+  const rawStart = Number.isFinite(startMin) ? Math.round(startMin) : 0;
+  const start = Math.min(Math.max(rawStart, 0), DAY_MIN - MIN_ENTRY_MIN);
+
+  const rawDuration = Number.isFinite(durationMin) ? Math.round(durationMin) : MIN_ENTRY_MIN;
+  const duration = Math.min(Math.max(rawDuration, MIN_ENTRY_MIN), DAY_MIN - start);
+
+  return { startMin: start, durationMin: duration };
+}
+
+/** Minutes from midnight → pixels from the top of a day column. */
+export function minToY(min: number, pxPerMin: number): number {
+  if (!Number.isFinite(min) || !Number.isFinite(pxPerMin)) return 0;
+  return min * pxPerMin;
+}
+
+/** Pixels from the top of a day column → minutes from midnight (unsnapped). */
+export function yToMin(y: number, pxPerMin: number): number {
+  if (!Number.isFinite(y) || !Number.isFinite(pxPerMin) || pxPerMin === 0) return 0;
+  return y / pxPerMin;
+}
+
+/**
+ * `formatTimeRange(570, 90)` → `"09:30–11:00"`. An entry that ends exactly at
+ * midnight reads `"24:00"` rather than wrapping to `"00:00"`.
+ */
+export function formatTimeRange(startMin: number, durationMin: number): string {
+  const start = Number.isFinite(startMin) ? Math.round(startMin) : 0;
+  const end = start + (Number.isFinite(durationMin) ? Math.round(durationMin) : 0);
+  const endText = end === DAY_MIN ? '24:00' : formatClock(end);
+  return `${formatClock(start)}–${endText}`;
+}
+
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'] as const;
+
+/** `"2026-08-23"` → `"8월 23일 (일)"`. Unparseable input is echoed back. */
+export function formatDayDate(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!match) return iso;
+  const [, y, m, d] = match;
+  const date = new Date(Number(y), Number(m) - 1, Number(d));
+  if (Number.isNaN(date.getTime())) return iso;
+  return `${Number(m)}월 ${Number(d)}일 (${WEEKDAYS[date.getDay()]})`;
+}

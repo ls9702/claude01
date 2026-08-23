@@ -4,8 +4,9 @@ import { useHashSync } from './HashSync';
 import TabBar from './TabBar';
 import TripsView from '../trips/TripListView';
 import BoardView from '../board/BoardView';
-import TimelineView from '../views/TimelineView';
+import TimelineView from '../timeline/TimelineView';
 import MapView from '../views/MapView';
+import UndoToast from '../common/UndoToast';
 
 const VIEWS: Record<TabId, () => React.JSX.Element> = {
   trips: TripsView,
@@ -51,6 +52,7 @@ export default function AppShell() {
         <View />
       </main>
       <TabBar />
+      <UndoToast />
     </div>
   );
 }

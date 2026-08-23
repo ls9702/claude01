@@ -13,13 +13,24 @@ interface CardSurfaceProps {
   color: string;
   /** Slight lift used by the drag overlay ghost. */
   lifted?: boolean;
+  /**
+   * How many timeline entries this card has, across every sheet. `0` hides the
+   * badge. Per-sheet detail arrives with M2b's multi-sheet UI.
+   */
+  scheduledCount?: number;
 }
 
 /**
  * The card's looks, with no drag wiring — shared by the sortable card and by
  * the `DragOverlay` ghost.
  */
-export function CardSurface({ card, currency, color, lifted = false }: CardSurfaceProps) {
+export function CardSurface({
+  card,
+  currency,
+  color,
+  lifted = false,
+  scheduledCount = 0,
+}: CardSurfaceProps) {
   const colors = colorClasses(color);
   const chips: { key: string; icon: string; text: string; title?: string }[] = [];
 
@@ -50,6 +61,16 @@ export function CardSurface({ card, currency, color, lifted = false }: CardSurfa
         <h3 className="min-w-0 flex-1 break-words text-sm font-semibold leading-snug text-stone-800">
           {card.title}
         </h3>
+        {scheduledCount > 0 ? (
+          <span
+            data-testid="card-schedule-badge"
+            data-count={scheduledCount}
+            title={`시간표에 ${scheduledCount}번 배치됨`}
+            className="shrink-0 rounded-full bg-stone-800 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white"
+          >
+            🗓 {scheduledCount}
+          </span>
+        ) : null}
         {card.url ? (
           <a
             href={card.url}
@@ -93,6 +114,8 @@ interface CardItemProps {
   card: Card;
   currency: string;
   color: string;
+  /** Timeline entries for this card; drives the 🗓 badge. */
+  scheduledCount?: number;
   onOpen: (card: Card) => void;
 }
 
@@ -102,7 +125,13 @@ interface CardItemProps {
  * `touch-action: none` lives on this element only — never on the board's
  * scroll containers, or horizontal scrolling would die on touch devices.
  */
-export default function CardItem({ card, currency, color, onOpen }: CardItemProps) {
+export default function CardItem({
+  card,
+  currency,
+  color,
+  scheduledCount = 0,
+  onOpen,
+}: CardItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
     data: { type: DND_CARD, columnId: card.columnId },
@@ -128,7 +157,12 @@ export default function CardItem({ card, currency, color, onOpen }: CardItemProp
         isDragging ? 'opacity-40' : '',
       ].join(' ')}
     >
-      <CardSurface card={card} currency={currency} color={color} />
+      <CardSurface
+        card={card}
+        currency={currency}
+        color={color}
+        scheduledCount={scheduledCount}
+      />
     </div>
   );
 }

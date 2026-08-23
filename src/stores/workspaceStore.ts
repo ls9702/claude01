@@ -4,14 +4,18 @@ import {
   emptyWorkspace,
   type BoardColumn,
   type Card,
+  type Day,
   type GeoPoint,
   type Id,
   type Millis,
+  type Sheet,
+  type TimelineEntry,
   type Tombstone,
   type Trip,
   type Workspace,
 } from '../types/models';
 import { newId } from '../utils/ids';
+import { clampEntry, snapMin } from '../utils/time';
 import { idbStorage } from './persistMiddleware';
 
 /* ------------------------------------------------------------------ *
@@ -32,6 +36,28 @@ export type ColumnPatch = Partial<Pick<BoardColumn, 'name' | 'color' | 'icon'>>;
 export type CardPatch = Partial<
   Pick<Card, 'title' | 'memo' | 'url' | 'location' | 'budget' | 'defaultDurationMin'>
 >;
+
+/** Fields of a {@link Sheet} that callers may change (flights arrive in M2b). */
+export type SheetPatch = Partial<Pick<Sheet, 'name'>>;
+
+/** Fields of a {@link Day} that callers may change. */
+export type DayPatch = Partial<Pick<Day, 'date' | 'label'>>;
+
+/** Optional day metadata; a day with neither reads as `N일차`. */
+export interface NewDayData {
+  /** `YYYY-MM-DD`. */
+  date?: string;
+  label?: string;
+}
+
+/** Fields of a {@link TimelineEntry} that callers may change directly. */
+export type EntryPatch = Partial<Pick<TimelineEntry, 'note'>>;
+
+/** Fallback length of a dropped card that carries no `defaultDurationMin`. */
+export const DEFAULT_ENTRY_MIN = 60;
+
+/** Name of the sheet auto-created on a trip's first visit to the 일정 tab. */
+export const FIRST_SHEET_NAME = '일정 1';
 
 /** Everything needed to create a card; only `title` is required. */
 export interface NewCardData {
@@ -120,6 +146,17 @@ function removeEntriesForCard(draft: Draft, cardId: Id, now: Millis): void {
   }
 }
 
+/** Deletes a day plus its entries. The caller fixes up `sheet.dayOrder`. */
+function removeDay(draft: Draft, dayId: Id, now: Millis): void {
+  delete draft.days[dayId];
+  bury(draft, 'day', dayId, now);
+  for (const entry of Object.values(draft.entries)) {
+    if (entry.dayId !== dayId) continue;
+    delete draft.entries[entry.id];
+    bury(draft, 'entry', entry.id, now);
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Store
  * ------------------------------------------------------------------ */
@@ -176,6 +213,41 @@ export interface WorkspaceState {
    * values are clamped.
    */
   moveCard: (cardId: Id, toColumnId: Id, toIndex: number) => void;
+
+  /* --- 일정 (timeline) — M2a ------------------------------------------ */
+
+  /** Appends a sheet to the trip's `sheetOrder`. Returns its id, or `null`. */
+  addSheet: (tripId: Id, name: string) => Id | null;
+  /** Renames a sheet. No-op for an unknown id. */
+  updateSheet: (id: Id, patch: SheetPatch) => void;
+  /** Deletes a sheet plus every day and entry inside it (+ tombstones). */
+  deleteSheet: (id: Id) => void;
+
+  /** Appends a day to the sheet's `dayOrder`. Returns its id, or `null`. */
+  addDay: (sheetId: Id, opts?: NewDayData) => Id | null;
+  /** Patches a day's date/label. Passing `undefined` clears the field. */
+  updateDay: (id: Id, patch: DayPatch) => void;
+  /** Deletes a day and cascade-deletes its entries (+ tombstones). */
+  deleteDay: (id: Id) => void;
+
+  /**
+   * Places a card on a day. `startMin` is snapped to the 15-minute grid and
+   * the result is clamped inside `0…1440` — an entry that would run past
+   * midnight is shortened, never moved. `durationMin` defaults to the card's
+   * `defaultDurationMin`, then to {@link DEFAULT_ENTRY_MIN}.
+   *
+   * Returns the new entry id, or `null` when the card/day are unknown or
+   * belong to different trips.
+   */
+  scheduleCard: (cardId: Id, dayId: Id, startMin: number, durationMin?: number) => Id | null;
+  /** Moves an entry to `dayId` at a snapped, clamped `startMin`. */
+  moveEntry: (entryId: Id, dayId: Id, startMin: number) => void;
+  /** Changes an entry's length (min 15 minutes, never past midnight). */
+  resizeEntry: (entryId: Id, durationMin: number) => void;
+  /** Patches an entry's note. */
+  updateEntry: (id: Id, patch: EntryPatch) => void;
+  /** Removes an entry, leaving a tombstone. */
+  deleteEntry: (id: Id) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()(
@@ -420,6 +492,178 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             order.splice(clampIndex(toIndex, order.length), 0, cardId);
             draft.columns[target.id] = { ...target, cardOrder: order, updatedAt: now };
             touch<Card>(draft.cards, cardId, { columnId: target.id }, now);
+            return true;
+          });
+        },
+
+        /* --- 일정 (timeline) ------------------------------------------ */
+
+        addSheet: (tripId, name) =>
+          run((draft, now) => {
+            const trip = draft.trips[tripId];
+            if (!trip) return null;
+
+            const sheetId = newId();
+            draft.sheets[sheetId] = {
+              id: sheetId,
+              tripId,
+              name: name.trim() || '새 일정',
+              dayOrder: [],
+              createdAt: now,
+              updatedAt: now,
+            };
+            draft.trips[tripId] = {
+              ...trip,
+              sheetOrder: [...trip.sheetOrder, sheetId],
+              updatedAt: now,
+            };
+            return sheetId;
+          }),
+
+        updateSheet: (id, patch) => {
+          run((draft, now) => touch<Sheet>(draft.sheets, id, patch, now));
+        },
+
+        deleteSheet: (id) => {
+          run((draft, now) => {
+            const sheet = draft.sheets[id];
+            if (!sheet) return null;
+
+            for (const dayId of sheet.dayOrder) removeDay(draft, dayId, now);
+            // Defensive: a day that lost its place in `dayOrder` still belongs
+            // to this sheet and must not outlive it.
+            for (const day of Object.values(draft.days)) {
+              if (day.sheetId === id) removeDay(draft, day.id, now);
+            }
+
+            delete draft.sheets[id];
+            bury(draft, 'sheet', id, now);
+
+            const trip = draft.trips[sheet.tripId];
+            if (trip) {
+              draft.trips[trip.id] = {
+                ...trip,
+                sheetOrder: trip.sheetOrder.filter((sheetId) => sheetId !== id),
+                updatedAt: now,
+              };
+            }
+            return true;
+          });
+        },
+
+        addDay: (sheetId, opts) =>
+          run((draft, now) => {
+            const sheet = draft.sheets[sheetId];
+            if (!sheet) return null;
+
+            const dayId = newId();
+            draft.days[dayId] = {
+              id: dayId,
+              tripId: sheet.tripId,
+              sheetId,
+              date: opts?.date,
+              label: opts?.label,
+              createdAt: now,
+              updatedAt: now,
+            };
+            draft.sheets[sheetId] = {
+              ...sheet,
+              dayOrder: [...sheet.dayOrder, dayId],
+              updatedAt: now,
+            };
+            return dayId;
+          }),
+
+        updateDay: (id, patch) => {
+          run((draft, now) => touch<Day>(draft.days, id, patch, now));
+        },
+
+        deleteDay: (id) => {
+          run((draft, now) => {
+            const day = draft.days[id];
+            if (!day) return null;
+
+            removeDay(draft, id, now);
+
+            const sheet = draft.sheets[day.sheetId];
+            if (sheet) {
+              draft.sheets[sheet.id] = {
+                ...sheet,
+                dayOrder: sheet.dayOrder.filter((dayId) => dayId !== id),
+                updatedAt: now,
+              };
+            }
+            return true;
+          });
+        },
+
+        scheduleCard: (cardId, dayId, startMin, durationMin) =>
+          run((draft, now) => {
+            const card = draft.cards[cardId];
+            const day = draft.days[dayId];
+            if (!card || !day || day.tripId !== card.tripId) return null;
+
+            const requested = durationMin ?? card.defaultDurationMin ?? DEFAULT_ENTRY_MIN;
+            const span = clampEntry(snapMin(startMin), requested);
+
+            const entryId = newId();
+            draft.entries[entryId] = {
+              id: entryId,
+              tripId: card.tripId,
+              cardId,
+              dayId,
+              startMin: span.startMin,
+              durationMin: span.durationMin,
+              createdAt: now,
+              updatedAt: now,
+            };
+            return entryId;
+          }),
+
+        moveEntry: (entryId, dayId, startMin) => {
+          run((draft, now) => {
+            const entry = draft.entries[entryId];
+            const day = draft.days[dayId];
+            if (!entry || !day || day.tripId !== entry.tripId) return null;
+
+            const span = clampEntry(snapMin(startMin), entry.durationMin);
+            // Dropping an entry back where it started is not a change.
+            if (
+              entry.dayId === dayId &&
+              entry.startMin === span.startMin &&
+              entry.durationMin === span.durationMin
+            ) {
+              return null;
+            }
+            return touch<TimelineEntry>(draft.entries, entryId, { dayId, ...span }, now);
+          });
+        },
+
+        resizeEntry: (entryId, durationMin) => {
+          run((draft, now) => {
+            const entry = draft.entries[entryId];
+            if (!entry) return null;
+
+            const span = clampEntry(entry.startMin, durationMin);
+            if (span.durationMin === entry.durationMin) return null;
+            return touch<TimelineEntry>(
+              draft.entries,
+              entryId,
+              { durationMin: span.durationMin },
+              now,
+            );
+          });
+        },
+
+        updateEntry: (id, patch) => {
+          run((draft, now) => touch<TimelineEntry>(draft.entries, id, patch, now));
+        },
+
+        deleteEntry: (id) => {
+          run((draft, now) => {
+            if (!draft.entries[id]) return null;
+            delete draft.entries[id];
+            bury(draft, 'entry', id, now);
             return true;
           });
         },
