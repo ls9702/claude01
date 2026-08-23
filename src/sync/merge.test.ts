@@ -1,0 +1,611 @@
+import { describe, expect, it } from 'vitest';
+import type {
+  BoardColumn,
+  Card,
+  Day,
+  Id,
+  Millis,
+  Sheet,
+  TimelineEntry,
+  Tombstone,
+  Trip,
+  Workspace,
+} from '../types/models';
+import { TOMBSTONE_TTL_MS, merge } from './merge';
+
+/* ------------------------------------------------------------------ *
+ * Fixtures
+ * ------------------------------------------------------------------ */
+
+/** Readable clock: `T(0)` is the epoch of every fixture, `T(n)` is n seconds on. */
+const T = (seconds: number): Millis => 1_760_000_000_000 + seconds * 1_000;
+
+const byId = <T extends { id: Id }>(items: T[]): Record<Id, T> =>
+  Object.fromEntries(items.map((item) => [item.id, item]));
+
+interface Parts {
+  trips?: Trip[];
+  sheets?: Sheet[];
+  columns?: BoardColumn[];
+  cards?: Card[];
+  days?: Day[];
+  entries?: TimelineEntry[];
+  tombstones?: Tombstone[];
+}
+
+const ws = (parts: Parts = {}): Workspace => ({
+  schemaVersion: 1,
+  trips: byId(parts.trips ?? []),
+  sheets: byId(parts.sheets ?? []),
+  columns: byId(parts.columns ?? []),
+  cards: byId(parts.cards ?? []),
+  days: byId(parts.days ?? []),
+  entries: byId(parts.entries ?? []),
+  tombstones: parts.tombstones ?? [],
+});
+
+const trip = (id: Id, at: Millis, over: Partial<Trip> = {}): Trip => ({
+  id,
+  title: `여행 ${id}`,
+  currency: 'KRW',
+  columnOrder: [],
+  sheetOrder: [],
+  createdAt: at,
+  updatedAt: at,
+  ...over,
+});
+
+const column = (id: Id, tripId: Id, at: Millis, over: Partial<BoardColumn> = {}): BoardColumn => ({
+  id,
+  tripId,
+  name: `칸 ${id}`,
+  color: 'sky',
+  icon: '📌',
+  cardOrder: [],
+  createdAt: at,
+  updatedAt: at,
+  ...over,
+});
+
+const card = (id: Id, tripId: Id, columnId: Id, at: Millis, over: Partial<Card> = {}): Card => ({
+  id,
+  tripId,
+  columnId,
+  title: `카드 ${id}`,
+  createdAt: at,
+  updatedAt: at,
+  ...over,
+});
+
+const sheet = (id: Id, tripId: Id, at: Millis, over: Partial<Sheet> = {}): Sheet => ({
+  id,
+  tripId,
+  name: `일정 ${id}`,
+  dayOrder: [],
+  createdAt: at,
+  updatedAt: at,
+  ...over,
+});
+
+const day = (id: Id, tripId: Id, sheetId: Id, at: Millis, over: Partial<Day> = {}): Day => ({
+  id,
+  tripId,
+  sheetId,
+  label: `${id}일차`,
+  createdAt: at,
+  updatedAt: at,
+  ...over,
+});
+
+const entry = (
+  id: Id,
+  tripId: Id,
+  cardId: Id,
+  dayId: Id,
+  at: Millis,
+  over: Partial<TimelineEntry> = {},
+): TimelineEntry => ({
+  id,
+  tripId,
+  cardId,
+  dayId,
+  startMin: 540,
+  durationMin: 60,
+  createdAt: at,
+  updatedAt: at,
+  ...over,
+});
+
+const tomb = (entity: Tombstone['entity'], id: Id, at: Millis): Tombstone => ({
+  id,
+  entity,
+  deletedAt: at,
+});
+
+/** Ids of the tombstones for one entity kind, sorted for stable assertions. */
+const tombIds = (result: Workspace, entity: Tombstone['entity']): Id[] =>
+  result.tombstones
+    .filter((t) => t.entity === entity)
+    .map((t) => t.id)
+    .sort();
+
+/* ------------------------------------------------------------------ *
+ * Table
+ * ------------------------------------------------------------------ */
+
+interface Case {
+  name: string;
+  local: Workspace;
+  remote: Workspace;
+  now: Millis;
+  check: (merged: Workspace) => void;
+}
+
+const NOW = T(100);
+
+const cases: Case[] = [
+  /* --- last-writer-wins on entities ---------------------------------- */
+  {
+    name: '동시 수정: 로컬이 더 최신이면 로컬이 이긴다',
+    local: ws({ trips: [trip('t1', T(1), { title: '로컬 제목', updatedAt: T(20) })] }),
+    remote: ws({ trips: [trip('t1', T(1), { title: '리모트 제목', updatedAt: T(10) })] }),
+    now: NOW,
+    check: (m) => {
+      expect(m.trips.t1.title).toBe('로컬 제목');
+      expect(m.trips.t1.updatedAt).toBe(T(20));
+    },
+  },
+  {
+    name: '동시 수정: 리모트가 더 최신이면 리모트가 이긴다',
+    local: ws({ trips: [trip('t1', T(1), { title: '로컬 제목', updatedAt: T(10) })] }),
+    remote: ws({ trips: [trip('t1', T(1), { title: '리모트 제목', updatedAt: T(20) })] }),
+    now: NOW,
+    check: (m) => expect(m.trips.t1.title).toBe('리모트 제목'),
+  },
+  {
+    name: '동시 수정: updatedAt이 같으면 리모트가 이긴다',
+    local: ws({ trips: [trip('t1', T(1), { title: '로컬 제목', updatedAt: T(20) })] }),
+    remote: ws({ trips: [trip('t1', T(1), { title: '리모트 제목', updatedAt: T(20) })] }),
+    now: NOW,
+    check: (m) => expect(m.trips.t1.title).toBe('리모트 제목'),
+  },
+  {
+    name: '한쪽에만 있는 엔티티는 양방향 모두 살아남는다',
+    local: ws({ trips: [trip('onlyLocal', T(5))] }),
+    remote: ws({ trips: [trip('onlyRemote', T(6))] }),
+    now: NOW,
+    check: (m) => expect(Object.keys(m.trips).sort()).toEqual(['onlyLocal', 'onlyRemote']),
+  },
+  {
+    name: '엔티티별로 각각 최신본이 뽑힌다 (양쪽이 서로 다른 카드를 수정)',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1', 'k2'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1), { title: '로컬이 고친 카드', updatedAt: T(30) }),
+        card('k2', 't1', 'c1', T(1), { title: '오래된 k2', updatedAt: T(1) }),
+      ],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1', 'k2'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1), { title: '오래된 k1', updatedAt: T(1) }),
+        card('k2', 't1', 'c1', T(1), { title: '리모트가 고친 카드', updatedAt: T(30) }),
+      ],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(m.cards.k1.title).toBe('로컬이 고친 카드');
+      expect(m.cards.k2.title).toBe('리모트가 고친 카드');
+    },
+  },
+
+  /* --- delete vs edit ------------------------------------------------ */
+  {
+    name: '삭제 vs 수정: 로컬 삭제가 리모트의 오래된 카드를 죽인다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1))],
+      tombstones: [tomb('card', 'k1', T(20))],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1), { updatedAt: T(10) })],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(m.cards.k1).toBeUndefined();
+      // The tombstone is kept: another peer may still be carrying k1.
+      expect(tombIds(m, 'card')).toEqual(['k1']);
+      expect(m.columns.c1.cardOrder).toEqual([]);
+    },
+  },
+  {
+    name: '삭제 vs 수정: 삭제 이후의 리모트 수정은 카드를 되살린다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1))],
+      tombstones: [tomb('card', 'k1', T(20))],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1), { title: '삭제 후 수정', updatedAt: T(30) })],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(m.cards.k1?.title).toBe('삭제 후 수정');
+      // Still kept — the next merge has to judge it against a peer's copy too.
+      expect(tombIds(m, 'card')).toEqual(['k1']);
+      expect(m.columns.c1.cardOrder).toEqual(['k1']);
+    },
+  },
+  {
+    name: '삭제 vs 수정 (반대 방향): 리모트 삭제가 로컬의 오래된 카드를 죽인다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1), { updatedAt: T(10) })],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1))],
+      tombstones: [tomb('card', 'k1', T(20))],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(m.cards.k1).toBeUndefined();
+      expect(m.columns.c1.cardOrder).toEqual([]);
+    },
+  },
+  {
+    name: '삭제 vs 수정 (반대 방향): 삭제 이후의 로컬 수정은 카드를 지킨다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1), { title: '로컬이 지킨 카드', updatedAt: T(30) })],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1))],
+      tombstones: [tomb('card', 'k1', T(20))],
+    }),
+    now: NOW,
+    check: (m) => expect(m.cards.k1?.title).toBe('로컬이 지킨 카드'),
+  },
+  {
+    name: '같은 엔티티의 툼스톤 두 개는 늦은 쪽으로 합쳐진다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1), { updatedAt: T(25) })],
+      tombstones: [tomb('card', 'k1', T(20))],
+    }),
+    remote: ws({ tombstones: [tomb('card', 'k1', T(40))] }),
+    now: NOW,
+    check: (m) => {
+      // Late delete (T40) beats the T25 edit that survived the T20 delete.
+      expect(m.cards.k1).toBeUndefined();
+      expect(m.tombstones.find((t) => t.id === 'k1')?.deletedAt).toBe(T(40));
+    },
+  },
+
+  /* --- tombstone TTL -------------------------------------------------- */
+  {
+    name: '30일보다 오래된 툼스톤은 정리된다',
+    local: ws({
+      tombstones: [
+        tomb('card', 'tooOld', NOW - TOMBSTONE_TTL_MS - 1),
+        tomb('card', 'exactlyTtl', NOW - TOMBSTONE_TTL_MS),
+      ],
+    }),
+    remote: ws({ tombstones: [tomb('day', 'fresh', NOW - 1_000)] }),
+    now: NOW,
+    check: (m) => {
+      expect(tombIds(m, 'card')).toEqual(['exactlyTtl']);
+      expect(tombIds(m, 'day')).toEqual(['fresh']);
+    },
+  },
+  {
+    name: '툼스톤 병합은 정리 전에 일어난다 (늦은 사본이 있으면 살아남는다)',
+    local: ws({ tombstones: [tomb('card', 'k1', NOW - TOMBSTONE_TTL_MS - 5_000)] }),
+    remote: ws({ tombstones: [tomb('card', 'k1', NOW - 1_000)] }),
+    now: NOW,
+    check: (m) => expect(m.tombstones).toEqual([{ id: 'k1', entity: 'card', deletedAt: NOW - 1_000 }]),
+  },
+
+  /* --- ordering arrays ------------------------------------------------ */
+  {
+    name: '순서 배열: 이긴 쪽의 순서를 지키고 빠진 id를 createdAt 순으로 덧붙인다',
+    local: ws({
+      // Local reordered its columns most recently, so its array wins…
+      trips: [trip('t1', T(1), { columnOrder: ['c3', 'c1', 'c2'], updatedAt: T(50) })],
+      columns: [column('c1', 't1', T(1)), column('c2', 't1', T(2)), column('c3', 't1', T(3))],
+    }),
+    remote: ws({
+      // …but remote's two new columns still have to land somewhere.
+      trips: [trip('t1', T(1), { columnOrder: ['c1', 'c2', 'c3', 'c5', 'c4'], updatedAt: T(20) })],
+      columns: [
+        column('c1', 't1', T(1)),
+        column('c2', 't1', T(2)),
+        column('c3', 't1', T(3)),
+        column('c4', 't1', T(20)),
+        column('c5', 't1', T(15)),
+      ],
+    }),
+    now: NOW,
+    check: (m) => {
+      // Appended oldest-first regardless of how remote had them ordered.
+      expect(m.trips.t1.columnOrder).toEqual(['c3', 'c1', 'c2', 'c5', 'c4']);
+    },
+  },
+  {
+    name: '순서 배열: 죽은 id는 cardOrder에서 빠진다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1', 'k2', 'k3'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1)),
+        card('k2', 't1', 'c1', T(2)),
+        card('k3', 't1', 'c1', T(3)),
+      ],
+    }),
+    remote: ws({ tombstones: [tomb('card', 'k2', T(30))] }),
+    now: NOW,
+    check: (m) => {
+      expect(m.columns.c1.cardOrder).toEqual(['k1', 'k3']);
+      expect(Object.keys(m.cards).sort()).toEqual(['k1', 'k3']);
+    },
+  },
+  {
+    name: '순서 배열: 중복 id와 유령 id가 함께 정리된다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1', 'c1', 'ghost'] })],
+      columns: [column('c1', 't1', T(1))],
+    }),
+    remote: ws({ trips: [trip('t1', T(1), { columnOrder: ['c1'] })] }),
+    now: NOW,
+    check: (m) => expect(m.trips.t1.columnOrder).toEqual(['c1']),
+  },
+  {
+    name: '순서 배열: sheetOrder와 dayOrder도 함께 조정된다',
+    local: ws({
+      trips: [trip('t1', T(1), { sheetOrder: ['s1'], updatedAt: T(50) })],
+      sheets: [sheet('s1', 't1', T(1), { dayOrder: ['d1'], updatedAt: T(50) })],
+      days: [day('d1', 't1', 's1', T(1))],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { sheetOrder: ['s1', 's2'], updatedAt: T(10) })],
+      sheets: [
+        sheet('s1', 't1', T(1), { dayOrder: ['d1', 'd2'], updatedAt: T(10) }),
+        sheet('s2', 't1', T(9), { dayOrder: [] }),
+      ],
+      days: [day('d1', 't1', 's1', T(1)), day('d2', 't1', 's1', T(9))],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(m.trips.t1.sheetOrder).toEqual(['s1', 's2']);
+      expect(m.sheets.s1.dayOrder).toEqual(['d1', 'd2']);
+    },
+  },
+
+  /* --- referential integrity ------------------------------------------ */
+  {
+    name: '고아 정리: 카드가 사라진 엔트리는 삭제되고 툼스톤이 남는다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'], sheetOrder: ['s1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1), { updatedAt: T(10) })],
+      sheets: [sheet('s1', 't1', T(1), { dayOrder: ['d1'] })],
+      days: [day('d1', 't1', 's1', T(1))],
+      entries: [entry('e1', 't1', 'k1', 'd1', T(1))],
+    }),
+    remote: ws({ tombstones: [tomb('card', 'k1', T(30))] }),
+    now: NOW,
+    check: (m) => {
+      expect(m.cards).toEqual({});
+      expect(m.entries).toEqual({});
+      expect(tombIds(m, 'entry')).toEqual(['e1']);
+      expect(m.tombstones.find((t) => t.id === 'e1')?.deletedAt).toBe(NOW);
+    },
+  },
+  {
+    name: '고아 정리: 날짜가 사라진 엔트리도 삭제된다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'], sheetOrder: ['s1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1))],
+      sheets: [sheet('s1', 't1', T(1), { dayOrder: ['d1'] })],
+      days: [day('d1', 't1', 's1', T(1), { updatedAt: T(10) })],
+      entries: [entry('e1', 't1', 'k1', 'd1', T(1))],
+    }),
+    remote: ws({ tombstones: [tomb('day', 'd1', T(30))] }),
+    now: NOW,
+    check: (m) => {
+      expect(m.days).toEqual({});
+      expect(m.entries).toEqual({});
+      expect(m.sheets.s1.dayOrder).toEqual([]);
+      // The card itself is untouched — it just goes back to 미배치.
+      expect(m.cards.k1).toBeDefined();
+      expect(tombIds(m, 'entry')).toEqual(['e1']);
+    },
+  },
+  {
+    name: '고아 정리: 시트가 사라지면 그 날짜와 엔트리가 함께 사라진다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'], sheetOrder: ['s1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1))],
+      sheets: [sheet('s1', 't1', T(1), { dayOrder: ['d1'], updatedAt: T(10) })],
+      days: [day('d1', 't1', 's1', T(1))],
+      entries: [entry('e1', 't1', 'k1', 'd1', T(1))],
+    }),
+    remote: ws({ tombstones: [tomb('sheet', 's1', T(30))] }),
+    now: NOW,
+    check: (m) => {
+      expect(m.sheets).toEqual({});
+      expect(m.days).toEqual({});
+      expect(m.entries).toEqual({});
+      expect(m.trips.t1.sheetOrder).toEqual([]);
+      expect(tombIds(m, 'day')).toEqual(['d1']);
+      expect(tombIds(m, 'entry')).toEqual(['e1']);
+    },
+  },
+  {
+    name: '고아 정리: 칸이 사라진 카드는 그 여행의 첫 칸으로 옮겨진다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1', 'c2'] })],
+      columns: [
+        column('c1', 't1', T(1), { cardOrder: [] }),
+        column('c2', 't1', T(2), { cardOrder: ['k1'], updatedAt: T(10) }),
+      ],
+      cards: [card('k1', 't1', 'c2', T(5))],
+    }),
+    remote: ws({ tombstones: [tomb('column', 'c2', T(30))] }),
+    now: NOW,
+    check: (m) => {
+      expect(m.columns.c2).toBeUndefined();
+      expect(m.cards.k1?.columnId).toBe('c1');
+      expect(m.columns.c1.cardOrder).toEqual(['k1']);
+      expect(m.trips.t1.columnOrder).toEqual(['c1']);
+      // The card was re-homed, not deleted.
+      expect(tombIds(m, 'card')).toEqual([]);
+    },
+  },
+  {
+    name: '고아 정리: 남은 칸이 없으면 카드도 삭제된다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'], updatedAt: T(10) })],
+      cards: [card('k1', 't1', 'c1', T(5))],
+    }),
+    remote: ws({ tombstones: [tomb('column', 'c1', T(30))] }),
+    now: NOW,
+    check: (m) => {
+      expect(m.cards).toEqual({});
+      expect(tombIds(m, 'card')).toEqual(['k1']);
+      expect(m.trips.t1.columnOrder).toEqual([]);
+    },
+  },
+  {
+    name: '고아 정리: 여행이 사라지면 그 아래가 모두 사라진다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'], sheetOrder: ['s1'], updatedAt: T(10) })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1))],
+      sheets: [sheet('s1', 't1', T(1), { dayOrder: ['d1'] })],
+      days: [day('d1', 't1', 's1', T(1))],
+      entries: [entry('e1', 't1', 'k1', 'd1', T(1))],
+    }),
+    remote: ws({ tombstones: [tomb('trip', 't1', T(30))] }),
+    now: NOW,
+    check: (m) => {
+      expect(m).toMatchObject({
+        trips: {},
+        sheets: {},
+        columns: {},
+        cards: {},
+        days: {},
+        entries: {},
+      });
+      expect(tombIds(m, 'column')).toEqual(['c1']);
+      expect(tombIds(m, 'card')).toEqual(['k1']);
+      expect(tombIds(m, 'sheet')).toEqual(['s1']);
+      expect(tombIds(m, 'day')).toEqual(['d1']);
+      expect(tombIds(m, 'entry')).toEqual(['e1']);
+    },
+  },
+  {
+    name: '리모트에만 있던 트리는 통째로 살아 들어온다',
+    local: ws(),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'], sheetOrder: ['s1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1))],
+      sheets: [sheet('s1', 't1', T(1), { dayOrder: ['d1'] })],
+      days: [day('d1', 't1', 's1', T(1))],
+      entries: [entry('e1', 't1', 'k1', 'd1', T(1))],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(Object.keys(m.entries)).toEqual(['e1']);
+      expect(m.tombstones).toEqual([]);
+      expect(m.columns.c1.cardOrder).toEqual(['k1']);
+    },
+  },
+];
+
+/* ------------------------------------------------------------------ *
+ * Suites
+ * ------------------------------------------------------------------ */
+
+describe('merge', () => {
+  it.each(cases.map((c) => [c.name, c] as const))('%s', (_name, testCase) => {
+    testCase.check(merge(testCase.local, testCase.remote, testCase.now));
+  });
+
+  it('빈 워크스페이스끼리 병합해도 schemaVersion 1을 유지한다', () => {
+    const merged = merge(ws(), ws(), NOW);
+    expect(merged.schemaVersion).toBe(1);
+    expect(merged).toEqual(ws());
+  });
+
+  it('입력을 변형하지 않는다', () => {
+    const local = ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1', 'gone'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [card('k1', 't1', 'c1', T(1))],
+    });
+    const remote = ws({ tombstones: [tomb('card', 'k1', T(30))] });
+    const localSnapshot = structuredClone(local);
+    const remoteSnapshot = structuredClone(remote);
+
+    merge(local, remote, NOW);
+
+    expect(local).toEqual(localSnapshot);
+    expect(remote).toEqual(remoteSnapshot);
+  });
+
+  it('TOMBSTONE_TTL_MS는 30일이다', () => {
+    expect(TOMBSTONE_TTL_MS).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe('merge — 멱등성', () => {
+  it.each(cases.map((c) => [c.name, c] as const))(
+    'merge(a, merge(a, b)) === merge(a, b) — %s',
+    (_name, testCase) => {
+      const once = merge(testCase.local, testCase.remote, testCase.now);
+      const twice = merge(testCase.local, once, testCase.now);
+      expect(twice).toEqual(once);
+    },
+  );
+
+  it('세 번 접어도 더 이상 변하지 않는다', () => {
+    const local = cases[cases.length - 2].local;
+    const remote = cases[cases.length - 2].remote;
+    const once = merge(local, remote, NOW);
+    const twice = merge(local, once, NOW);
+    const thrice = merge(local, twice, NOW);
+    expect(thrice).toEqual(twice);
+  });
+
+  it('병합 결과를 리모트에 되먹여도 안정적이다 (양방향)', () => {
+    const local = ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1', 'c2'], updatedAt: T(50) })],
+      columns: [column('c1', 't1', T(1)), column('c2', 't1', T(2))],
+      cards: [card('k1', 't1', 'c1', T(3))],
+    });
+    const remote = ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c2', 'c1'], updatedAt: T(20) })],
+      columns: [column('c1', 't1', T(1)), column('c2', 't1', T(2))],
+      cards: [card('k2', 't1', 'c2', T(4))],
+    });
+
+    const merged = merge(local, remote, NOW);
+    expect(merge(merged, merged, NOW)).toEqual(merged);
+    expect(merge(remote, merged, NOW)).toEqual(merged);
+  });
+});

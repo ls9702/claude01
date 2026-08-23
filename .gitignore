@@ -7,6 +7,7 @@ blob-report
 .playwright
 coverage
 server/config.php
+server/data/
 *.local
 .DS_Store
 .vite

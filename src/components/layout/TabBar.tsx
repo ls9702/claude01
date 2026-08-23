@@ -1,4 +1,5 @@
 import { TAB_IDS, TAB_LABELS, useUiStore, type TabId } from '../../stores/uiStore';
+import SyncStatusChip from '../common/SyncStatusChip';
 
 const TAB_ICONS: Record<TabId, string> = {
   trips: '🧳',
@@ -54,6 +55,7 @@ export default function TabBar() {
             </button>
           );
         })}
+        <SyncStatusChip />
       </div>
     </nav>
   );
