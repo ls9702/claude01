@@ -250,11 +250,30 @@ test('결산이 총지출·카테고리·Top 5를 보여주고 카드로 이어�
   await expect(rows.first()).toContainText('우메다 전망대');
   await expect(rows.first()).toHaveAttribute('data-amount', '18000');
 
+  // Everything is on the timeline, so there is nothing the 결산 left out (B14).
+  await expect(page.getByTestId('recap-unplaced')).toHaveCount(0);
+
   await rows.first().click();
   await expect(page.getByTestId('recap-sheet')).toHaveCount(0);
   await expect(page).toHaveURL(/#\/board$/);
   await expect(page.getByTestId('card-form')).toBeVisible();
   await expect(page.getByTestId('card-title-input')).toHaveValue('우메다 전망대');
+  await page.getByTestId('sheet-close').click();
+
+  // A budgeted card nobody scheduled: the board shows its money, the 결산 does
+  // not count it — and now says so instead of quietly differing (B14).
+  await addCard(page, 1, '가부키 티켓', '30000');
+  await page.getByTestId('tab-trips').click();
+  await page
+    .getByTestId('trip-card')
+    .filter({ hasText: '오사카 결산' })
+    .getByTestId('trip-recap-open')
+    .click();
+
+  await expect(page.getByTestId('recap-budget')).toHaveAttribute('data-amount', '35000');
+  const unplaced = page.getByTestId('recap-unplaced');
+  await expect(unplaced).toHaveAttribute('data-count', '1');
+  await expect(unplaced).toHaveText('미배치 카드 1장의 예산/지출은 제외됐어요');
 });
 
 test('현지 통화를 켜면 지출을 현지 금액으로 적고 기준 통화로 저장한다', async ({ page }) => {

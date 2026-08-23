@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import AppShell from './components/layout/AppShell';
 import UpdateToast from './components/common/UpdateToast';
+import { pruneActiveIds } from './stores/uiStore';
 import { useWorkspaceStore } from './stores/workspaceStore';
 import { initSyncEngine } from './sync/syncEngine';
 
@@ -28,6 +29,9 @@ export default function App() {
   // into an empty workspace and push the result, wiping the device clean.
   useEffect(() => {
     if (!hydrated) return;
+    // Same reason, one line up: the remembered 활성 여행 can only be checked
+    // against a workspace that has actually loaded (B15).
+    pruneActiveIds(useWorkspaceStore.getState().workspace);
     return initSyncEngine();
   }, [hydrated]);
 

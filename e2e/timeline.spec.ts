@@ -188,7 +188,8 @@ test('보드 레일의 카드를 하루 칸으로 끌어다 10시쯤에 배치�
   await waitForPersisted(page, '츠텐카쿠');
   await page.reload();
   await expect(page.getByTestId('tab-bar')).toBeVisible();
-  await page.getByTestId('timeline-trip-option').filter({ hasText: '오사카' }).click();
+  // 새로고침해도 보던 여행의 시간표로 곧장 돌아온다 (B15).
+  await expect(page.getByTestId('timeline-trip-option')).toHaveCount(0);
   await expect(page.getByTestId('timeline-entry')).toHaveCount(1);
   await expect(page.getByTestId('timeline-entry')).toHaveAttribute(
     'data-start-min',

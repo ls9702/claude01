@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { Card, GeoPoint } from '../../types/models';
 import { formatLatLng } from '../../utils/geo';
+import { MAX_AMOUNT, formatBudget, isValidBudget } from '../../utils/money';
 import { DURATION_PRESETS, formatDuration } from '../../utils/time';
+import { normalizeUrl } from '../../utils/url';
 import PinPicker from '../map/PinPicker';
 import PlaceSearch from '../map/PlaceSearch';
 import CardLedger, { numberOrUndefined, type LocalMoney } from '../common/CardLedger';
@@ -84,7 +86,11 @@ export default function CardEditSheet({
     () => duration !== undefined && !DURATION_PRESETS.includes(duration),
   );
 
-  const canSubmit = title.trim().length > 0;
+  const parsedBudget = numberOrUndefined(budget);
+  /** A 예산 may be 0 but never negative, and never a slipped extra digit (B18). */
+  const budgetOk = isValidBudget(parsedBudget);
+  const budgetProblem = budget.trim() !== '' && !budgetOk;
+  const canSubmit = title.trim().length > 0 && budgetOk;
   const presetActive = duration !== undefined && DURATION_PRESETS.includes(duration);
 
   const submit = () => {
@@ -92,9 +98,11 @@ export default function CardEditSheet({
     onSubmit({
       title: title.trim(),
       memo: memo.trim() || undefined,
-      url: url.trim() || undefined,
+      // `tabelog.com/tokyo` becomes an absolute link here, once, on the way in
+      // — never at render time, where every reader would have to repeat it.
+      url: normalizeUrl(url),
       location,
-      budget: numberOrUndefined(budget),
+      budget: parsedBudget,
       defaultDurationMin: duration,
     });
   };
@@ -196,10 +204,21 @@ export default function CardEditSheet({
               data-testid="card-budget-input"
               value={budget}
               inputMode="numeric"
+              aria-invalid={budgetProblem}
               onChange={(event) => setBudget(event.target.value)}
               placeholder="예) 15000"
-              className={INPUT_CLASS}
+              className={`${INPUT_CLASS} ${
+                budgetProblem ? 'border-danger focus:border-danger' : ''
+              }`}
             />
+            {budgetProblem ? (
+              <p
+                data-testid="card-budget-error"
+                className="mt-2 text-micro font-normal text-danger"
+              >
+                예산은 0 이상 {formatBudget(MAX_AMOUNT, currency)} 이하여야 해요.
+              </p>
+            ) : null}
           </div>
 
           <div>

@@ -132,6 +132,44 @@ export function tripCardIds(workspace: Workspace, tripId: Id): Id[] {
   return [...cardIds];
 }
 
+/** What {@link tripSpend} deliberately left out, so the 결산 can own up to it. */
+export interface UnplacedSpend extends SpendTotals {
+  /** How many 미배치 cards carry money — the `N` of the 결산's hint line. */
+  count: number;
+}
+
+/**
+ * 예산/지출 of the trip's cards that are **nowhere** on any timeline (B14).
+ *
+ * The 결산 counts placed cards only, on purpose: a card sitting in the board's
+ * 볼거리 pile is an idea, not a plan. But the board still shows its 예산 chip,
+ * so a silent 결산 reads as arithmetic that does not add up. This is the
+ * difference, ready to be said out loud.
+ *
+ * `count` only counts the cards that actually carry money — it is the number
+ * the hint claims to have excluded, so it must not include empty ideas.
+ */
+export function unplacedSpend(workspace: Workspace, tripId: Id): UnplacedSpend {
+  if (!workspace.trips[tripId]) return { ...ZERO, count: 0 };
+
+  const placed = new Set<Id>(tripCardIds(workspace, tripId));
+
+  let budget = 0;
+  let spent = 0;
+  let count = 0;
+  for (const card of Object.values(workspace.cards)) {
+    if (card.tripId !== tripId || placed.has(card.id)) continue;
+    const cardBudget =
+      typeof card.budget === 'number' && Number.isFinite(card.budget) ? card.budget : 0;
+    const cardTotal = cardSpent(card);
+    if (cardBudget === 0 && cardTotal === 0) continue;
+    budget += cardBudget;
+    spent += cardTotal;
+    count += 1;
+  }
+  return { budget, spent, count };
+}
+
 /** True when there is any money to show at all. */
 export const hasSpend = (totals: SpendTotals): boolean =>
   totals.spent > 0 || totals.budget > 0;

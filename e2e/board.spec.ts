@@ -120,9 +120,10 @@ test('새로고침해도 IndexedDB에 저장된 보드가 남아 있다', async 
   await page.reload();
   await expect(page.getByTestId('tab-bar')).toBeVisible();
 
-  // The active trip is view state, so the board offers a picker after a reload.
+  // 활성 여행은 이 기기에 남으므로(B15) 새로고침해도 고르는 화면이 아니라
+  // 그 여행의 보드로 곧장 돌아온다.
   await expect(page).toHaveURL(/#\/board$/);
-  await page.getByTestId('board-trip-option').filter({ hasText: '다낭' }).click();
+  await expect(page.getByTestId('board-trip-option')).toHaveCount(0);
 
   const columns = page.getByTestId('board-column');
   await expect(columns).toHaveCount(5);

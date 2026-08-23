@@ -8,6 +8,7 @@ import {
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
+  withoutMarginTop,
 } from '../common/formStyles';
 
 export interface TripFormValues {
@@ -40,6 +41,12 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
   const usableRate = Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : undefined;
   /** Both halves or neither — half a conversion is worse than none. */
   const pairIsSet = Boolean(localCurrency) && usableRate !== undefined;
+  /**
+   * `0`, `-5`, `abc`: typed, and unusable. The example line used to answer with
+   * the placeholder `9.3` as though the input had been accepted, while 저장
+   * quietly threw the pair away (B19).
+   */
+  const rateProblem = rate.trim() !== '' && usableRate === undefined;
 
   const submit = () => {
     if (!canSubmit) return;
@@ -140,7 +147,7 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
                 aria-label="현지 통화"
                 value={localCurrency}
                 onChange={(event) => setLocalCurrency(event.target.value)}
-                className={`${INPUT_CLASS} mt-0`}
+                className={withoutMarginTop(INPUT_CLASS)}
               >
                 <option value="">사용 안 함</option>
                 {CURRENCIES.filter((option) => option.code !== currency).map((option) => (
@@ -155,16 +162,28 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
                 aria-label="환율"
                 value={rate}
                 inputMode="decimal"
+                aria-invalid={rateProblem}
                 onChange={(event) => setRate(event.target.value)}
                 placeholder="예) 9.3"
-                className={`${INPUT_CLASS} mt-0`}
+                className={`${withoutMarginTop(INPUT_CLASS)} ${
+                  rateProblem ? 'border-danger focus:border-danger' : ''
+                }`}
               />
 
               <p
                 data-testid="trip-local-example"
-                className="text-micro font-normal text-ink-faint"
+                data-invalid={rateProblem ? 'true' : 'false'}
+                className={`text-micro font-normal ${
+                  rateProblem ? 'text-danger' : 'text-ink-faint'
+                }`}
               >
-                1 {localCurrency || 'JPY'} = {usableRate ?? 9.3} {currency}
+                {rateProblem ? (
+                  '환율을 확인해 주세요'
+                ) : (
+                  <>
+                    1 {localCurrency || 'JPY'} = {usableRate ?? 9.3} {currency}
+                  </>
+                )}
                 <br />
                 지출을 현지 금액으로 적으면 이 환율로 환산해서 저장해요. 이미 적어둔 지출은
                 그대로 남아요.

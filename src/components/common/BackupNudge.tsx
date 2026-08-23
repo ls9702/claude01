@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import {
+  backupNudgeText,
   isWorkspaceWorthBacking,
   loadBackupState,
   shouldNudgeBackup,
@@ -43,7 +44,11 @@ export default function BackupNudge({
   // Read straight through on every render rather than memoizing: `revision`
   // exists precisely to force this re-read after ✕ or after 내보내기.
   void revision;
-  const visible = shouldNudgeBackup(loadBackupState(), worthBacking);
+  const state = loadBackupState();
+  const visible = shouldNudgeBackup(state, worthBacking);
+  // 「오래됐어요」 vs 「아직 한 적이 없어요」 — the same chip, two different
+  // facts, and it used to tell only one of them (B20).
+  const message = backupNudgeText(state.lastBackupAt);
 
   const closeSheet = useCallback(() => {
     setOpen(false);
@@ -79,14 +84,14 @@ export default function BackupNudge({
           type="button"
           data-testid="backup-nudge-open"
           onClick={() => setOpen(true)}
-          title="백업한 지 오래됐어요"
+          title={message}
           className={
             banner
               ? 'min-w-0 flex-1 truncate text-left hover:underline'
               : 'min-w-0 truncate py-1 hover:underline'
           }
         >
-          백업한 지 오래됐어요
+          {message}
         </button>
         {banner ? (
           <button

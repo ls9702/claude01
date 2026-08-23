@@ -126,7 +126,8 @@ test('카드에 지출·코멘트를 남기면 저장 없이도 남고, 새로�
   await waitForPersisted(page, '입장료');
   await page.reload();
   await expect(page.getByTestId('tab-bar')).toBeVisible();
-  await page.getByTestId('board-trip-option').filter({ hasText: '오사카 가계부' }).click();
+  // 새로고침해도 보던 여행 그대로다 (B15).
+  await expect(page.getByTestId('board-trip-option')).toHaveCount(0);
 
   await expect(page.getByTestId('card-chip-spent')).toContainText('15,000원');
   await openCard(page, '츠텐카쿠');

@@ -236,6 +236,13 @@ interface SheetWizardProps {
   tripId: Id;
   /** Editing an existing sheet (항공편 수정) instead of creating a new one. */
   sheet?: SheetModel;
+  /**
+   * Create mode only: an **empty** sheet to pour the result into instead of
+   * creating a sibling (B17). The auto-seeded 일정 1 is the usual candidate —
+   * a shell with no days and no flights is not something worth keeping beside
+   * the plan the user just described.
+   */
+  fillSheet?: SheetModel;
   /** Suggested name for a new sheet — `일정 2`, `일정 3`, … */
   suggestedName?: string;
   onClose: () => void;
@@ -258,6 +265,7 @@ interface SheetWizardProps {
 export default function SheetWizard({
   tripId,
   sheet,
+  fillSheet,
   suggestedName,
   onClose,
   onDone,
@@ -295,10 +303,13 @@ export default function SheetWizard({
 
   const submit = () => {
     if (!canSubmit) return;
-    if (sheet) {
-      updateSheet(sheet.id, { name: name.trim() || sheet.name });
-      updateSheetFlights(sheet.id, opts);
-      onDone?.(sheet.id);
+    // 수정 mode, or create-into-an-empty-shell (B17): both re-plan a sheet that
+    // already exists, and `updateSheetFlights` is exactly that operation.
+    const target = sheet ?? fillSheet;
+    if (target) {
+      updateSheet(target.id, { name: name.trim() || target.name });
+      updateSheetFlights(target.id, opts);
+      onDone?.(target.id);
     } else {
       const created = createSheetFromFlights(tripId, name, opts);
       if (created) onDone?.(created.sheetId);

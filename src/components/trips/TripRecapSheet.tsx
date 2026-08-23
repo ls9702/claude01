@@ -10,7 +10,7 @@ import {
   isIsoDate,
 } from '../../utils/flights';
 import { formatBudget } from '../../utils/money';
-import { cardSpent, tripCardIds, tripSpend } from '../../utils/spend';
+import { cardSpent, tripCardIds, tripSpend, unplacedSpend } from '../../utils/spend';
 import { EmojiIcon } from '../common/Icon';
 import Sheet from '../common/Sheet';
 import { SECTION_TITLE_CLASS } from '../common/formStyles';
@@ -45,6 +45,9 @@ export default function TripRecapSheet({ trip, onOpenCard, onClose }: TripRecapS
   const workspace = useWorkspaceStore((s) => s.workspace);
 
   const totals = useMemo(() => tripSpend(workspace, trip.id), [workspace, trip.id]);
+
+  /** The money this screen is *not* counting, so it can say so (B14). */
+  const unplaced = useMemo(() => unplacedSpend(workspace, trip.id), [workspace, trip.id]);
 
   /** The counted cards, as records. */
   const cards = useMemo<Card[]>(
@@ -200,6 +203,21 @@ export default function TripRecapSheet({ trip, onOpenCard, onClose }: TripRecapS
               ? `예산보다 ${formatBudget(Math.abs(diff), trip.currency)} 더 썼어요`
               : `예산이 ${formatBudget(diff, trip.currency)} 남았어요`}
           </p>
+
+          {/* 결산은 시간표에 올라간 카드만 센다 — 규칙이지 버그가 아니다. 다만
+              보드에는 그 돈이 그대로 보이므로, 빠진 몫이 있으면 침묵하지 않고
+              한 줄로 밝힌다 (B14). */}
+          {unplaced.count > 0 ? (
+            <p
+              data-testid="recap-unplaced"
+              data-count={unplaced.count}
+              data-budget={unplaced.budget}
+              data-spent={unplaced.spent}
+              className="mt-2 text-micro font-normal text-ink-muted"
+            >
+              미배치 카드 {unplaced.count}장의 예산/지출은 제외됐어요
+            </p>
+          ) : null}
         </section>
 
         <section>

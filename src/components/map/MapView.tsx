@@ -11,7 +11,7 @@ import { colorClasses } from '../../utils/colors';
 import { formatBudget } from '../../utils/money';
 import { cardCommentCount, cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
-import { dayTitle } from '../timeline/DayColumn';
+import { dayTitle } from '../../timeline/dayLabel';
 import Icon, { EmojiIcon } from '../common/Icon';
 import BackupNudge from '../common/BackupNudge';
 import SyncStatusChip from '../common/SyncStatusChip';

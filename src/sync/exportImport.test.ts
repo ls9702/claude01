@@ -4,7 +4,9 @@ import {
   backupDateStamp,
   backupFileName,
   deserializeBackup,
+  findTombstoneConflicts,
   serializeBackup,
+  withoutTombstones,
   type BackupFile,
 } from './exportImport';
 import { merge, workspaceEquals } from './merge';
@@ -208,5 +210,95 @@ describe('workspaceEquals', () => {
 
     b.tombstones.push({ id: 'z', entity: 'entry', deletedAt: 3 });
     expect(workspaceEquals(a, b)).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 삭제 복원 (B11)
+ * ------------------------------------------------------------------ */
+
+/** `populated()` with the whole trip deleted the way `deleteTrip` does it. */
+function afterDeletingTrip(at: number): Workspace {
+  const ws = populated();
+  const dead: Workspace['tombstones'] = [
+    { id: 't1', entity: 'trip', deletedAt: at },
+    { id: 's1', entity: 'sheet', deletedAt: at },
+    { id: 'c1', entity: 'column', deletedAt: at },
+    { id: 'k1', entity: 'card', deletedAt: at },
+    { id: 'd1', entity: 'day', deletedAt: at },
+    { id: 'e1', entity: 'entry', deletedAt: at },
+  ];
+  return {
+    ...emptyWorkspace(),
+    tombstones: [...ws.tombstones, ...dead],
+  };
+}
+
+describe('findTombstoneConflicts', () => {
+  it('names every entity the local tombstones would swallow', () => {
+    const local = afterDeletingTrip(Date.now());
+    const backup = populated();
+
+    const conflicts = findTombstoneConflicts(local, backup);
+    expect(conflicts.map((tomb) => `${tomb.entity}:${tomb.id}`).sort()).toEqual([
+      'card:k1',
+      'column:c1',
+      'day:d1',
+      'entry:e1',
+      'sheet:s1',
+      'trip:t1',
+    ]);
+  });
+
+  it('ignores a tombstone the backup knows nothing about', () => {
+    // `gone` is tombstoned locally and absent from the file — nothing to save.
+    expect(findTombstoneConflicts(populated(), populated())).toEqual([]);
+  });
+
+  it('ignores a tombstone the backup already outlives', () => {
+    // Merge would keep this entity anyway (edited after the delete), so it is
+    // not a question worth asking the user.
+    const local: Workspace = {
+      ...emptyWorkspace(),
+      tombstones: [{ id: 't1', entity: 'trip', deletedAt: 1_500 }],
+    };
+    const backup = populated(); // t1.updatedAt === 2_000
+    expect(findTombstoneConflicts(local, backup)).toEqual([]);
+  });
+});
+
+describe('복원 병합', () => {
+  it('되살리기를 고르면 지운 여행이 백업 그대로 돌아온다', () => {
+    const at = Date.now();
+    const local = afterDeletingTrip(at);
+    const backup = deserializeBackup(serializeBackup(populated(), AT));
+
+    // 건너뛰기 — today's behaviour, and the bug the user reported.
+    expect(Object.keys(merge(local, backup).trips)).toEqual([]);
+
+    // 복원 — exactly those tombstones dropped, nothing else touched.
+    const restored = merge(
+      withoutTombstones(local, findTombstoneConflicts(local, backup)),
+      backup,
+    );
+    expect(Object.keys(restored.trips)).toEqual(['t1']);
+    expect(restored.trips.t1.title).toBe('오사카 3박4일');
+    expect(Object.keys(restored.cards)).toEqual(['k1']);
+    expect(Object.keys(restored.entries)).toEqual(['e1']);
+    expect(restored.trips.t1.columnOrder).toEqual(['c1']);
+  });
+
+  it('복원이 다른 톰스톤은 건드리지 않는다', () => {
+    const local = afterDeletingTrip(Date.now());
+    const backup = populated();
+    const stripped = withoutTombstones(local, findTombstoneConflicts(local, backup));
+
+    // The unrelated `gone` card stays buried, so sync still agrees it is dead.
+    expect(stripped.tombstones.map((tomb) => tomb.id)).toEqual(['gone']);
+  });
+
+  it('되살릴 게 없으면 워크스페이스를 그대로 돌려준다', () => {
+    const local = populated();
+    expect(withoutTombstones(local, [])).toBe(local);
   });
 });

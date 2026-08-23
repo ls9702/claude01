@@ -11,6 +11,7 @@ import {
   isIsoDate,
   legArrivalDate,
   legDurationMin,
+  legPlacements,
   parseHm,
   planSheetDays,
 } from './flights';
@@ -123,6 +124,45 @@ describe('planSheetDays', () => {
 
     expect(planSheetDays({ dayCount: 999 }).count).toBe(MAX_SHEET_DAYS);
     expect(planSheetDays({ outbound: leg(), dayCount: 999 }).count).toBe(MAX_SHEET_DAYS);
+  });
+});
+
+describe('legPlacements (B10)', () => {
+  it('keeps a same-day leg as one piece', () => {
+    expect(legPlacements(leg({ depTime: '10:00', arrTime: '12:30' }))).toEqual([
+      { date: '2026-05-03', startMin: 600, durationMin: 150 },
+    ]);
+  });
+
+  it('splits a 심야 leg into a dep-day tail and an arrival-day head', () => {
+    expect(
+      legPlacements(leg({ depTime: '23:40', arrTime: '06:20', arrNextDay: true })),
+    ).toEqual([
+      // 23:40 snaps to 23:45, so the tail is the last 15 minutes of the day…
+      { date: '2026-05-03', startMin: 1425, durationMin: 15 },
+      // …and 06:20 snaps to 06:15 on the day it lands.
+      { date: '2026-05-04', startMin: 0, durationMin: 375 },
+    ]);
+  });
+
+  it('never produces a piece shorter than the grid allows', () => {
+    const [tail, head] = legPlacements(
+      leg({ depTime: '23:58', arrTime: '00:05', arrNextDay: true }),
+    );
+    expect(tail.durationMin).toBe(15);
+    expect(head).toEqual({ date: '2026-05-04', startMin: 0, durationMin: 15 });
+  });
+
+  it('draws no arrival head for a leg that lands exactly at midnight', () => {
+    expect(legPlacements(leg({ depTime: '21:00', arrTime: '00:00', arrNextDay: true }))).toEqual(
+      [{ date: '2026-05-03', startMin: 1260, durationMin: 180 }],
+    );
+  });
+
+  it('falls back to one piece when a time is missing', () => {
+    expect(legPlacements(leg({ depTime: '', arrTime: '', arrNextDay: true }))).toEqual([
+      { date: '2026-05-03', startMin: 0, durationMin: 15 },
+    ]);
   });
 });
 

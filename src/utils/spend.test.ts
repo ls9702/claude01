@@ -9,6 +9,7 @@ import {
   sheetSpend,
   tripCardIds,
   tripSpend,
+  unplacedSpend,
 } from './spend';
 
 const AT = 1_760_000_000_000;
@@ -307,5 +308,57 @@ describe('hasSpend', () => {
     expect(hasSpend({ budget: 0, spent: 0 })).toBe(false);
     expect(hasSpend({ budget: 1, spent: 0 })).toBe(true);
     expect(hasSpend({ budget: 0, spent: 1 })).toBe(true);
+  });
+});
+
+describe('unplacedSpend (B14)', () => {
+  it('adds up the cards no timeline in the trip has picked up', () => {
+    const ws = scaffold();
+    addCard(ws, 'placed', { budget: 10_000, expenses: [4_000] });
+    addCard(ws, 'idea', { budget: 20_000, expenses: [1_000, 500] });
+    addCard(ws, 'wishlist', { budget: 5_000 });
+    place(ws, 'e1', 'placed', 'd1');
+
+    expect(unplacedSpend(ws, 't1')).toEqual({ budget: 25_000, spent: 1_500, count: 2 });
+    // …and it is exactly what the 결산 left out.
+    expect(tripSpend(ws, 't1')).toEqual({ budget: 10_000, spent: 4_000 });
+  });
+
+  it('counts only the 미배치 cards that actually carry money', () => {
+    const ws = scaffold();
+    addCard(ws, 'blank');
+    addCard(ws, 'zero', { budget: 0 });
+    addCard(ws, 'real', { expenses: [700] });
+
+    expect(unplacedSpend(ws, 't1')).toEqual({ budget: 0, spent: 700, count: 1 });
+  });
+
+  it('is silent when every card is on the timeline', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 10_000 });
+    place(ws, 'e1', 'k1', 'd1');
+
+    expect(unplacedSpend(ws, 't1')).toEqual({ budget: 0, spent: 0, count: 0 });
+  });
+
+  it('counts a card placed on any sheet of the trip as placed', () => {
+    const ws = scaffold();
+    ws.sheets.s2 = {
+      id: 's2',
+      tripId: 't1',
+      name: '플랜 B',
+      dayOrder: ['d9'],
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    ws.days.d9 = { id: 'd9', tripId: 't1', sheetId: 's2', createdAt: AT, updatedAt: AT };
+    addCard(ws, 'k1', { budget: 10_000 });
+    place(ws, 'e1', 'k1', 'd9');
+
+    expect(unplacedSpend(ws, 't1').count).toBe(0);
+  });
+
+  it('is empty for an unknown trip', () => {
+    expect(unplacedSpend(scaffold(), 'nope')).toEqual({ budget: 0, spent: 0, count: 0 });
   });
 });

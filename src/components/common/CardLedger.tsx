@@ -1,7 +1,7 @@
 import { useState, type KeyboardEvent } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, Id } from '../../types/models';
-import { formatBudget, formatLocalAmount } from '../../utils/money';
+import { MAX_AMOUNT, formatBudget, formatLocalAmount, isValidExpenseAmount } from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatStamp } from '../../utils/time';
 import Icon from './Icon';
@@ -71,9 +71,17 @@ export function ExpenseInputRow({
   const parsed = numberOrUndefined(amount);
   const useLocal = local && inLocal;
   const converted = useLocal && parsed != null ? Math.round(parsed * (fxRate as number)) : null;
+  /**
+   * `0`, `-8000` and `1e9` all used to sail straight into the ledger (B18).
+   * The check runs on what will actually be **stored**, so a 현지 금액 is judged
+   * after conversion — that is the number the chips and the 결산 will add up.
+   */
+  const valid = isValidExpenseAmount(useLocal ? (converted ?? undefined) : parsed);
+  /** Say why, but only once the user has typed something to be wrong about. */
+  const problem = amount.trim() !== '' && !valid;
 
   const submit = () => {
-    if (parsed == null) return;
+    if (parsed == null || !valid) return;
     const trimmed = label.trim();
 
     let finalAmount = parsed;
@@ -135,8 +143,11 @@ export function ExpenseInputRow({
           inputMode="numeric"
           onChange={(event) => setAmount(event.target.value)}
           onKeyDown={onEnter}
+          aria-invalid={problem}
           placeholder={useLocal ? `금액 (${localCurrency})` : '금액'}
-          className={`${INLINE_INPUT_CLASS} w-28 shrink-0`}
+          className={`${INLINE_INPUT_CLASS} w-28 shrink-0 ${
+            problem ? 'border-danger focus:border-danger' : ''
+          }`}
         />
         <input
           data-testid="card-expense-label-input"
@@ -151,12 +162,18 @@ export function ExpenseInputRow({
           type="button"
           data-testid="card-expense-add"
           onClick={submit}
-          disabled={parsed == null}
+          disabled={!valid}
           className={`${PRIMARY_BUTTON_CLASS} shrink-0`}
         >
           추가
         </button>
       </div>
+
+      {problem ? (
+        <p data-testid="expense-amount-error" className="mt-2 text-micro font-normal text-danger">
+          금액은 0보다 크고 {formatBudget(MAX_AMOUNT, currency)} 이하여야 해요.
+        </p>
+      ) : null}
 
       {converted != null ? (
         <p

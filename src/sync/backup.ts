@@ -100,6 +100,22 @@ export function daysBetween(at: Millis | undefined, now: Millis = Date.now()): n
   return Math.max(0, Math.floor((now - at) / DAY_MS));
 }
 
+/** Nudge copy for "you have never taken a backup on this device". */
+export const NEVER_BACKED_UP_TEXT = '아직 백업한 적이 없어요';
+
+/** Nudge copy for "the last backup is older than {@link BACKUP_STALE_DAYS}". */
+export const STALE_BACKUP_TEXT = '백업한 지 오래됐어요';
+
+/**
+ * What the 백업 넛지 should actually say (B20).
+ *
+ * The chip claimed "백업한 지 오래됐어요" to someone who had never backed up at
+ * all, which is both wrong and the less alarming of the two facts. The trigger
+ * ({@link shouldNudgeBackup}) is unchanged — only the sentence.
+ */
+export const backupNudgeText = (at: Millis | undefined): string =>
+  daysBetween(at) === null ? NEVER_BACKED_UP_TEXT : STALE_BACKUP_TEXT;
+
 /** `없음` / `오늘` / `3일 전` for the settings sheet. */
 export function formatLastBackup(at: Millis | undefined, now: Millis = Date.now()): string {
   const days = daysBetween(at, now);

@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { COLORS, COLOR_HEX, COLOR_TOKENS, colorClasses, colorHex } from './colors';
-import { formatBudget, formatCompactAmount, formatLocalAmount, symbolFor } from './money';
+import {
+  MAX_AMOUNT,
+  formatBudget,
+  formatCompactAmount,
+  formatLocalAmount,
+  isValidBudget,
+  isValidExpenseAmount,
+  symbolFor,
+} from './money';
 import { formatClock, formatDuration, formatStamp } from './time';
 
 describe('formatDuration', () => {
@@ -117,5 +125,32 @@ describe('symbolFor / formatLocalAmount', () => {
     expect(formatLocalAmount(1200, 'JPY')).toBe('¥1,200');
     expect(formatLocalAmount(12.5, 'USD')).toBe('$12.5');
     expect(formatLocalAmount(Number.NaN, 'JPY')).toBe('');
+  });
+});
+
+describe('금액 검증 (B18)', () => {
+  it('accepts a real 지출 and refuses 0, negatives and slipped digits', () => {
+    expect(isValidExpenseAmount(1)).toBe(true);
+    expect(isValidExpenseAmount(15_000)).toBe(true);
+    expect(isValidExpenseAmount(MAX_AMOUNT)).toBe(true);
+
+    expect(isValidExpenseAmount(0)).toBe(false);
+    expect(isValidExpenseAmount(-8_000)).toBe(false);
+    expect(isValidExpenseAmount(1e9)).toBe(false);
+    expect(isValidExpenseAmount(MAX_AMOUNT + 1)).toBe(false);
+    expect(isValidExpenseAmount(Number.NaN)).toBe(false);
+    expect(isValidExpenseAmount(Number.POSITIVE_INFINITY)).toBe(false);
+    expect(isValidExpenseAmount(undefined)).toBe(false);
+  });
+
+  it('lets a 예산 be zero or absent but never negative', () => {
+    expect(isValidBudget(undefined)).toBe(true);
+    expect(isValidBudget(0)).toBe(true);
+    expect(isValidBudget(20_000)).toBe(true);
+    expect(isValidBudget(MAX_AMOUNT)).toBe(true);
+
+    expect(isValidBudget(-1)).toBe(false);
+    expect(isValidBudget(1e9)).toBe(false);
+    expect(isValidBudget(Number.NaN)).toBe(false);
   });
 });

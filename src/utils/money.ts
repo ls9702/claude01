@@ -77,6 +77,35 @@ const oneDecimal = (value: number): string =>
  * else falls back to a `k` above a thousand. Small amounts are left alone and
  * go through {@link formatBudget}.
  */
+/* ------------------------------------------------------------------ *
+ * 금액 검증 (M8-2, B18)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Ceiling for a single amount — a hundred million minus one.
+ *
+ * Not a currency judgement, a typo guard: `1e9` in the 금액 field was almost
+ * certainly a slipped keypress, and it drags every chip and bar on the screen
+ * along with it.
+ */
+export const MAX_AMOUNT = 99_999_999;
+
+/**
+ * A 지출 must be a real, positive amount within {@link MAX_AMOUNT}.
+ *
+ * `0` and negatives are rejected outright: a receipt for nothing is not a
+ * receipt, and there is no 환불 concept to spend a negative on.
+ */
+export const isValidExpenseAmount = (amount: number | undefined): amount is number =>
+  amount !== undefined && Number.isFinite(amount) && amount > 0 && amount <= MAX_AMOUNT;
+
+/**
+ * A 예산 may be `0` ("planned to cost nothing") but never negative, and obeys
+ * the same ceiling. An absent budget is valid — the field is optional.
+ */
+export const isValidBudget = (budget: number | undefined): boolean =>
+  budget === undefined || (Number.isFinite(budget) && budget >= 0 && budget <= MAX_AMOUNT);
+
 export function formatCompactAmount(amount: number, currency: string): string {
   if (!Number.isFinite(amount)) return '';
   const code = (currency || 'KRW').toUpperCase();

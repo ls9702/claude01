@@ -4,6 +4,9 @@ import {
   BACKUP_MIN_CARDS,
   BACKUP_SNOOZE_DAYS,
   BACKUP_STALE_DAYS,
+  NEVER_BACKED_UP_TEXT,
+  STALE_BACKUP_TEXT,
+  backupNudgeText,
   daysBetween,
   formatLastBackup,
   isWorkspaceWorthBacking,
@@ -129,5 +132,18 @@ describe('shouldNudgeBackup', () => {
   it('a snooze also silences the never-backed-up case', () => {
     expect(shouldNudgeBackup({ snoozedAt: daysAgo(1) }, true, NOW)).toBe(false);
     expect(shouldNudgeBackup({ snoozedAt: daysAgo(30) }, true, NOW)).toBe(true);
+  });
+});
+
+describe('backupNudgeText (B20)', () => {
+  it('says "never" when this device has never produced a file', () => {
+    expect(backupNudgeText(undefined)).toBe(NEVER_BACKED_UP_TEXT);
+    expect(backupNudgeText(Number.NaN)).toBe(NEVER_BACKED_UP_TEXT);
+    expect(NEVER_BACKED_UP_TEXT).toBe('아직 백업한 적이 없어요');
+  });
+
+  it('says "a while ago" only when there really was a last time', () => {
+    expect(backupNudgeText(daysAgo(BACKUP_STALE_DAYS + 1))).toBe(STALE_BACKUP_TEXT);
+    expect(STALE_BACKUP_TEXT).toBe('백업한 지 오래됐어요');
   });
 });

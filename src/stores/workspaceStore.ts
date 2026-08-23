@@ -19,10 +19,9 @@ import {
 } from '../types/models';
 import {
   FLIGHT_CARD_PREFIX,
-  dayLabelAt,
   flightCardTitle,
   legDurationMin,
-  parseHm,
+  legPlacements,
   planSheetDays,
   type LegKind,
   type SheetFlightOpts,
@@ -282,6 +281,11 @@ function clearFlightPlacements(draft: Draft, sheetId: Id, now: Millis): void {
  * matching the leg's date (first/last day as a fallback), starting at `depTime`
  * and lasting as long as the leg is in the air. A leg with nowhere to land —
  * a dateless sheet with no days — is skipped, card and all.
+ *
+ * A 심야 leg gets **two** entries for that one card (B10): the tail of its
+ * departure day and the head of the day it lands on — see {@link legPlacements}.
+ * The second entry only appears when the sheet actually holds the arrival day;
+ * otherwise the leg keeps its tail and nothing is invented.
  */
 function syncFlightPlacements(draft: Draft, sheetId: Id, now: Millis): void {
   const sheet = draft.sheets[sheetId];
@@ -304,21 +308,22 @@ function syncFlightPlacements(draft: Draft, sheetId: Id, now: Millis): void {
 
   for (const [leg, kind] of legs) {
     if (!leg) continue;
+    const [departure, arrival] = legPlacements(leg);
     const fallback = kind === 'outbound' ? sheet.dayOrder[0] : sheet.dayOrder.at(-1);
-    const dayId = dayByDate.get(leg.date) ?? fallback;
+    const dayId = dayByDate.get(departure.date) ?? fallback;
     if (!dayId) continue;
 
     const column = draft.columns[columnId];
     if (!column) continue;
 
-    const durationMin = legDurationMin(leg);
     const cardId = newId();
     draft.cards[cardId] = {
       id: cardId,
       tripId: trip.id,
       columnId,
       title: flightCardTitle(leg, kind),
-      defaultDurationMin: durationMin,
+      // The card still states the whole flight, however many days it touches.
+      defaultDurationMin: legDurationMin(leg),
       createdAt: now,
       updatedAt: now,
     };
@@ -328,7 +333,12 @@ function syncFlightPlacements(draft: Draft, sheetId: Id, now: Millis): void {
       updatedAt: now,
     };
 
-    newEntry(draft, trip.id, cardId, dayId, parseHm(leg.depTime) ?? 0, durationMin, now);
+    newEntry(draft, trip.id, cardId, dayId, departure.startMin, departure.durationMin, now);
+
+    const arrivalDayId = arrival ? dayByDate.get(arrival.date) : undefined;
+    if (arrival && arrivalDayId) {
+      newEntry(draft, trip.id, cardId, arrivalDayId, arrival.startMin, arrival.durationMin, now);
+    }
   }
 }
 
@@ -422,14 +432,15 @@ export interface WorkspaceState {
    * The day range comes from {@link planSheetDays}: `outbound.date` through the
    * inbound leg's arrival date (its `date`, +1 when `arrNextDay`), or
    * `dayCount` days from the departure when there is no return leg, or
-   * `dayCount` **dateless** days when there are no flights at all. Every day
-   * gets a `N일차` label; dated days also carry their `date`.
+   * `dayCount` **dateless** days when there are no flights at all. A day carries
+   * its `date` and nothing else — `N일차` is derived from its position at render
+   * time, never stored (B12).
    *
    * The generated cards go into the trip's `이동수단` column (its first column
    * if there is none) and are titled `✈️ ICN→KIX OZ112`, falling back to
    * `✈️ 출발편` / `✈️ 귀국편`. Each entry starts at the leg's `depTime` and
-   * lasts as long as the leg is in the air; a red-eye is clamped to midnight
-   * by {@link clampEntry} rather than spilling into the next day.
+   * lasts as long as the leg is in the air; a 심야 leg is **split** across the
+   * two days it touches rather than clamped into a stub (B10).
    *
    * Returns the new sheet's id, or `null` for an unknown trip.
    */
@@ -870,8 +881,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             };
             draft.sheets[sheetId] = sheet;
 
+            // No `label`: `N일차` is a *position*, and freezing it here is what
+            // made an insert read `2일차 · 3일차 · 3일차` (B12). The header
+            // derives it from `dayOrder` instead.
             sheet.dayOrder = Array.from({ length: plan.count }, (_, index) =>
-              newDay(draft, sheet, { date: plan.dates?.[index], label: dayLabelAt(index) }, now),
+              newDay(draft, sheet, { date: plan.dates?.[index] }, now),
             );
 
             draft.trips[tripId] = {
@@ -900,27 +914,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               // same position — that *is* the shift by (newStart − oldStart).
               dayOrder = existing.slice(0, plan.count);
               dayOrder.forEach((dayId, index) => {
-                touch<Day>(
-                  draft.days,
-                  dayId,
-                  {
-                    date: plan.dates?.[index],
-                    label: draft.days[dayId]?.label ?? dayLabelAt(index),
-                  },
-                  now,
-                );
+                // Only the date moves; a `label` the user typed is theirs.
+                touch<Day>(draft.days, dayId, { date: plan.dates?.[index] }, now);
               });
               // Days past the end of the new range go, entries and all.
               for (const dayId of existing.slice(plan.count)) removeDay(draft, dayId, now);
               for (let index = dayOrder.length; index < plan.count; index += 1) {
-                dayOrder.push(
-                  newDay(
-                    draft,
-                    sheet,
-                    { date: plan.dates?.[index], label: dayLabelAt(index) },
-                    now,
-                  ),
-                );
+                dayOrder.push(newDay(draft, sheet, { date: plan.dates?.[index] }, now));
               }
             }
 

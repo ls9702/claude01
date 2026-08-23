@@ -4,6 +4,7 @@ import { useRegisterDayGrid } from '../../dnd/PlanDndContext';
 import { DND_DAY, dayDroppableId } from '../../dnd/planDnd';
 import type { BoardColumn, Card, Day, Id, TimelineEntry } from '../../types/models';
 import type { DayGap } from '../../timeline/gap';
+import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
 import { formatDistanceKm } from '../../timeline/route';
 import {
   DAY_COLUMN_PX,
@@ -13,25 +14,12 @@ import {
   laneMap,
 } from '../../timeline/layout';
 import type { SpendTotals } from '../../utils/spend';
-import { formatClock, formatDayDate, minToY } from '../../utils/time';
+import { formatClock, minToY } from '../../utils/time';
 import Icon from '../common/Icon';
 import { POPOVER_CLASS, POPOVER_ROW_DANGER_CLASS } from '../common/formStyles';
 import EntryBlock from './EntryBlock';
 import SpendChip from './SpendChip';
 import { HOURS } from './TimeAxis';
-
-/** `label` → date → `N일차`. Kept here so the pager can show the same text. */
-export function dayTitle(day: Day, index: number): string {
-  if (day.label?.trim()) return day.label.trim();
-  if (day.date) return formatDayDate(day.date);
-  return `${index + 1}일차`;
-}
-
-/** Secondary line: the date when the title is already a label, else the index. */
-export function daySubtitle(day: Day, index: number): string {
-  if (day.label?.trim() && day.date) return formatDayDate(day.date);
-  return `${index + 1}일차`;
-}
 
 interface DayColumnProps {
   day: Day;
@@ -133,9 +121,13 @@ export default function DayColumn({
           <p data-testid="timeline-day-title" className="truncate text-label font-semibold text-ink">
             {dayTitle(day, index)}
           </p>
-          <p className="truncate text-micro font-normal text-ink-muted">
-            {daySubtitle(day, index)}
-          </p>
+          {/* Nothing at all when the date is missing and the title is already
+              `N일차` — an empty second line is still a line (B12). */}
+          {daySubtitle(day, index) ? (
+            <p className="truncate text-micro font-normal text-ink-muted">
+              {daySubtitle(day, index)}
+            </p>
+          ) : null}
         </div>
         {/* On mobile the pager carries the day's money chip instead — one
             `day-spend` per visible day, wherever the day heading lives.

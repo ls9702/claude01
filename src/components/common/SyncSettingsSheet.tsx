@@ -1,10 +1,17 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import { SYNC_STATUS_LABELS, useSyncStore } from '../../stores/syncStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { fetchMeta } from '../../sync/api';
 import { daysBetween, formatLastBackup, loadBackupState } from '../../sync/backup';
-import { exportJson, importJson } from '../../sync/exportImport';
+import {
+  exportJson,
+  findTombstoneConflicts,
+  importJson,
+  readBackupFile,
+} from '../../sync/exportImport';
 import { clearSettings, loadSettings, normalizeBaseUrl, saveSettings } from '../../sync/settings';
 import { restartSync, syncNow } from '../../sync/syncEngine';
+import ConfirmDialog from './ConfirmDialog';
 import Icon from './Icon';
 import Sheet from './Sheet';
 import { SYNC_DOT_CLASS } from './SyncStatusChip';
@@ -65,6 +72,8 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const [busy, setBusy] = useState(false);
   /** Bumped by 내보내기 so 마지막 백업 updates without reopening the sheet. */
   const [backupRevision, setBackupRevision] = useState(0);
+  /** A picked backup waiting on the 복원 / 건너뛰기 question (B11). */
+  const [restoreAsk, setRestoreAsk] = useState<{ file: File; count: number } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const status = useSyncStore((s) => s.status);
@@ -79,8 +88,12 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   /** Whole days since the last 내보내기; `-1` stands for "never". */
   const backupDays = daysBetween(backupState.lastBackupAt) ?? -1;
 
-  /** Runs an async action with the buttons disabled and the result reported. */
-  const guard = async (action: () => Promise<Notice>): Promise<void> => {
+  /**
+   * Runs an async action with the buttons disabled and the result reported.
+   * A `null` result means "no news yet" — the import flow uses it to hand over
+   * to a dialog instead of ending on a line of text.
+   */
+  const guard = async (action: () => Promise<Notice | null>): Promise<void> => {
     setBusy(true);
     setNotice(null);
     try {
@@ -134,6 +147,16 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
     }
   };
 
+  /** The merge itself, once the 복원 question (if any) has been answered. */
+  const runImport = (file: File, restore: boolean): Promise<void> =>
+    guard(async () => {
+      const summary = await importJson(file, { restore });
+      return {
+        tone: 'ok',
+        text: `가져왔어요 — 여행 ${summary.trips}개, 카드 ${summary.cards}개`,
+      };
+    });
+
   const handleImport = (event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.target.files?.[0];
     // Clear immediately so picking the same file twice fires `change` again.
@@ -141,12 +164,31 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
     if (!file) return;
 
     void guard(async () => {
+      // Look before merging: a backup that still holds something this device has
+      // since deleted is the one case where 합치기 alone throws the file away.
+      const imported = await readBackupFile(file);
+      const conflicts = findTombstoneConflicts(
+        useWorkspaceStore.getState().workspace,
+        imported,
+      );
+      if (conflicts.length > 0) {
+        setRestoreAsk({ file, count: conflicts.length });
+        return null;
+      }
+
       const summary = await importJson(file);
       return {
         tone: 'ok',
         text: `가져왔어요 — 여행 ${summary.trips}개, 카드 ${summary.cards}개`,
       };
     });
+  };
+
+  /** Answers the 복원 question and gets on with the import either way. */
+  const answerRestore = (restore: boolean): void => {
+    const pending = restoreAsk;
+    setRestoreAsk(null);
+    if (pending) void runImport(pending.file, restore);
   };
 
   return (
@@ -321,6 +363,19 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
           </p>
         </div>
       </div>
+
+      {restoreAsk ? (
+        <ConfirmDialog
+          title={`백업에 삭제된 항목 ${restoreAsk.count}개가 있어요. 복원할까요?`}
+          description="이 기기에서 지운 항목이 백업에는 남아 있어요. 복원하면 다시 살아나고, 건너뛰면 지운 상태 그대로 합쳐요."
+          confirmLabel="복원"
+          cancelLabel="건너뛰기"
+          danger={false}
+          onConfirm={() => answerRestore(true)}
+          onCancel={() => answerRestore(false)}
+          testId="import-restore-confirm"
+        />
+      ) : null}
     </Sheet>
   );
 }

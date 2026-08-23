@@ -15,6 +15,7 @@ import type {
   TimelineEntry,
 } from '../../types/models';
 import { AXIS_PX, HEADER_PX, INITIAL_SCROLL_MIN, PX_PER_MIN } from '../../timeline/layout';
+import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
 import { dayGaps, type DayGap } from '../../timeline/gap';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
 import { currentAndNext, nowMin, todayDayId, todayIso } from '../../timeline/today';
@@ -36,7 +37,7 @@ import {
 import BoardRail from './BoardRail';
 import NowBar from './NowBar';
 import QuickSpendSheet from './QuickSpendSheet';
-import DayColumn, { dayTitle, daySubtitle } from './DayColumn';
+import DayColumn from './DayColumn';
 import SpendChip from './SpendChip';
 import EntryDetailSheet from './EntryDetailSheet';
 import ScheduleSheet from './ScheduleSheet';
@@ -349,11 +350,32 @@ export default function TimelineView() {
   const quickSpendCard =
     dialog?.kind === 'quick-spend' ? workspace.cards[dialog.entry.cardId] : undefined;
 
+  /**
+   * 일자 추가 — and, when the trip has no sheet left to add it to, the sheet
+   * first (B16).
+   *
+   * Deleting the last sheet used to leave both CTAs disabled with nothing said,
+   * and the auto-seed above never fires twice for one trip. So the button makes
+   * what it needs instead of standing there greyed out.
+   */
   const addDayToSheet = () => {
-    if (!sheet) return;
-    const created = addDay(sheet.id);
+    const targetId = sheet?.id ?? addSheet(trip.id, FIRST_SHEET_NAME);
+    if (!targetId) return;
+    if (targetId !== sheet?.id) setActiveSheet(targetId);
+    const created = addDay(targetId);
     if (created) setPageIndex(days.length);
   };
+
+  /**
+   * The sheet a 새 시트 wizard should **fill** rather than sit next to (B17):
+   * the active one, when it is a bare shell with no days and no flights. That
+   * shell is almost always the auto-seeded 일정 1, and leaving it behind as a
+   * sibling is how a trip ends up with a stray empty tab.
+   */
+  const fillableSheet =
+    sheet && sheet.dayOrder.length === 0 && !sheet.outboundFlight && !sheet.inboundFlight
+      ? sheet
+      : undefined;
 
   /** Deletes an entry and offers to put an identical one back. */
   const removeEntry = (entry: TimelineEntry) => {
@@ -394,7 +416,6 @@ export default function TimelineView() {
             type="button"
             data-testid="timeline-add-day"
             onClick={addDayToSheet}
-            disabled={!sheet}
             className={SECONDARY_BUTTON_CLASS}
           >
             <Icon name="plus" size={16} />
@@ -464,7 +485,6 @@ export default function TimelineView() {
               type="button"
               data-testid="timeline-add-day-empty"
               onClick={addDayToSheet}
-              disabled={!sheet}
               className={PRIMARY_BUTTON_CLASS}
             >
               <Icon name="plus" size={16} />
@@ -518,7 +538,8 @@ export default function TimelineView() {
                 >
                   {currentDay ? dayTitle(currentDay, safePage) : ''}
                 </span>
-                {currentDay ? (
+                {/* Empty when it would only repeat the label beside it (B12). */}
+                {currentDay && daySubtitle(currentDay, safePage) ? (
                   <span className="min-w-0 truncate text-micro font-normal text-ink-muted">
                     {daySubtitle(currentDay, safePage)}
                   </span>
@@ -741,7 +762,8 @@ export default function TimelineView() {
       {dialog?.kind === 'sheet-create' ? (
         <SheetWizard
           tripId={trip.id}
-          suggestedName={`일정 ${sheets.length + 1}`}
+          fillSheet={fillableSheet}
+          suggestedName={fillableSheet?.name ?? `일정 ${sheets.length + 1}`}
           onClose={() => setDialog(null)}
           onDone={setActiveSheet}
         />

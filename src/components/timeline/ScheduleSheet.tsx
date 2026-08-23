@@ -22,7 +22,7 @@ import {
   SECONDARY_BUTTON_CLASS,
   SQUARE_BUTTON_CLASS,
 } from '../common/formStyles';
-import { dayTitle } from './DayColumn';
+import { dayTitle } from '../../timeline/dayLabel';
 
 /** Opening time offered when a card is scheduled from the board. */
 const DEFAULT_START_MIN = 600; // 10:00

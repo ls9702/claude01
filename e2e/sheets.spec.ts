@@ -103,8 +103,9 @@ test('항공편 마법사로 만든 시트는 날짜와 항공편 일정을 함�
   await page.getByTestId('wizard-submit').click();
   await expect(page.getByTestId('sheet-wizard')).toHaveCount(0);
 
-  // The new sheet is added *and* switched to.
-  await expect(page.getByTestId('sheet-tab')).toHaveCount(2);
+  // 일정 1 was an empty shell, so the wizard filled it instead of parking a
+  // second tab beside it (B17). One sheet, and it is the one just described.
+  await expect(page.getByTestId('sheet-tab')).toHaveCount(1);
   await expect(page.getByTestId('timeline-sheet-name')).toHaveText('본 일정');
 
   const days = page.getByTestId('timeline-day');
@@ -131,18 +132,26 @@ test('항공편 마법사로 만든 시트는 날짜와 항공편 일정을 함�
   await expect(railMovement.getByTestId('board-card').first()).toContainText('✈️ ICN→KIX');
   await expect(railMovement.getByTestId('board-card').last()).toContainText('✈️ 귀국편');
 
-  // Everything survives a reload; `activeSheetId` is view state, so the app
-  // comes back on the trip's first sheet and the chip switches back.
+  // A second wizard run now has a *non*-empty active sheet, so it does add a
+  // sibling — and switches to it.
+  await page.getByTestId('sheet-add').click();
+  await page.getByTestId('wizard-name-input').fill('플랜 B');
+  await page.getByTestId('wizard-mode-days').click();
+  await page.getByTestId('wizard-submit').click();
+  await expect(page.getByTestId('sheet-tab')).toHaveCount(2);
+  await expect(page.getByTestId('timeline-sheet-name')).toHaveText('플랜 B');
+
+  await page.getByTestId('sheet-tab').filter({ hasText: '본 일정' }).click();
+  await expect(page.getByTestId('timeline-sheet-name')).toHaveText('본 일정');
+
+  // Everything survives a reload — and so does the sheet that was on screen,
+  // because 활성 여행/시트 are remembered per device now (B15).
   await waitForPersisted(page, '본 일정');
   await page.reload();
   await expect(page.getByTestId('tab-bar')).toBeVisible();
-  await page.getByTestId('timeline-trip-option').filter({ hasText: '오사카' }).click();
+  await expect(page.getByTestId('timeline-trip-option')).toHaveCount(0);
 
   await expect(page.getByTestId('sheet-tab')).toHaveCount(2);
-  await expect(page.getByTestId('timeline-sheet-name')).toHaveText('일정 1');
-  await expect(page.getByTestId('timeline-empty')).toBeVisible();
-
-  await page.getByTestId('sheet-tab').filter({ hasText: '본 일정' }).click();
   await expect(page.getByTestId('timeline-sheet-name')).toHaveText('본 일정');
   await expect(page.getByTestId('timeline-day')).toHaveCount(5);
   await expect(page.getByTestId('timeline-entry')).toHaveCount(2);
@@ -158,6 +167,16 @@ test('항공편을 하루 미루면 일자 날짜만 밀리고 배치한 일정�
   await fillLeg(page, 'wizard-out', { date: '2026-05-03', dep: '10:00', arr: '12:30' });
   await fillLeg(page, 'wizard-in', { date: '2026-05-07', dep: '18:00', arr: '20:30' });
   await page.getByTestId('wizard-submit').click();
+  await expect(page.getByTestId('timeline-day')).toHaveCount(5);
+
+  // A sibling for the 일정표 picker to choose *between*. 본 일정 now has days,
+  // so this one really is a new sheet rather than a refill (B17).
+  await page.getByTestId('sheet-add').click();
+  await page.getByTestId('wizard-name-input').fill('플랜 B');
+  await page.getByTestId('wizard-mode-days').click();
+  await page.getByTestId('wizard-submit').click();
+  await expect(page.getByTestId('sheet-tab')).toHaveCount(2);
+  await page.getByTestId('sheet-tab').filter({ hasText: '본 일정' }).click();
   await expect(page.getByTestId('timeline-day')).toHaveCount(5);
 
   // Put a card on the second day through the schedule sheet — which must open
@@ -305,8 +324,16 @@ test('일수 모드로 날짜 없는 3일짜리 시트를 만든다', async ({ p
   await expect(page.getByTestId('sheet-delete-confirm')).toContainText('일자 3개');
   await page.getByTestId('confirm-accept').click();
 
-  // Back to the trip's remaining sheet.
+  // The wizard filled 일정 1 rather than adding a sibling (B17), so that was
+  // the trip's only sheet and the 일정 탭 is now empty-handed.
+  await expect(page.getByTestId('sheet-tab')).toHaveCount(0);
+  await expect(page.getByTestId('timeline-empty')).toBeVisible();
+
+  // 일자 추가 must not be a dead end there: it makes the sheet it needs (B16).
+  await expect(page.getByTestId('timeline-add-day-empty')).toBeEnabled();
+  await page.getByTestId('timeline-add-day-empty').click();
   await expect(page.getByTestId('sheet-tab')).toHaveCount(1);
   await expect(page.getByTestId('timeline-sheet-name')).toHaveText('일정 1');
-  await expect(page.getByTestId('timeline-empty')).toBeVisible();
+  await expect(page.getByTestId('timeline-day')).toHaveCount(1);
+  await expect(page.getByTestId('timeline-day-title')).toHaveText('1일차');
 });

@@ -216,6 +216,61 @@ test('백업한 적 없어도 데이터가 적으면 넛지는 안 뜬다', asyn
 });
 
 /* ------------------------------------------------------------------ *
+ * 백업 복원 (B11)
+ * ------------------------------------------------------------------ */
+
+test('백업을 가져오면 지운 여행도 복원할지 물어보고 되살린다', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+
+  await createTrip(page, '오키나와');
+  await addCard(page, 0, '츄라우미 수족관');
+
+  // --- 내보내기 -------------------------------------------------------
+  await page.getByTestId('sync-chip').click();
+  await expect(page.getByTestId('sync-settings')).toBeVisible();
+  const downloading = page.waitForEvent('download');
+  await page.getByTestId('sync-export').click();
+  const backupPath = await (await downloading).path();
+  await expect(page.getByTestId('sync-notice')).toHaveText('백업 파일을 내려받았어요');
+  await page.getByTestId('sheet-close').click();
+
+  // --- 여행 삭제, 되돌리기 기회는 흘려보낸다 ---------------------------
+  await page.getByTestId('tab-trips').click();
+  await page
+    .getByTestId('trip-card')
+    .filter({ hasText: '오키나와' })
+    .getByTestId('trip-delete')
+    .click();
+  await page.getByTestId('confirm-accept').click();
+  await expect(page.getByTestId('trips-empty')).toBeVisible();
+  // 실행취소 기회가 지나가길 기다린다 — 이제 남은 건 톰스톤뿐이다.
+  await expect(page.getByTestId('undo-toast')).toHaveCount(0, { timeout: 15_000 });
+
+  // --- 가져오기 -------------------------------------------------------
+  await page.getByTestId('sync-chip').click();
+  await expect(page.getByTestId('sync-settings')).toBeVisible();
+  await page.getByTestId('sync-import-input').setInputFiles(backupPath);
+
+  // 합치기만 하면 톰스톤이 백업을 삼킨다 — 그래서 먼저 물어본다.
+  const ask = page.getByTestId('import-restore-confirm');
+  await expect(ask).toBeVisible();
+  await expect(ask).toContainText('복원할까요?');
+  await page.getByTestId('confirm-accept').click();
+
+  await expect(page.getByTestId('sync-notice')).toContainText('가져왔어요 — 여행 1개');
+  await page.getByTestId('sheet-close').click();
+
+  const restored = page.getByTestId('trip-card').filter({ hasText: '오키나와' });
+  await expect(restored).toHaveCount(1);
+  await expect(restored).toContainText('카드 1');
+  await restored.getByTestId('trip-open').click();
+  await expect(page.getByTestId('board-card').filter({ hasText: '츄라우미 수족관' })).toHaveCount(
+    1,
+  );
+});
+
+/* ------------------------------------------------------------------ *
  * 오프라인 지도 힌트
  * ------------------------------------------------------------------ */
 

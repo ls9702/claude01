@@ -15,7 +15,7 @@
  */
 
 import { useWorkspaceStore } from '../stores/workspaceStore';
-import type { Millis, Workspace } from '../types/models';
+import type { Id, Millis, Tombstone, Workspace } from '../types/models';
 import { markBackedUp } from './backup';
 import { merge } from './merge';
 
@@ -115,6 +115,66 @@ export function exportJson(now: Millis = Date.now()): void {
   markBackedUp(now);
 }
 
+/** Reads a picked file into a workspace, so the UI can look before it merges. */
+export const readBackupFile = async (file: File): Promise<Workspace> =>
+  deserializeBackup(await file.text());
+
+/** Which entity map a tombstone's `entity` names. */
+const MAP_OF = {
+  trip: 'trips',
+  sheet: 'sheets',
+  column: 'columns',
+  card: 'cards',
+  day: 'days',
+  entry: 'entries',
+} as const satisfies Record<Tombstone['entity'], keyof Workspace>;
+
+const tombKey = (tomb: Tombstone): string => `${tomb.entity}:${tomb.id}`;
+
+/**
+ * The local deletions that would swallow something the backup still has (B11).
+ *
+ * Import is a {@link merge}, and merge is right to let a tombstone win over an
+ * older entity — that is what stops a stale device from resurrecting a row.
+ * But it makes 백업 가져오기 useless for the one job people expect of it:
+ * "I deleted my trip, give it back". The file has the trip; the local tombstone
+ * kills it on the way in; the user sees 여행 0개 and no explanation.
+ *
+ * So the decision is handed to them instead. This is the *question* half —
+ * pure, and reproducing merge's own kill rule exactly (`deletedAt >
+ * entity.updatedAt`) so the answer is never off by one entity.
+ */
+export function findTombstoneConflicts(local: Workspace, imported: Workspace): Tombstone[] {
+  const conflicts: Tombstone[] = [];
+  for (const tomb of local.tombstones) {
+    const map = imported[MAP_OF[tomb.entity]] as Record<Id, { updatedAt: Millis }> | undefined;
+    const entity = map?.[tomb.id];
+    if (entity && tomb.deletedAt > entity.updatedAt) conflicts.push(tomb);
+  }
+  return conflicts;
+}
+
+/** A copy of `workspace` with exactly `drop`'s tombstones taken out. */
+export function withoutTombstones(workspace: Workspace, drop: readonly Tombstone[]): Workspace {
+  if (drop.length === 0) return workspace;
+  const dropped = new Set(drop.map(tombKey));
+  return {
+    ...workspace,
+    tombstones: workspace.tombstones.filter((tomb) => !dropped.has(tombKey(tomb))),
+  };
+}
+
+/** How an import should treat {@link findTombstoneConflicts}. */
+export interface ImportOptions {
+  /**
+   * `true` drops exactly the conflicting local tombstones before merging, so
+   * the backup's copies come back. Everything else — including tombstones the
+   * backup knows nothing about — is left alone, so sync semantics are untouched
+   * for every other row.
+   */
+  restore?: boolean;
+}
+
 /**
  * Reads a picked file and folds it into the current workspace.
  *
@@ -122,10 +182,16 @@ export function exportJson(now: Millis = Date.now()): void {
  * debounce picks the result up and pushes it — importing on one device
  * propagates to the others by itself.
  */
-export async function importJson(file: File): Promise<ImportSummary> {
-  const imported = deserializeBackup(await file.text());
+export async function importJson(
+  file: File,
+  opts: ImportOptions = {},
+): Promise<ImportSummary> {
+  const imported = await readBackupFile(file);
   const store = useWorkspaceStore.getState();
-  const merged = merge(store.workspace, imported);
+  const local = opts.restore
+    ? withoutTombstones(store.workspace, findTombstoneConflicts(store.workspace, imported))
+    : store.workspace;
+  const merged = merge(local, imported);
   store.replaceWorkspace(merged);
 
   return {

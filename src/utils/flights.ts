@@ -10,7 +10,7 @@
  */
 
 import type { FlightLeg } from '../types/models';
-import { DAY_MIN, MIN_ENTRY_MIN } from './time';
+import { DAY_MIN, MIN_ENTRY_MIN, snapMin } from './time';
 
 const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const HM_RE = /^(\d{1,2}):([0-5]\d)$/;
@@ -89,6 +89,55 @@ export function legDurationMin(leg: FlightLeg): number {
 /** The calendar date a leg lands on — `date`, plus one when it crosses midnight. */
 export function legArrivalDate(leg: FlightLeg): string {
   return leg.arrNextDay ? addDaysIso(leg.date, 1) : leg.date;
+}
+
+/** One piece of a leg as it lands on the calendar. */
+export interface LegPlacement {
+  /** `YYYY-MM-DD` of the day this piece belongs on. */
+  date: string;
+  /** Minutes from that day's midnight. */
+  startMin: number;
+  durationMin: number;
+}
+
+/**
+ * How a leg occupies the grid: **one** piece for a same-day flight, **two** for
+ * a leg that crosses midnight (M8-2, B10).
+ *
+ * A timeline entry cannot span two day columns — `clampEntry` shortens anything
+ * that would run past midnight. So a 심야 leg (`23:40 → 06:20 +1일`) used to
+ * collapse into a 15-minute stub while its card still claimed 6시간 40분. Split
+ * instead: the departure day keeps the tail (snapped 출발 시각 → 24:00) and the
+ * arrival day gets the head (00:00 → 도착 시각). Together they read as the one
+ * flight they are, on the two days it actually touches.
+ *
+ * The head is dropped when the leg lands exactly at midnight — there is no
+ * arrival day to draw. The caller decides whether the sheet even *holds* the
+ * arrival day; a leg landing outside the sheet keeps only its tail.
+ */
+export function legPlacements(leg: FlightLeg): LegPlacement[] {
+  const dep = parseHm(leg.depTime);
+  const arr = parseHm(leg.arrTime);
+  const startMin = dep ?? 0;
+  const head = [{ date: leg.date, startMin, durationMin: legDurationMin(leg) }];
+
+  if (!leg.arrNextDay || dep === null || arr === null || arr === 0) return head;
+
+  // The tail is snapped here rather than left to the caller, so `startMin +
+  // durationMin` really is midnight — an off-grid start would leave a sliver.
+  const tailStart = snapMin(startMin);
+  return [
+    {
+      date: leg.date,
+      startMin: tailStart,
+      durationMin: Math.max(DAY_MIN - tailStart, MIN_ENTRY_MIN),
+    },
+    {
+      date: addDaysIso(leg.date, 1),
+      startMin: 0,
+      durationMin: Math.max(snapMin(arr), MIN_ENTRY_MIN),
+    },
+  ];
 }
 
 /** What the wizard knows about a sheet: two optional legs and/or a length. */

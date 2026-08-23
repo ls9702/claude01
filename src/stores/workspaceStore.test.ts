@@ -388,6 +388,13 @@ const entriesOf = (sheetId: Id) =>
   Object.values(ws().entries)
     .filter((entry) => ws().days[entry.dayId]?.sheetId === sheetId)
     .sort((a, b) => a.startMin - b.startMin);
+/** One card's entries inside a sheet, in the sheet's own day order. */
+const piecesOf = (sheetId: Id, cardId: Id) => {
+  const order = new Map(ws().sheets[sheetId].dayOrder.map((dayId, index) => [dayId, index]));
+  return entriesOf(sheetId)
+    .filter((entry) => entry.cardId === cardId)
+    .sort((a, b) => (order.get(a.dayId) ?? 0) - (order.get(b.dayId) ?? 0));
+};
 /** Cards of the trip's 이동수단 column. */
 const flightCards = (tripId: Id) => {
   const column = ws().trips[tripId].columnOrder
@@ -397,7 +404,7 @@ const flightCards = (tripId: Id) => {
 };
 
 describe('createSheetFromFlights', () => {
-  it('spans outbound departure → inbound arrival and labels every day', () => {
+  it('spans outbound departure → inbound arrival and stores no positional label', () => {
     const tripId = store().addTrip('오사카');
     const { sheetId } = store().createSheetFromFlights(tripId, '본 일정', {
       outbound: OUTBOUND,
@@ -419,12 +426,14 @@ describe('createSheetFromFlights', () => {
       '2026-05-06',
       '2026-05-07',
     ]);
+    // `N일차` is a position, not a fact about the day — the header derives it
+    // so an insert/delete can never leave `2일차 · 3일차 · 3일차` behind (B12).
     expect(days.map((day) => day.label)).toEqual([
-      '1일차',
-      '2일차',
-      '3일차',
-      '4일차',
-      '5일차',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
     ]);
     expect(days.every((day) => day.tripId === tripId && day.sheetId === sheetId)).toBe(true);
   });
@@ -469,17 +478,55 @@ describe('createSheetFromFlights', () => {
     });
   });
 
-  it('clamps a red-eye inside its own day rather than spilling over', () => {
+  it('splits a 심야 출발편 across the two days it actually touches', () => {
     const tripId = store().addTrip('밤비행기');
     const { sheetId } = store().createSheetFromFlights(tripId, '본 일정', {
-      outbound: { date: '2026-05-03', depTime: '23:30', arrTime: '05:10', arrNextDay: true },
+      outbound: { date: '2026-05-03', depTime: '23:40', arrTime: '06:20', arrNextDay: true },
       inbound: INBOUND,
     })!;
 
-    const firstDayId = daysOf(sheetId)[0].id;
-    const entry = entriesOf(sheetId).find((item) => item.dayId === firstDayId)!;
-    expect(entry.startMin).toBe(1410);
-    expect(entry.durationMin).toBe(30); // 23:30 → 24:00, per clampEntry
+    const days = daysOf(sheetId);
+    const [outboundCard] = flightCards(tripId);
+    const pieces = piecesOf(sheetId, outboundCard.id);
+
+    // Two entries, one card: the tail of 5/3 and the head of 5/4 (B10).
+    expect(pieces).toHaveLength(2);
+    expect(pieces[0]).toMatchObject({ dayId: days[0].id, startMin: 1425, durationMin: 15 });
+    expect(pieces[1]).toMatchObject({ dayId: days[1].id, startMin: 0, durationMin: 375 });
+    // The card still states the whole 6시간 40분 flight.
+    expect(outboundCard.defaultDurationMin).toBe(400);
+  });
+
+  it('splits a 심야 귀국편 onto the extra arrival day it created', () => {
+    const tripId = store().addTrip('밤귀국');
+    const { sheetId } = store().createSheetFromFlights(tripId, '본 일정', {
+      outbound: OUTBOUND,
+      inbound: { ...INBOUND, depTime: '23:30', arrTime: '05:10', arrNextDay: true },
+    })!;
+
+    const days = daysOf(sheetId);
+    expect(days).toHaveLength(6); // 5/3 … 5/8
+    const inboundCard = flightCards(tripId).at(-1)!;
+    const pieces = piecesOf(sheetId, inboundCard.id);
+
+    expect(pieces).toHaveLength(2);
+    expect(pieces[0]).toMatchObject({ dayId: days[4].id, startMin: 1410, durationMin: 30 });
+    expect(pieces[1]).toMatchObject({ dayId: days[5].id, startMin: 0, durationMin: 315 });
+  });
+
+  it('leaves a same-day leg as the single entry it always was', () => {
+    const tripId = store().addTrip('낮비행기');
+    const { sheetId } = store().createSheetFromFlights(tripId, '본 일정', {
+      outbound: OUTBOUND,
+      inbound: INBOUND,
+    })!;
+
+    const days = daysOf(sheetId);
+    const [outboundCard] = flightCards(tripId);
+    expect(entriesOf(sheetId)).toHaveLength(2);
+    expect(piecesOf(sheetId, outboundCard.id)).toEqual([
+      expect.objectContaining({ dayId: days[0].id, startMin: 600, durationMin: 150 }),
+    ]);
   });
 
   it('creates dateless days from dayCount alone, with no flight cards', () => {
@@ -489,7 +536,7 @@ describe('createSheetFromFlights', () => {
     const days = daysOf(sheetId);
     expect(days).toHaveLength(3);
     expect(days.every((day) => day.date === undefined)).toBe(true);
-    expect(days.map((day) => day.label)).toEqual(['1일차', '2일차', '3일차']);
+    expect(days.every((day) => day.label === undefined)).toBe(true);
     expect(entriesOf(sheetId)).toHaveLength(0);
     expect(flightCards(tripId)).toHaveLength(0);
     expect(ws().sheets[sheetId].outboundFlight).toBeUndefined();
@@ -592,7 +639,7 @@ describe('updateSheetFlights', () => {
     expect(days).toHaveLength(7);
     expect(days.slice(0, 5).map((day) => day.id)).toEqual(dayIds);
     expect(days.map((day) => day.date).slice(5)).toEqual(['2026-05-08', '2026-05-09']);
-    expect(days.at(-1)?.label).toBe('7일차');
+    expect(days.at(-1)?.label).toBeUndefined();
   });
 
   it('recreates the flight cards instead of leaving stale ones behind', () => {
@@ -609,6 +656,28 @@ describe('updateSheetFlights', () => {
     expect(cards[0].title).toBe('✈️ ICN→KIX KE723');
     expect(entriesOf(sheetId).filter((entry) => ws().cards[entry.cardId].title.startsWith('✈️')))
       .toHaveLength(2);
+  });
+
+  it('re-lays both halves of a 심야 leg without leaving a stray entry', () => {
+    const { tripId, sheetId } = flightSheetSetup();
+
+    store().updateSheetFlights(sheetId, {
+      outbound: { ...OUTBOUND, depTime: '23:40', arrTime: '06:20', arrNextDay: true },
+      inbound: INBOUND,
+    });
+
+    // Two cards, three flight entries: the split outbound plus the day-time
+    // return. The delete-and-recreate path clears by card, so both halves go.
+    const cards = flightCards(tripId);
+    expect(cards).toHaveLength(2);
+    expect(piecesOf(sheetId, cards[0].id)).toHaveLength(2);
+    expect(piecesOf(sheetId, cards[1].id)).toHaveLength(1);
+
+    store().updateSheetFlights(sheetId, { outbound: OUTBOUND, inbound: INBOUND });
+    expect(flightCards(tripId)).toHaveLength(2);
+    expect(
+      entriesOf(sheetId).filter((entry) => ws().cards[entry.cardId].title.startsWith('✈️')),
+    ).toHaveLength(2);
   });
 
   it('clears the flights, and their cards, when neither leg is given', () => {
