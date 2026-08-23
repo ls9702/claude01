@@ -2,8 +2,8 @@ import { useUiStore, type TabId } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useHashSync } from './HashSync';
 import TabBar from './TabBar';
-import TripsView from '../views/TripsView';
-import BoardView from '../views/BoardView';
+import TripsView from '../trips/TripListView';
+import BoardView from '../board/BoardView';
 import TimelineView from '../views/TimelineView';
 import MapView from '../views/MapView';
 
