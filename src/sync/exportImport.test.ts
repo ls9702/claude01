@@ -11,6 +11,9 @@ import { merge, workspaceEquals } from './merge';
 
 const AT = new Date('2026-03-07T10:20:30+09:00').getTime();
 
+/** 톰스톤 시각 — populated()를 여러 번 불러도 같도록 모듈 로드 때 한 번만 계산 (TTL 이내). */
+const TOMBSTONE_AT = Date.now() - 1_000;
+
 /** A workspace with one of everything, so the round trip has something to lose. */
 function populated(): Workspace {
   const ws = emptyWorkspace();
@@ -71,7 +74,7 @@ function populated(): Workspace {
     createdAt: 1_000,
     updatedAt: 1_000,
   };
-  ws.tombstones.push({ id: 'gone', entity: 'card', deletedAt: Date.now() - 1_000 });
+  ws.tombstones.push({ id: 'gone', entity: 'card', deletedAt: TOMBSTONE_AT });
   return ws;
 }
 
