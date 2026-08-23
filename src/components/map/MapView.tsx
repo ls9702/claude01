@@ -5,11 +5,15 @@ import 'leaflet/dist/leaflet.css';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import type { BoardColumn, Card, Id } from '../../types/models';
-import { colorClasses } from '../../utils/colors';
+import type { BoardColumn, Card, Day, Id, Sheet as SheetModel } from '../../types/models';
+import { dayRoute } from '../../timeline/route';
+import { COLOR_HEX, COLOR_TOKENS, colorClasses } from '../../utils/colors';
 import { formatBudget } from '../../utils/money';
+import { cardCommentCount, cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
+import { dayTitle } from '../timeline/DayColumn';
 import MapReady from './MapReady';
+import RouteLayer, { type RouteDrawing } from './RouteLayer';
 import {
   FIT_MAX_ZOOM,
   FIT_PAD,
@@ -107,6 +111,33 @@ function FitPins({ points, fitKey, ready }: FitPinsProps) {
 }
 
 /**
+ * Frames the picked day's route, once per selection.
+ *
+ * Unlike {@link FitPins} an empty input is a no-op: turning the route off, or
+ * picking a day with nothing located on it, must leave the user's view alone
+ * rather than throwing them back out to the world.
+ */
+function FitRoute({ points, fitKey, ready }: FitPinsProps) {
+  const map = useMap();
+  const fittedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!ready || points.length === 0 || fittedRef.current === fitKey) return;
+    fittedRef.current = fitKey;
+    const bounds = latLngBounds(points.map((point) => [point.lat, point.lng]));
+    map.fitBounds(bounds.pad(FIT_PAD), { animate: false, maxZoom: FIT_MAX_ZOOM });
+  }, [map, points, fitKey, ready]);
+
+  return null;
+}
+
+/** Which day(s) the route control is drawing: nothing, one day, or all. */
+type RouteSelection = { kind: 'off' } | { kind: 'day'; dayId: Id } | { kind: 'all' };
+
+/** Line color of a single-day route — neutral, so the pins keep the palette. */
+const SINGLE_ROUTE_HEX = '#334155';
+
+/**
  * The 지도 tab: every located card of the active trip as a colored pin.
  *
  * Locations are *written* from the board (검색 / 지도에서 선택 inside the card
@@ -117,6 +148,7 @@ export default function MapView() {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const updateCard = useWorkspaceStore((s) => s.updateCard);
   const activeTripId = useUiStore((s) => s.activeTripId);
+  const activeSheetId = useUiStore((s) => s.activeSheetId);
   const setTab = useUiStore((s) => s.setTab);
   const focusCard = useUiStore((s) => s.focusCard);
   const isDesktop = useIsDesktop();
@@ -125,6 +157,9 @@ export default function MapView() {
   const [size, setSize] = useState({ x: 0, y: 0 });
   /** Column ids toggled off in the legend. */
   const [mutedColumns, setMutedColumns] = useState<readonly Id[]>([]);
+  /** 경로 controls: which sheet is being read, and what is drawn from it. */
+  const [routeSheetId, setRouteSheetId] = useState<Id | undefined>(undefined);
+  const [selection, setSelection] = useState<RouteSelection>({ kind: 'off' });
 
   const onSize = useCallback((next: { x: number; y: number }) => {
     setSize((current) => (current.x === next.x && current.y === next.y ? current : next));
@@ -166,6 +201,74 @@ export default function MapView() {
   );
 
   const fitPoints = useMemo(() => pins.map((pin) => pin.card.location!), [pins]);
+
+  /* --- 경로 (M6) ---------------------------------------------------- */
+
+  const sheets = useMemo<SheetModel[]>(
+    () =>
+      (trip?.sheetOrder ?? [])
+        .map((sheetId) => workspace.sheets[sheetId])
+        .filter((sheet): sheet is SheetModel => Boolean(sheet)),
+    [trip?.sheetOrder, workspace.sheets],
+  );
+
+  /** The 경로 sheet: the user's pick, else whatever the 일정 tab is showing. */
+  const routeSheet =
+    sheets.find((sheet) => sheet.id === routeSheetId) ??
+    sheets.find((sheet) => sheet.id === activeSheetId) ??
+    sheets[0];
+
+  const routeDays = useMemo<Day[]>(
+    () =>
+      (routeSheet?.dayOrder ?? [])
+        .map((dayId) => workspace.days[dayId])
+        .filter((day): day is Day => Boolean(day)),
+    [routeSheet?.dayOrder, workspace.days],
+  );
+
+  const drawings = useMemo<RouteDrawing[]>(() => {
+    if (selection.kind === 'off') return [];
+    const wanted =
+      selection.kind === 'all'
+        ? routeDays
+        : routeDays.filter((day) => day.id === selection.dayId);
+
+    return wanted
+      .map<RouteDrawing>((day) => ({
+        dayId: day.id,
+        dayTitle: dayTitle(day, routeDays.indexOf(day)),
+        // One neutral line for a single day; the palette cycles for 전체 so
+        // two days crossing the same street stay tellable apart.
+        color:
+          selection.kind === 'all'
+            ? COLOR_HEX[COLOR_TOKENS[routeDays.indexOf(day) % COLOR_TOKENS.length]]
+            : SINGLE_ROUTE_HEX,
+        route: dayRoute(workspace, day.id),
+      }))
+      .filter((drawing) => drawing.route.stops.length > 0);
+  }, [selection, routeDays, workspace]);
+
+  const routePoints = useMemo(
+    () => drawings.flatMap((drawing) => drawing.route.stops),
+    [drawings],
+  );
+
+  const routeKey =
+    selection.kind === 'off'
+      ? 'off'
+      : `${routeSheet?.id ?? ''}:${selection.kind === 'all' ? 'all' : selection.dayId}`;
+
+  // A day (or a whole sheet) that disappears must not leave a dangling route.
+  useEffect(() => {
+    if (selection.kind !== 'day') return;
+    if (!routeDays.some((day) => day.id === selection.dayId)) setSelection({ kind: 'off' });
+  }, [selection, routeDays]);
+
+  // Switching trips resets the control rather than pointing it at a stale sheet.
+  useEffect(() => {
+    setSelection({ kind: 'off' });
+    setRouteSheetId(undefined);
+  }, [trip?.id]);
 
   // A legend chip for a category that no longer has pins would be unreachable.
   useEffect(() => {
@@ -243,6 +346,91 @@ export default function MapView() {
         </div>
       ) : null}
 
+      {routeDays.length > 0 ? (
+        <div
+          data-testid="map-route-controls"
+          className="flex flex-wrap items-center gap-1.5 px-4 pb-2"
+          role="group"
+          aria-label="일자별 경로"
+        >
+          <span className="text-[11px] font-medium text-stone-400">경로</span>
+
+          {sheets.length > 0 ? (
+            <select
+              data-testid="map-route-sheet-select"
+              aria-label="일정표 선택"
+              value={routeSheet?.id ?? ''}
+              onChange={(event) => {
+                setRouteSheetId(event.target.value);
+                setSelection({ kind: 'off' });
+              }}
+              className="max-w-32 rounded-full border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-600"
+            >
+              {sheets.map((sheet) => (
+                <option key={sheet.id} value={sheet.id}>
+                  {sheet.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+
+          <button
+            type="button"
+            data-testid="map-route-all"
+            data-active={selection.kind === 'all'}
+            aria-pressed={selection.kind === 'all'}
+            onClick={() =>
+              setSelection((current) =>
+                current.kind === 'all' ? { kind: 'off' } : { kind: 'all' },
+              )
+            }
+            className={[
+              'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+              selection.kind === 'all'
+                ? 'bg-stone-800 text-white'
+                : 'bg-stone-100 text-stone-500 hover:bg-stone-200',
+            ].join(' ')}
+          >
+            전체
+          </button>
+
+          {routeDays.map((day, index) => {
+            const active = selection.kind === 'day' && selection.dayId === day.id;
+            return (
+              <button
+                key={day.id}
+                type="button"
+                data-testid="map-route-day"
+                data-day-id={day.id}
+                data-active={active}
+                aria-pressed={active}
+                onClick={() =>
+                  setSelection((current) =>
+                    current.kind === 'day' && current.dayId === day.id
+                      ? { kind: 'off' }
+                      : { kind: 'day', dayId: day.id },
+                  )
+                }
+                className={[
+                  'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+                  active
+                    ? 'bg-stone-800 text-white'
+                    : 'bg-stone-100 text-stone-500 hover:bg-stone-200',
+                ].join(' ')}
+              >
+                {dayTitle(day, index)}
+              </button>
+            );
+          })}
+
+          {selection.kind !== 'off' && routePoints.length === 0 ? (
+            <span data-testid="map-route-empty" className="text-[11px] text-stone-400">
+              위치가 있는 일정이 없어요
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* `isolate` traps Leaflet's internal z-indexes (panes go up to 700) so
           they cannot paint over the bottom sheets and the tab bar. */}
       <div
@@ -262,6 +450,7 @@ export default function MapView() {
           <OsmTiles />
           <MapReady onSize={onSize} />
           <FitPins points={fitPoints} fitKey={trip.id} ready={ready} />
+          <FitRoute points={routePoints} fitKey={routeKey} ready={ready} />
 
           {visiblePins.map(({ card, column }) => (
             <Marker
@@ -294,6 +483,24 @@ export default function MapView() {
                         💰 {formatBudget(card.budget, trip.currency)}
                       </span>
                     ) : null}
+                    {cardSpent(card) > 0 ? (
+                      <span
+                        data-testid="map-popup-chip-spent"
+                        data-spent={cardSpent(card)}
+                        className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600"
+                      >
+                        💸 {formatBudget(cardSpent(card), trip.currency)}
+                      </span>
+                    ) : null}
+                    {cardCommentCount(card) > 0 ? (
+                      <span
+                        data-testid="map-popup-chip-comments"
+                        data-count={cardCommentCount(card)}
+                        className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600"
+                      >
+                        💬 {cardCommentCount(card)}
+                      </span>
+                    ) : null}
                   </div>
 
                   <div className="mt-2 flex flex-col gap-1">
@@ -318,6 +525,14 @@ export default function MapView() {
               </Popup>
             </Marker>
           ))}
+
+          {/* Drawn on top of the pins, and deliberately not filtered by the
+              legend — see RouteLayer's doc comment. */}
+          <RouteLayer
+            drawings={drawings}
+            cards={workspace.cards}
+            columns={workspace.columns}
+          />
         </MapContainer>
 
         {pins.length === 0 ? (

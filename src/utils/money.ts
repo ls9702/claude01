@@ -33,3 +33,31 @@ export function formatBudget(amount: number, currency: string): string {
   const suffix = SUFFIX[code];
   return suffix ? `${value}${suffix}` : `${value} ${code}`;
 }
+
+/** `12.3` → `"12.3"`, `12.0` → `"12"` — one decimal, never a trailing `.0`. */
+const oneDecimal = (value: number): string =>
+  (Math.round(value * 10) / 10).toFixed(1).replace(/\.0$/, '');
+
+/**
+ * Short form for the timeline chips, where a full `123,000원` would not fit:
+ * `formatCompactAmount(123000, 'KRW')` → `"12.3만"`,
+ * `formatCompactAmount(1500, 'USD')` → `"1.5k USD"`.
+ *
+ * 원/엔 break at 만 (10,000) the way Korean actually reads amounts; everything
+ * else falls back to a `k` above a thousand. Small amounts are left alone and
+ * go through {@link formatBudget}.
+ */
+export function formatCompactAmount(amount: number, currency: string): string {
+  if (!Number.isFinite(amount)) return '';
+  const code = (currency || 'KRW').toUpperCase();
+  const suffix = SUFFIX[code];
+  const abs = Math.abs(amount);
+
+  if (suffix && abs >= 10_000) {
+    const man = amount / 10_000;
+    const text = Math.abs(man) >= 100 ? Math.round(man).toLocaleString('ko-KR') : oneDecimal(man);
+    return `${text}만`;
+  }
+  if (!suffix && abs >= 1_000) return `${oneDecimal(amount / 1_000)}k ${code}`;
+  return formatBudget(amount, currency);
+}

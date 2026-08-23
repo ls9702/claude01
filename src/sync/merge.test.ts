@@ -535,6 +535,75 @@ const cases: Case[] = [
       expect(m.columns.c1.cardOrder).toEqual(['k1']);
     },
   },
+
+  /* --- M6: 지출 / 코멘트 ride along on the card ---------------------- */
+  {
+    // These are card *subfields*, and the merge is entity-level LWW: the
+    // newer card wins its whole ledger. Two devices each adding one expense
+    // therefore keep one list, not the union — the accepted trade for a
+    // sync model with no operation log.
+    name: '카드 지출/코멘트는 카드 단위 LWW로 최신본이 통째로 이긴다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1), {
+          updatedAt: T(30),
+          expenses: [
+            { id: 'x1', amount: 12_000, label: '점심', at: T(20) },
+            { id: 'x2', amount: 3_000, at: T(30) },
+          ],
+          comments: [{ id: 'm1', text: '줄 서야 함', at: T(30) }],
+        }),
+      ],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1), {
+          updatedAt: T(10),
+          expenses: [{ id: 'x1', amount: 12_000, label: '점심', at: T(20) }],
+        }),
+      ],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(m.cards.k1.expenses?.map((item) => item.id)).toEqual(['x1', 'x2']);
+      expect(m.cards.k1.comments?.map((item) => item.text)).toEqual(['줄 서야 함']);
+    },
+  },
+  {
+    name: 'M6 필드가 없는 예전 카드도 그대로 살아남는다 (하위 호환)',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1', 'k2'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1), { updatedAt: T(5) }),
+        card('k2', 't1', 'c1', T(2), {
+          updatedAt: T(40),
+          expenses: [{ id: 'x9', amount: 500, at: T(40) }],
+          comments: [{ id: 'm9', text: '현금만', at: T(40) }],
+        }),
+      ],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1', 'k2'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1), { updatedAt: T(5) }),
+        card('k2', 't1', 'c1', T(2), { updatedAt: T(2) }),
+      ],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(m.schemaVersion).toBe(1);
+      expect(m.cards.k1.expenses).toBeUndefined();
+      expect(m.cards.k1.comments).toBeUndefined();
+      expect(m.cards.k2.expenses).toHaveLength(1);
+      expect(m.cards.k2.comments).toHaveLength(1);
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------ *

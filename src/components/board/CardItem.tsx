@@ -5,6 +5,7 @@ import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { Card } from '../../types/models';
 import { colorClasses } from '../../utils/colors';
 import { formatBudget } from '../../utils/money';
+import { cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
 
 interface CardSurfaceProps {
@@ -68,6 +69,17 @@ export function CardSurface({
   }
   if (typeof card.budget === 'number' && Number.isFinite(card.budget)) {
     chips.push({ key: 'budget', icon: '💰', text: formatBudget(card.budget, currency) });
+  }
+  // 💰 is the plan, 💸 is what it actually cost — they sit side by side on
+  // purpose, so a card that ran over its budget says so at a glance.
+  const spent = cardSpent(card);
+  if (spent > 0) {
+    chips.push({
+      key: 'spent',
+      icon: '💸',
+      text: formatBudget(spent, currency),
+      title: `지출 ${card.expenses?.length ?? 0}건`,
+    });
   }
 
   return (

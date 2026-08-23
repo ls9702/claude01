@@ -14,10 +14,12 @@ import type {
 } from '../../types/models';
 import { AXIS_PX, HEADER_PX, INITIAL_SCROLL_MIN, PX_PER_MIN } from '../../timeline/layout';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
+import { daySpend, emptySpend, sheetSpend, type SpendTotals } from '../../utils/spend';
 import { minToY } from '../../utils/time';
 import ConfirmDialog from '../common/ConfirmDialog';
 import BoardRail from './BoardRail';
 import DayColumn, { dayTitle } from './DayColumn';
+import SpendChip from './SpendChip';
 import EntryDetailSheet from './EntryDetailSheet';
 import ScheduleSheet from './ScheduleSheet';
 import SheetRenameDialog from './SheetRenameDialog';
@@ -189,6 +191,23 @@ export default function TimelineView() {
     return byDay;
   }, [workspace.entries, trip]);
 
+  /**
+   * dayId → 예산/지출 of that day, and the sheet's own totals (M6).
+   *
+   * Both count **cards**, not placements — see `utils/spend.ts`; the sheet
+   * total is therefore not the sum of its days when one card spans two of them.
+   */
+  const spendByDay = useMemo<Record<Id, SpendTotals>>(() => {
+    const byDay: Record<Id, SpendTotals> = {};
+    for (const day of days) byDay[day.id] = daySpend(workspace, day.id);
+    return byDay;
+  }, [days, workspace]);
+
+  const sheetTotals = useMemo<SpendTotals>(
+    () => (sheet ? sheetSpend(workspace, sheet.id) : emptySpend()),
+    [sheet, workspace],
+  );
+
   /** cardId → total entries (badge) and their per-sheet split (popover). */
   const { counts: scheduledCounts, bySheet: scheduleBreakdowns } = useMemo(
     () => summarizeSchedule(workspace, trip?.id),
@@ -269,15 +288,25 @@ export default function TimelineView() {
         </button>
       </header>
 
-      <SheetTabs
-        sheets={sheets}
-        activeSheetId={sheet?.id}
-        onSelect={setActiveSheet}
-        onCreate={() => setDialog({ kind: 'sheet-create' })}
-        onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
-        onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
-        onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
-      />
+      <div className="flex items-center gap-1.5">
+        <div className="min-w-0 flex-1">
+          <SheetTabs
+            sheets={sheets}
+            activeSheetId={sheet?.id}
+            onSelect={setActiveSheet}
+            onCreate={() => setDialog({ kind: 'sheet-create' })}
+            onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
+            onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
+            onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
+          />
+        </div>
+        <SpendChip
+          totals={sheetTotals}
+          currency={trip.currency}
+          testId="sheet-spend"
+          className="mb-2 mr-4"
+        />
+      </div>
 
       {days.length === 0 ? (
         <div
@@ -319,11 +348,21 @@ export default function TimelineView() {
               >
                 ‹
               </button>
-              <span
-                data-testid="day-pager-label"
-                className="truncate text-sm font-semibold text-stone-700"
-              >
-                {days[safePage] ? dayTitle(days[safePage], safePage) : ''}
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span
+                  data-testid="day-pager-label"
+                  className="truncate text-sm font-semibold text-stone-700"
+                >
+                  {days[safePage] ? dayTitle(days[safePage], safePage) : ''}
+                </span>
+                {days[safePage] ? (
+                  <SpendChip
+                    totals={spendByDay[days[safePage].id] ?? emptySpend()}
+                    currency={trip.currency}
+                    testId="day-spend"
+                    dayId={days[safePage].id}
+                  />
+                ) : null}
               </span>
               <button
                 type="button"
@@ -382,6 +421,8 @@ export default function TimelineView() {
                         entries={entriesByDay[day.id] ?? []}
                         cards={workspace.cards}
                         columns={workspace.columns}
+                        spend={spendByDay[day.id] ?? emptySpend()}
+                        currency={trip.currency}
                         fullWidth={!isDesktop}
                         onOpenEntry={(entry) => setDialog({ kind: 'entry', entry })}
                         onDeleteDay={(target) =>
@@ -410,6 +451,7 @@ export default function TimelineView() {
         <EntryDetailSheet
           entry={dialogEntry}
           card={workspace.cards[dialogEntry.cardId]}
+          currency={trip.currency}
           dayTitle={(() => {
             const index = days.findIndex((day) => day.id === dialogEntry.dayId);
             return index >= 0 ? dayTitle(days[index], index) : '';

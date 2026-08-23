@@ -305,6 +305,74 @@ test('위치를 제거하면 카드에서 사라진다', async ({ page }) => {
   await expect(page.getByTestId('card-chip-location')).toHaveCount(0);
 });
 
+test('일자를 고르면 그날의 동선이 화살표로 그려진다', async ({ page }) => {
+  await stubNetwork(page);
+  await page.goto('/');
+  await createTrip(page, '도쿄 동선');
+  await addCard(page, 4, '스크램블 교차로');
+  await addCard(page, 4, '시부야역 앞');
+
+  // The two stubbed hits sit ~150m apart — one card each.
+  await openCard(page, '스크램블 교차로');
+  await openPlaceSearch(page);
+  await page.getByTestId('place-search-submit').click();
+  await expect(page.getByTestId('place-search-result')).toHaveCount(2);
+  await page.getByTestId('place-search-result').nth(0).click();
+  await page.getByTestId('card-submit').click();
+
+  await openCard(page, '시부야역 앞');
+  await openPlaceSearch(page);
+  await page.getByTestId('place-search-submit').click();
+  await expect(page.getByTestId('place-search-result')).toHaveCount(2);
+  await page.getByTestId('place-search-result').nth(1).click();
+  await page.getByTestId('card-submit').click();
+
+  // One day, both cards on it — 10:00 and 10:30, so the order is unambiguous.
+  await page.getByTestId('tab-timeline').click();
+  await page.getByTestId('timeline-add-day-empty').click();
+  await expect(page.getByTestId('timeline-day')).toHaveCount(1);
+
+  for (const [title, nudges] of [
+    ['스크램블 교차로', 0],
+    ['시부야역 앞', 2],
+  ] as const) {
+    await page.getByTestId('tab-board').click();
+    await openCard(page, title);
+    await page.getByTestId('card-schedule').click();
+    for (let i = 0; i < nudges; i += 1) await page.getByTestId('schedule-start-plus').click();
+    await page.getByTestId('schedule-submit').click();
+    await expect(page.getByTestId('schedule-sheet')).toHaveCount(0);
+  }
+
+  await page.getByTestId('tab-map').click();
+  await expectLiveMap(page);
+  await expect(page.getByTestId('map-marker')).toHaveCount(2);
+
+  // The route is off until a day is picked.
+  await expect(page.getByTestId('map-route-controls')).toBeVisible();
+  await expect(page.getByTestId('map-route-sheet-select')).toBeVisible();
+  await expect(page.getByTestId('route-stop')).toHaveCount(0);
+
+  const dayChip = page.getByTestId('map-route-day').first();
+  await dayChip.click();
+  await expect(dayChip).toHaveAttribute('data-active', 'true');
+  await expect(page.getByTestId('route-stop')).toHaveCount(2);
+  await expect(page.getByTestId('route-leg')).toHaveCount(1);
+  await expect(page.getByTestId('route-stop').first()).toHaveAttribute('data-order', '1');
+  // The pins stay put underneath the numbered badges.
+  await expect(page.getByTestId('map-marker')).toHaveCount(2);
+
+  // 전체 draws the same single day; tapping it again turns the route off.
+  await page.getByTestId('map-route-all').click();
+  await expect(page.getByTestId('map-route-all')).toHaveAttribute('data-active', 'true');
+  await expect(dayChip).toHaveAttribute('data-active', 'false');
+  await expect(page.getByTestId('route-stop')).toHaveCount(2);
+
+  await page.getByTestId('map-route-all').click();
+  await expect(page.getByTestId('route-stop')).toHaveCount(0);
+  await expect(page.getByTestId('route-leg')).toHaveCount(0);
+});
+
 test('검색이 실패하면 한국어 안내가 뜬다', async ({ page }) => {
   await page.route(/tile\.openstreetmap\.org/, (route) =>
     route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }),

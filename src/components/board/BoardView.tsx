@@ -245,6 +245,7 @@ export default function BoardView() {
         <CardEditSheet
           card={dialog.card}
           columnName={columnNameOf(dialog.card.columnId)}
+          currency={trip.currency}
           scheduledCount={scheduledCounts[dialog.card.id] ?? 0}
           onSubmit={submitCard}
           onSchedule={() => setDialog({ kind: 'card-schedule', card: dialog.card })}

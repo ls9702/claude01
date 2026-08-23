@@ -805,3 +805,123 @@ describe('addColumn / addCard guards', () => {
     expect(store().addCard(tripId, 'nope', { title: 'A' })).toBeNull();
   });
 });
+
+describe('addExpense / removeExpense (M6)', () => {
+  /** A trip with one card, ready to spend money on. */
+  const cardSetup = (): Id => {
+    const tripId = store().addTrip('오사카');
+    return store().addCard(tripId, columnIds(tripId)[4], { title: '츠텐카쿠', budget: 10_000 })!;
+  };
+
+  it('appends expenses oldest first and stamps them', () => {
+    const cardId = cardSetup();
+    const first = store().addExpense(cardId, 12_000, '점심')!;
+    const second = store().addExpense(cardId, 3_000)!;
+
+    const expenses = ws().cards[cardId].expenses!;
+    expect(expenses.map((item) => item.id)).toEqual([first, second]);
+    expect(expenses[0]).toMatchObject({ amount: 12_000, label: '점심' });
+    // A blank label is dropped rather than stored as ''.
+    expect(expenses[1].label).toBeUndefined();
+    expect(expenses[0].at).toBeGreaterThan(0);
+    // The card is what changed, so the card's own stamp moves.
+    expect(ws().cards[cardId].updatedAt).toBeGreaterThanOrEqual(expenses[1].at);
+    expect(store().dirty).toBe(true);
+  });
+
+  it('leaves the rest of the card alone', () => {
+    const cardId = cardSetup();
+    store().addExpense(cardId, 500, '  ');
+    expect(ws().cards[cardId]).toMatchObject({ title: '츠텐카쿠', budget: 10_000 });
+    expect(ws().cards[cardId].expenses![0].label).toBeUndefined();
+  });
+
+  it('returns null for an unknown card or a non-finite amount', () => {
+    const cardId = cardSetup();
+    expect(store().addExpense('nope', 1_000)).toBeNull();
+    expect(store().addExpense(cardId, Number.NaN)).toBeNull();
+    expect(store().addExpense(cardId, Number.POSITIVE_INFINITY)).toBeNull();
+    expect(ws().cards[cardId].expenses).toBeUndefined();
+  });
+
+  it('removes one expense and clears the field once the list empties', () => {
+    const cardId = cardSetup();
+    const first = store().addExpense(cardId, 12_000, '점심')!;
+    const second = store().addExpense(cardId, 3_000)!;
+
+    store().removeExpense(cardId, first);
+    expect(ws().cards[cardId].expenses!.map((item) => item.id)).toEqual([second]);
+
+    store().removeExpense(cardId, second);
+    // Back to exactly the shape a pre-M6 card has.
+    expect(ws().cards[cardId].expenses).toBeUndefined();
+  });
+
+  it('is a no-op for an unknown card or expense', () => {
+    const cardId = cardSetup();
+    store().addExpense(cardId, 100);
+    const before = ws();
+    store().removeExpense(cardId, 'nope');
+    store().removeExpense('nope', 'nope');
+    expect(ws()).toBe(before);
+  });
+});
+
+describe('addComment / removeComment (M6)', () => {
+  const cardSetup = (): Id => {
+    const tripId = store().addTrip('오사카');
+    return store().addCard(tripId, columnIds(tripId)[4], { title: '츠텐카쿠' })!;
+  };
+
+  it('appends comments oldest first, trimmed', () => {
+    const cardId = cardSetup();
+    const first = store().addComment(cardId, '  줄 서야 함  ')!;
+    const second = store().addComment(cardId, '야경이 좋아요')!;
+
+    const comments = ws().cards[cardId].comments!;
+    expect(comments.map((item) => item.id)).toEqual([first, second]);
+    expect(comments[0].text).toBe('줄 서야 함');
+    expect(comments[1].at).toBeGreaterThan(0);
+  });
+
+  it('refuses blank text and unknown cards', () => {
+    const cardId = cardSetup();
+    expect(store().addComment(cardId, '   ')).toBeNull();
+    expect(store().addComment('nope', '있음')).toBeNull();
+    expect(ws().cards[cardId].comments).toBeUndefined();
+  });
+
+  it('removes one comment and clears the field once the thread empties', () => {
+    const cardId = cardSetup();
+    const first = store().addComment(cardId, '하나')!;
+    const second = store().addComment(cardId, '둘')!;
+
+    store().removeComment(cardId, first);
+    expect(ws().cards[cardId].comments!.map((item) => item.text)).toEqual(['둘']);
+
+    store().removeComment(cardId, second);
+    expect(ws().cards[cardId].comments).toBeUndefined();
+
+    const before = ws();
+    store().removeComment(cardId, 'nope');
+    expect(ws()).toBe(before);
+  });
+
+  it('keeps 지출 and 코멘트 apart on the same card', () => {
+    const cardId = cardSetup();
+    store().addExpense(cardId, 1_500, '입장료');
+    store().addComment(cardId, '현금만 받아요');
+
+    expect(ws().cards[cardId].expenses).toHaveLength(1);
+    expect(ws().cards[cardId].comments).toHaveLength(1);
+  });
+
+  it('cascade-deletes with the card, ledger and all', () => {
+    const cardId = cardSetup();
+    store().addExpense(cardId, 1_500);
+    store().addComment(cardId, '메모');
+
+    store().deleteCard(cardId);
+    expect(ws().cards[cardId]).toBeUndefined();
+  });
+});

@@ -96,6 +96,20 @@ export function formatTimeRange(startMin: number, durationMin: number): string {
   return `${formatClock(start)}–${endText}`;
 }
 
+const two = (value: number): string => String(value).padStart(2, '0');
+
+/**
+ * `"10/12 14:30"` — the stamp under a 지출 / 코멘트 row (M6).
+ *
+ * Deliberately year-less and locale-free: these rows sit inside a trip that is
+ * days long, and a bare `Intl` call would render differently per device.
+ */
+export function formatStamp(at: number): string {
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getMonth() + 1}/${date.getDate()} ${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'] as const;
 
 /** `"2026-08-23"` → `"8월 23일 (일)"`. Unparseable input is echoed back. */

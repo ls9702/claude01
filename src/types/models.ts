@@ -74,6 +74,30 @@ export interface GeoPoint {
   address?: string;
 }
 
+/**
+ * One amount actually spent on a card (M6).
+ *
+ * `budget` is what the card was *planned* to cost; these are the receipts.
+ * They live on the card rather than on a timeline entry so the number survives
+ * re-scheduling — and so a card placed twice never double-counts.
+ */
+export interface CardExpense {
+  id: Id;
+  /** In the trip's currency. Not rounded — some currencies have cents. */
+  amount: number;
+  /** What it was for; the UI falls back to '지출'. */
+  label?: string;
+  /** When it was recorded. */
+  at: Millis;
+}
+
+/** A free-text note appended to a card, oldest first (M6). */
+export interface CardComment {
+  id: Id;
+  text: string;
+  at: Millis;
+}
+
 /** A brainstorm card: an idea that can be dragged onto the timeline. */
 export interface Card {
   id: Id;
@@ -86,6 +110,15 @@ export interface Card {
   budget?: number;
   /** Default length in minutes used when the card is dropped on a day. */
   defaultDurationMin?: number;
+  /**
+   * Money actually spent on this card (M6). Optional and additive: a card
+   * persisted before M6 simply has no field, and `schemaVersion` stays 1.
+   * Sync merges the card as a whole, so the newest edit of *the card* wins the
+   * whole list — two devices adding an expense at once keep only one list.
+   */
+  expenses?: CardExpense[];
+  /** Comment thread on this card (M6), oldest first. Same LWW caveat. */
+  comments?: CardComment[];
   createdAt: Millis;
   updatedAt: Millis;
 }

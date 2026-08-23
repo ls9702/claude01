@@ -10,8 +10,10 @@ import {
   PX_PER_MIN,
   laneMap,
 } from '../../timeline/layout';
+import type { SpendTotals } from '../../utils/spend';
 import { formatDayDate, minToY } from '../../utils/time';
 import EntryBlock from './EntryBlock';
+import SpendChip from './SpendChip';
 import { HOURS } from './TimeAxis';
 
 /** `label` → date → `N일차`. Kept here so the pager can show the same text. */
@@ -34,6 +36,10 @@ interface DayColumnProps {
   entries: readonly TimelineEntry[];
   cards: Record<Id, Card>;
   columns: Record<Id, BoardColumn>;
+  /** 예산/지출 of this day's cards (M6); the header chip. */
+  spend: SpendTotals;
+  /** Trip currency, for the money chip. */
+  currency: string;
   onOpenEntry: (entry: TimelineEntry) => void;
   onDeleteDay: (day: Day) => void;
   /** Mobile pager: the single visible day fills the width. */
@@ -53,6 +59,8 @@ export default function DayColumn({
   entries,
   cards,
   columns,
+  spend,
+  currency,
   onOpenEntry,
   onDeleteDay,
   fullWidth = false,
@@ -108,6 +116,11 @@ export default function DayColumn({
           </p>
           <p className="truncate text-[10px] text-stone-400">{daySubtitle(day, index)}</p>
         </div>
+        {/* On mobile the pager carries the day's money chip instead — one
+            `day-spend` per visible day, wherever the day heading lives. */}
+        {fullWidth ? null : (
+          <SpendChip totals={spend} currency={currency} testId="day-spend" dayId={day.id} />
+        )}
         <span
           data-testid="timeline-day-count"
           className="rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-stone-500"

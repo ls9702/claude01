@@ -4,6 +4,8 @@ import {
   emptyWorkspace,
   type BoardColumn,
   type Card,
+  type CardComment,
+  type CardExpense,
   type Day,
   type FlightLeg,
   type GeoPoint,
@@ -384,6 +386,21 @@ export interface WorkspaceState {
    */
   moveCard: (cardId: Id, toColumnId: Id, toIndex: number) => void;
 
+  /* --- 지출 / 코멘트 — M6 --------------------------------------------- */
+
+  /**
+   * Appends an expense to a card. Returns its id, or `null` for an unknown
+   * card or a non-finite amount. Editing in place is deliberately missing —
+   * removing and re-adding is enough for a receipt list.
+   */
+  addExpense: (cardId: Id, amount: number, label?: string) => Id | null;
+  /** Drops one expense. No-op when the card or the expense is unknown. */
+  removeExpense: (cardId: Id, expenseId: Id) => void;
+  /** Appends a comment. Returns its id, or `null` for blank text. */
+  addComment: (cardId: Id, text: string) => Id | null;
+  /** Drops one comment. No-op when the card or the comment is unknown. */
+  removeComment: (cardId: Id, commentId: Id) => void;
+
   /* --- 일정 (timeline) — M2a ------------------------------------------ */
 
   /** Appends a sheet to the trip's `sheetOrder`. Returns its id, or `null`. */
@@ -702,6 +719,77 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             draft.columns[target.id] = { ...target, cardOrder: order, updatedAt: now };
             touch<Card>(draft.cards, cardId, { columnId: target.id }, now);
             return true;
+          });
+        },
+
+        /* --- 지출 / 코멘트 (M6) ---------------------------------------- */
+
+        addExpense: (cardId, amount, label) =>
+          run((draft, now) => {
+            const card = draft.cards[cardId];
+            if (!card || !Number.isFinite(amount)) return null;
+
+            const expenseId = newId();
+            const expense: CardExpense = {
+              id: expenseId,
+              amount,
+              label: label?.trim() || undefined,
+              at: now,
+            };
+            touch<Card>(
+              draft.cards,
+              cardId,
+              { expenses: [...(card.expenses ?? []), expense] },
+              now,
+            );
+            return expenseId;
+          }),
+
+        removeExpense: (cardId, expenseId) => {
+          run((draft, now) => {
+            const card = draft.cards[cardId];
+            const kept = (card?.expenses ?? []).filter((item) => item.id !== expenseId);
+            if (!card || kept.length === (card.expenses?.length ?? 0)) return null;
+            // An emptied list goes back to `undefined` — exactly the shape a
+            // card created before M6 has, so nothing downstream sees a special
+            // case.
+            return touch<Card>(
+              draft.cards,
+              cardId,
+              { expenses: kept.length > 0 ? kept : undefined },
+              now,
+            );
+          });
+        },
+
+        addComment: (cardId, text) =>
+          run((draft, now) => {
+            const card = draft.cards[cardId];
+            const body = text.trim();
+            if (!card || body === '') return null;
+
+            const commentId = newId();
+            const comment: CardComment = { id: commentId, text: body, at: now };
+            touch<Card>(
+              draft.cards,
+              cardId,
+              { comments: [...(card.comments ?? []), comment] },
+              now,
+            );
+            return commentId;
+          }),
+
+        removeComment: (cardId, commentId) => {
+          run((draft, now) => {
+            const card = draft.cards[cardId];
+            const kept = (card?.comments ?? []).filter((item) => item.id !== commentId);
+            if (!card || kept.length === (card.comments?.length ?? 0)) return null;
+            return touch<Card>(
+              draft.cards,
+              cardId,
+              { comments: kept.length > 0 ? kept : undefined },
+              now,
+            );
           });
         },
 
