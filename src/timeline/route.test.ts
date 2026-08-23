@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { emptyWorkspace, type GeoPoint, type Id, type Workspace } from '../types/models';
-import { dayRoute, legBearingDeg, legMidpoint, transportColumnId } from './route';
+import {
+  dayRoute,
+  formatDistanceKm,
+  haversineKm,
+  legBearingDeg,
+  legMidpoint,
+  transportColumnId,
+} from './route';
 
 const AT = 1_760_000_000_000;
 
@@ -277,5 +284,51 @@ describe('legBearingDeg / legMidpoint', () => {
 
   it('halves the leg', () => {
     expect(legMidpoint({ lat: 0, lng: 0 }, { lat: 10, lng: 20 })).toEqual({ lat: 5, lng: 10 });
+  });
+});
+
+describe('haversineKm', () => {
+  it('measures a known hop — 난바 → 우메다 is about 4km', () => {
+    const km = haversineKm({ lat: 34.6659, lng: 135.5011 }, { lat: 34.7025, lng: 135.4959 });
+    expect(km).toBeGreaterThan(3.9);
+    expect(km).toBeLessThan(4.2);
+  });
+
+  it('is one degree of latitude ≈ 111km, and symmetric', () => {
+    const north = haversineKm({ lat: 0, lng: 0 }, { lat: 1, lng: 0 });
+    expect(north).toBeGreaterThan(110);
+    expect(north).toBeLessThan(112);
+    expect(haversineKm({ lat: 1, lng: 0 }, { lat: 0, lng: 0 })).toBeCloseTo(north, 9);
+  });
+
+  it('squeezes longitude with latitude', () => {
+    const equator = haversineKm({ lat: 0, lng: 0 }, { lat: 0, lng: 1 });
+    const north60 = haversineKm({ lat: 60, lng: 0 }, { lat: 60, lng: 1 });
+    expect(north60).toBeLessThan(equator * 0.55);
+    expect(north60).toBeGreaterThan(equator * 0.45);
+  });
+
+  it('is 0 for the same point and for garbled coordinates', () => {
+    expect(haversineKm({ lat: 35, lng: 139 }, { lat: 35, lng: 139 })).toBe(0);
+    expect(haversineKm({ lat: Number.NaN, lng: 139 }, { lat: 35, lng: 139 })).toBe(0);
+  });
+});
+
+describe('formatDistanceKm', () => {
+  it('reads metres below a kilometre and km above it', () => {
+    expect(formatDistanceKm(0.85)).toBe('850m');
+    expect(formatDistanceKm(0.333)).toBe('333m');
+    expect(formatDistanceKm(3.44)).toBe('3.4km');
+    expect(formatDistanceKm(12)).toBe('12km');
+    expect(formatDistanceKm(1)).toBe('1km');
+  });
+
+  it('never prints 1000m', () => {
+    expect(formatDistanceKm(0.9999)).toBe('1km');
+  });
+
+  it('is empty for nonsense', () => {
+    expect(formatDistanceKm(Number.NaN)).toBe('');
+    expect(formatDistanceKm(-1)).toBe('');
   });
 });

@@ -37,8 +37,11 @@ export type { SheetFlightOpts } from '../utils/flights';
  * Mutation payload types (the public write API of the workspace)
  * ------------------------------------------------------------------ */
 
-/** Fields of a {@link Trip} that callers may change. */
-export type TripPatch = Partial<Pick<Trip, 'title' | 'currency'>>;
+/**
+ * Fields of a {@link Trip} that callers may change. Passing `undefined` for
+ * `localCurrency` / `fxRate` clears the 현지 통화 pair (M7b).
+ */
+export type TripPatch = Partial<Pick<Trip, 'title' | 'currency' | 'localCurrency' | 'fxRate'>>;
 
 /** Fields of a {@link BoardColumn} that callers may change. */
 export type ColumnPatch = Partial<Pick<BoardColumn, 'name' | 'color' | 'icon'>>;

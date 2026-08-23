@@ -19,6 +19,21 @@ export interface Trip {
   title: string;
   /** ISO 4217-ish currency code used for budget display, e.g. `KRW`. */
   currency: string;
+  /**
+   * The currency spent on the ground, when it differs from {@link Trip.currency}
+   * (M7b). Optional and additive — a trip saved before M7b simply has no field
+   * and `schemaVersion` stays 1.
+   */
+  localCurrency?: string;
+  /**
+   * How many units of {@link Trip.currency} one unit of
+   * {@link Trip.localCurrency} costs — `9.3` for `9.3 KRW per 1 JPY`.
+   *
+   * Used **only** to convert an amount as it is typed in; the stored
+   * {@link CardExpense} is always in the trip's own currency, so changing the
+   * rate later never rewrites a receipt that was already recorded.
+   */
+  fxRate?: number;
   /** Ordered {@link BoardColumn} ids for the 보드 tab. */
   columnOrder: Id[];
   /** Ordered {@link Sheet} ids for the 일정 tab. */

@@ -3,6 +3,8 @@ import { divIcon, type DivIcon } from 'leaflet';
 import { Marker, Polyline, Popup } from 'react-leaflet';
 import type { BoardColumn, Card, Id } from '../../types/models';
 import {
+  formatDistanceKm,
+  haversineKm,
   legBearingDeg,
   legMidpoint,
   type DayRoute,
@@ -187,6 +189,15 @@ export default function RouteLayer({ drawings, cards, columns }: RouteLayerProps
                       </p>
                       <p className="mt-0.5 text-[11px] tabular-nums text-stone-500">
                         {legTiming(leg)}
+                      </p>
+                      {/* The same straight-line fact the 일정 tab's gap chip
+                          states — one measurement, two places to read it. */}
+                      <p
+                        data-testid="route-leg-distance"
+                        data-km={haversineKm(leg.from, leg.to).toFixed(2)}
+                        className="text-[11px] tabular-nums text-stone-500"
+                      >
+                        ↕ 직선 {formatDistanceKm(haversineKm(leg.from, leg.to))}
                       </p>
                       {ride ? (
                         <p

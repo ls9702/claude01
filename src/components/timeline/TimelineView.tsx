@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PlanDndContext from '../../dnd/PlanDndContext';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
+import { useNowTick } from '../../hooks/useNowTick';
 import { deleteWithUndo } from '../../stores/undoDelete';
 import { useUndoStore } from '../../stores/undoStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -14,11 +15,15 @@ import type {
   TimelineEntry,
 } from '../../types/models';
 import { AXIS_PX, HEADER_PX, INITIAL_SCROLL_MIN, PX_PER_MIN } from '../../timeline/layout';
+import { dayGaps, type DayGap } from '../../timeline/gap';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
+import { currentAndNext, nowMin, todayDayId, todayIso } from '../../timeline/today';
 import { daySpend, emptySpend, sheetSpend, type SpendTotals } from '../../utils/spend';
-import { minToY } from '../../utils/time';
+import { formatTimeRange, minToY } from '../../utils/time';
 import ConfirmDialog from '../common/ConfirmDialog';
 import BoardRail from './BoardRail';
+import NowBar from './NowBar';
+import QuickSpendSheet from './QuickSpendSheet';
 import DayColumn, { dayTitle } from './DayColumn';
 import SpendChip from './SpendChip';
 import EntryDetailSheet from './EntryDetailSheet';
@@ -31,6 +36,7 @@ import UnscheduledTray from './UnscheduledTray';
 
 type Dialog =
   | { kind: 'entry'; entry: TimelineEntry }
+  | { kind: 'quick-spend'; entry: TimelineEntry }
   | { kind: 'day-delete'; day: Day; index: number }
   | { kind: 'schedule'; card: Card }
   | { kind: 'sheet-create' }
@@ -123,8 +129,14 @@ export default function TimelineView() {
   const [pageIndex, setPageIndex] = useState(0);
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const scrolledRef = useRef(false);
+  /** `tripId:sheetId` this view has already positioned itself for. */
+  const positionedRef = useRef<string | null>(null);
   const seededTripRef = useRef<Id | null>(null);
+
+  /** 오늘 모드's clock: one `Date` per minute, paused while the tab is hidden. */
+  const now = useNowTick();
+  const today = todayIso(now);
+  const minuteNow = nowMin(now);
 
   const trip = activeTripId ? workspace.trips[activeTripId] : undefined;
 
@@ -209,6 +221,31 @@ export default function TimelineView() {
     [sheet, workspace],
   );
 
+  /** dayId → straight-line 이동 갭 between its consecutive located stops (M7b). */
+  const gapsByDay = useMemo<Record<Id, DayGap[]>>(() => {
+    const byDay: Record<Id, DayGap[]> = {};
+    for (const day of days) byDay[day.id] = dayGaps(workspace, day.id);
+    return byDay;
+  }, [days, workspace]);
+
+  /**
+   * 오늘 모드 (M7b): the day of the **active sheet** whose date is today, if any.
+   * Everything today-flavoured — the chip, the now line, the 지금/다음 bar —
+   * hangs off this one id being non-null.
+   */
+  const todayId = useMemo(
+    () => todayDayId(workspace, sheet?.id, today),
+    [workspace, sheet?.id, today],
+  );
+
+  const nowNext = useMemo(
+    () =>
+      todayId
+        ? currentAndNext(entriesByDay[todayId] ?? [], workspace.cards, minuteNow)
+        : {},
+    [todayId, entriesByDay, workspace.cards, minuteNow],
+  );
+
   /** cardId → total entries (badge) and their per-sheet split (popover). */
   const { counts: scheduledCounts, bySheet: scheduleBreakdowns } = useMemo(
     () => summarizeSchedule(workspace, trip?.id),
@@ -236,13 +273,50 @@ export default function TimelineView() {
     if (safePage !== pageIndex) setPageIndex(safePage);
   }, [safePage, pageIndex]);
 
-  /** Open on 06:00 rather than midnight — nobody plans from 00:00. */
-  useEffect(() => {
+  /** Puts `minute` an hour below the top of the grid (never above midnight). */
+  const scrollToMinute = useCallback((minute: number) => {
     const scroller = scrollerRef.current;
-    if (!scroller || scrolledRef.current || days.length === 0) return;
-    scroller.scrollTop = minToY(INITIAL_SCROLL_MIN, PX_PER_MIN);
-    scrolledRef.current = true;
-  }, [days.length]);
+    if (!scroller) return;
+    scroller.scrollTop = minToY(Math.max(minute, 0), PX_PER_MIN);
+  }, []);
+
+  /** Desktop: brings one day column into the horizontally scrolling grid. */
+  const revealDay = useCallback((dayId: Id) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const column = scroller.querySelector<HTMLElement>(
+      `[data-testid="timeline-day"][data-day-id="${dayId}"]`,
+    );
+    if (column) scroller.scrollLeft = Math.max(column.offsetLeft - AXIS_PX, 0);
+  }, []);
+
+  /** Selects today's day and parks the grid an hour before the current minute. */
+  const jumpToToday = useCallback(
+    (dayId: Id, minute: number) => {
+      const index = days.findIndex((day) => day.id === dayId);
+      if (index >= 0) setPageIndex(index);
+      scrollToMinute(minute - 60);
+      revealDay(dayId);
+    },
+    [days, scrollToMinute, revealDay],
+  );
+
+  /**
+   * First paint of a trip+sheet: open on **today** when the sheet holds it,
+   * otherwise on 06:00 — nobody plans from 00:00.
+   *
+   * Guarded by `positionedRef` so it lands exactly once per sheet: after that
+   * the grid belongs to the user, and a minute tick must never yank it back.
+   */
+  useEffect(() => {
+    if (!sheet || days.length === 0 || !scrollerRef.current) return;
+    const key = `${trip?.id ?? ''}:${sheet.id}`;
+    if (positionedRef.current === key) return;
+    positionedRef.current = key;
+
+    if (todayId) jumpToToday(todayId, minuteNow);
+    else scrollToMinute(INITIAL_SCROLL_MIN);
+  }, [trip?.id, sheet, days.length, todayId, minuteNow, jumpToToday, scrollToMinute]);
 
   if (!trip) return <TripPrompt />;
 
@@ -250,6 +324,8 @@ export default function TimelineView() {
   const gridHeight = isDesktop ? 'calc(100dvh - 15rem)' : 'calc(100dvh - 21rem)';
   const visibleDays = isDesktop ? days : days.slice(safePage, safePage + 1);
   const dialogEntry = dialog?.kind === 'entry' ? workspace.entries[dialog.entry.id] : undefined;
+  const quickSpendCard =
+    dialog?.kind === 'quick-spend' ? workspace.cards[dialog.entry.cardId] : undefined;
 
   const addDayToSheet = () => {
     if (!sheet) return;
@@ -301,6 +377,23 @@ export default function TimelineView() {
             onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
           />
         </div>
+        {todayId ? (
+          <button
+            type="button"
+            data-testid="today-chip"
+            data-day-id={todayId}
+            data-active={days[safePage]?.id === todayId ? 'true' : 'false'}
+            onClick={() => jumpToToday(todayId, minuteNow)}
+            className={[
+              'mb-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors',
+              days[safePage]?.id === todayId
+                ? 'bg-rose-500 text-white'
+                : 'bg-rose-100 text-rose-600 hover:bg-rose-200',
+            ].join(' ')}
+          >
+            오늘
+          </button>
+        ) : null}
         <SpendChip
           totals={sheetTotals}
           currency={trip.currency}
@@ -378,6 +471,18 @@ export default function TimelineView() {
             </div>
           ) : null}
 
+          {todayId ? (
+            <NowBar
+              current={nowNext.current}
+              next={nowNext.next}
+              gapMin={nowNext.gapMin}
+              cards={workspace.cards}
+              columns={workspace.columns}
+              onSpend={(entry) => setDialog({ kind: 'quick-spend', entry })}
+              onOpen={(entry) => setDialog({ kind: 'entry', entry })}
+            />
+          ) : null}
+
           <PlanDndContext trip={trip} columns={columns}>
             <div className="flex items-start border-y border-stone-200 bg-white">
               {/* Mounted on desktop only: the rail and the tray draw the same
@@ -425,6 +530,8 @@ export default function TimelineView() {
                         spend={spendByDay[day.id] ?? emptySpend()}
                         currency={trip.currency}
                         fullWidth={!isDesktop}
+                        nowMin={day.id === todayId ? minuteNow : undefined}
+                        gaps={gapsByDay[day.id]}
                         onOpenEntry={(entry) => setDialog({ kind: 'entry', entry })}
                         onDeleteDay={(target) =>
                           setDialog({ kind: 'day-delete', day: target, index })
@@ -453,6 +560,8 @@ export default function TimelineView() {
           entry={dialogEntry}
           card={workspace.cards[dialogEntry.cardId]}
           currency={trip.currency}
+          localCurrency={trip.localCurrency}
+          fxRate={trip.fxRate}
           dayTitle={(() => {
             const index = days.findIndex((day) => day.id === dialogEntry.dayId);
             return index >= 0 ? dayTitle(days[index], index) : '';
@@ -463,6 +572,21 @@ export default function TimelineView() {
             setDialog(null);
             setTab('board');
           }}
+        />
+      ) : null}
+
+      {quickSpendCard ? (
+        <QuickSpendSheet
+          card={quickSpendCard}
+          currency={trip.currency}
+          localCurrency={trip.localCurrency}
+          fxRate={trip.fxRate}
+          subtitle={
+            dialog?.kind === 'quick-spend'
+              ? formatTimeRange(dialog.entry.startMin, dialog.entry.durationMin)
+              : undefined
+          }
+          onClose={() => setDialog(null)}
         />
       ) : null}
 

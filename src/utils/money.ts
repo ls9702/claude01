@@ -34,6 +34,36 @@ export function formatBudget(amount: number, currency: string): string {
   return suffix ? `${value}${suffix}` : `${value} ${code}`;
 }
 
+/**
+ * Currency symbols used to *prefix* an amount, e.g. `` `${symbolFor('JPY')}1,200` ``
+ * → `¥1,200` (M7b, 현지 통화).
+ *
+ * A code with no symbol falls back to the code plus a space — `THB 1,200` —
+ * so the result is always something that can be glued straight onto a number.
+ */
+const SYMBOLS: Record<string, string> = {
+  JPY: '¥',
+  CNY: '¥',
+  USD: '$',
+  EUR: '€',
+  KRW: '₩',
+  GBP: '£',
+};
+
+/** `'JPY'` → `'¥'`; an unknown code → `'THB '` (code + space). */
+export function symbolFor(code: string): string {
+  const upper = (code || '').trim().toUpperCase();
+  if (!upper) return '';
+  return SYMBOLS[upper] ?? `${upper} `;
+}
+
+/** `1200` + `'JPY'` → `"¥1,200"` — the 현지 통화 half of a 지출 label. */
+export function formatLocalAmount(amount: number, code: string): string {
+  if (!Number.isFinite(amount)) return '';
+  const rounded = Math.round(amount * 100) / 100;
+  return `${symbolFor(code)}${rounded.toLocaleString('ko-KR')}`;
+}
+
 /** `12.3` → `"12.3"`, `12.0` → `"12"` — one decimal, never a trailing `.0`. */
 const oneDecimal = (value: number): string =>
   (Math.round(value * 10) / 10).toFixed(1).replace(/\.0$/, '');

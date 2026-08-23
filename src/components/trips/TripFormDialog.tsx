@@ -12,6 +12,10 @@ import {
 export interface TripFormValues {
   title: string;
   currency: string;
+  /** 현지 통화 (선택) — absent clears the pair. */
+  localCurrency?: string;
+  /** 기준통화 per 1 local unit. Absent (or ≤ 0) clears the pair. */
+  fxRate?: number;
 }
 
 interface TripFormDialogProps {
@@ -25,11 +29,25 @@ interface TripFormDialogProps {
 export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDialogProps) {
   const [title, setTitle] = useState(trip?.title ?? '');
   const [currency, setCurrency] = useState(trip?.currency ?? 'KRW');
+  const [localCurrency, setLocalCurrency] = useState(trip?.localCurrency ?? '');
+  const [rate, setRate] = useState(trip?.fxRate != null ? String(trip.fxRate) : '');
+  // Opens itself for a trip that already uses the pair, stays folded otherwise.
+  const [localOpen, setLocalOpen] = useState(Boolean(trip?.localCurrency));
+
   const canSubmit = title.trim().length > 0;
+  const parsedRate = Number(rate.trim().replace(/,/g, ''));
+  const usableRate = Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : undefined;
+  /** Both halves or neither — half a conversion is worse than none. */
+  const pairIsSet = Boolean(localCurrency) && usableRate !== undefined;
 
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit({ title: title.trim(), currency });
+    onSubmit({
+      title: title.trim(),
+      currency,
+      localCurrency: pairIsSet ? localCurrency : undefined,
+      fxRate: pairIsSet ? usableRate : undefined,
+    });
   };
 
   return (
@@ -94,6 +112,58 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
             ))}
           </select>
           <p className="mt-1.5 text-xs text-stone-400">카드 예산을 이 통화로 표시해요.</p>
+        </div>
+
+        <div className="rounded-xl border border-stone-200">
+          <button
+            type="button"
+            data-testid="trip-local-toggle"
+            aria-expanded={localOpen}
+            data-open={localOpen ? 'true' : 'false'}
+            onClick={() => setLocalOpen((open) => !open)}
+            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+          >
+            <span className="text-xs font-semibold text-stone-600">현지 통화 (선택)</span>
+            <span className="text-xs text-stone-400">
+              {pairIsSet ? `${localCurrency} · ${usableRate}` : '없음'} {localOpen ? '▴' : '▾'}
+            </span>
+          </button>
+
+          {localOpen ? (
+            <div className="space-y-2 border-t border-stone-100 px-3 pb-3 pt-2">
+              <select
+                data-testid="trip-local-currency-select"
+                aria-label="현지 통화"
+                value={localCurrency}
+                onChange={(event) => setLocalCurrency(event.target.value)}
+                className={`${INPUT_CLASS} mt-0`}
+              >
+                <option value="">사용 안 함</option>
+                {CURRENCIES.filter((option) => option.code !== currency).map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                data-testid="trip-local-rate-input"
+                aria-label="환율"
+                value={rate}
+                inputMode="decimal"
+                onChange={(event) => setRate(event.target.value)}
+                placeholder="예) 9.3"
+                className={`${INPUT_CLASS} mt-0`}
+              />
+
+              <p data-testid="trip-local-example" className="text-xs leading-relaxed text-stone-400">
+                1 {localCurrency || 'JPY'} = {usableRate ?? 9.3} {currency}
+                <br />
+                지출을 현지 금액으로 적으면 이 환율로 환산해서 저장해요. 이미 적어둔 지출은
+                그대로 남아요.
+              </p>
+            </div>
+          ) : null}
         </div>
 
         {/* Lets Enter submit without showing a second button. */}

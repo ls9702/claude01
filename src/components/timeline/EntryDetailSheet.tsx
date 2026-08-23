@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import type { Card, TimelineEntry } from '../../types/models';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import { formatBudget } from '../../utils/money';
-import { cardCommentCount, cardSpent } from '../../utils/spend';
 import {
   DAY_MIN,
   MIN_ENTRY_MIN,
@@ -10,6 +8,7 @@ import {
   formatDuration,
   formatTimeRange,
 } from '../../utils/time';
+import CardLedger, { type LocalMoney } from '../common/CardLedger';
 import Sheet from '../common/Sheet';
 import {
   DANGER_TEXT_BUTTON_CLASS,
@@ -60,12 +59,12 @@ function Stepper({ label, value, testId, onStep }: StepperProps) {
   );
 }
 
-interface EntryDetailSheetProps {
+interface EntryDetailSheetProps extends LocalMoney {
   entry: TimelineEntry;
   card?: Card;
   /** Day heading shown in the sheet subtitle. */
   dayTitle: string;
-  /** Trip currency, for the read-only 지출 line. Defaults to `KRW`. */
+  /** Trip currency, for the 지출 기록 section. Defaults to `KRW`. */
   currency?: string;
   onClose: () => void;
   /** Deletes with an 실행 취소 offer — owned by the view. */
@@ -85,6 +84,8 @@ export default function EntryDetailSheet({
   card,
   dayTitle,
   currency = 'KRW',
+  localCurrency,
+  fxRate,
   onClose,
   onDelete,
   onOpenBoard,
@@ -149,27 +150,6 @@ export default function EntryDetailSheet({
           </p>
         ) : null}
 
-        {/* Read-only: the card owns its money and its thread, so editing them
-            here would fork the same numbers across two sheets. */}
-        {cardSpent(card) > 0 || cardCommentCount(card) > 0 ? (
-          <p
-            data-testid="entry-spend"
-            data-spent={cardSpent(card)}
-            data-comments={cardCommentCount(card)}
-            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-stone-50 px-3 py-2.5 text-xs text-stone-500"
-          >
-            {cardSpent(card) > 0 ? (
-              <span className="font-semibold tabular-nums text-stone-700">
-                💸 {formatBudget(cardSpent(card), currency)}
-              </span>
-            ) : null}
-            {cardCommentCount(card) > 0 ? (
-              <span className="tabular-nums">💬 {cardCommentCount(card)}</span>
-            ) : null}
-            <span className="text-[11px] text-stone-400">보드에서 카드를 열면 수정돼요</span>
-          </p>
-        ) : null}
-
         <Stepper
           label="시작 시각"
           testId="entry-start"
@@ -198,6 +178,18 @@ export default function EntryDetailSheet({
             className={`${INPUT_CLASS} resize-none`}
           />
         </div>
+
+        {/* The card owns its money and its thread, so this is the *same*
+            ledger the board shows — not a copy of it. Recording a receipt from
+            the day you are standing in is the whole point of 오늘 모드. */}
+        {card ? (
+          <CardLedger
+            card={card}
+            currency={currency}
+            localCurrency={localCurrency}
+            fxRate={fxRate}
+          />
+        ) : null}
 
         {onOpenBoard ? (
           <button

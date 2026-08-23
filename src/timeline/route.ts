@@ -72,9 +72,57 @@ export function transportColumnId(workspace: Workspace, tripId: Id | undefined):
   return byName?.id ?? null;
 }
 
-/** Sort key: start time, then creation, then id — always deterministic. */
-const byStart = (a: TimelineEntry, b: TimelineEntry): number =>
+/**
+ * Sort key: start time, then creation, then id — always deterministic.
+ *
+ * Exported because `timeline/gap.ts` walks the very same entry list to map a
+ * {@link RouteStop} back onto the entry that produced it; the two orderings
+ * must be the identical one, not merely similar.
+ */
+export const byStart = (a: TimelineEntry, b: TimelineEntry): number =>
   a.startMin - b.startMin || a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1);
+
+/** Mean Earth radius, in kilometres. */
+const EARTH_RADIUS_KM = 6371;
+
+const RAD = Math.PI / 180;
+
+/**
+ * Great-circle distance between two points, in kilometres (M7b).
+ *
+ * The 이동 갭 칩 states a **straight-line** fact — no roads, no timetable — so
+ * the haversine is not an approximation of the answer, it *is* the answer.
+ * Non-finite coordinates degrade to `0` rather than `NaN`.
+ */
+export function haversineKm(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  if (![a.lat, a.lng, b.lat, b.lng].every((value) => Number.isFinite(value))) return 0;
+
+  const dLat = (b.lat - a.lat) * RAD;
+  const dLng = (b.lng - a.lng) * RAD;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * RAD) * Math.cos(b.lat * RAD) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * `3.44` → `"3.4km"`, `12` → `"12km"`, `0.85` → `"850m"`.
+ *
+ * Under a kilometre the number reads in metres, because `0.9km` is a distance
+ * nobody quotes. Shared by the gap chip and the map's leg popup so the same hop
+ * never reads two different ways.
+ */
+export function formatDistanceKm(km: number): string {
+  if (!Number.isFinite(km) || km < 0) return '';
+  if (km < 1) {
+    const metres = Math.round(km * 1000);
+    if (metres < 1000) return `${metres}m`;
+  }
+  return `${(Math.round(km * 10) / 10).toFixed(1).replace(/\.0$/, '')}km`;
+}
 
 /**
  * Bearing from `from` to `to` in degrees clockwise from north (`0` = up).

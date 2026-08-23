@@ -93,6 +93,45 @@ export function sheetSpend(workspace: Workspace, sheetId: Id): SpendTotals {
   return totalOf(workspace, cardIds);
 }
 
+/**
+ * 예산/지출 of a whole trip: over the unique cards scheduled anywhere in it —
+ * on any day of any sheet (M7b, 여행 결산).
+ *
+ * Same de-duplication rule as {@link sheetSpend}, one level up: a card that
+ * appears on two sheets (the 플랜 A / 플랜 B of the same hotel) is one card and
+ * one amount, so the 결산 is never the sum of the sheet chips.
+ */
+export function tripSpend(workspace: Workspace, tripId: Id): SpendTotals {
+  if (!workspace.trips[tripId]) return emptySpend();
+
+  const dayIds = new Set<Id>();
+  for (const day of Object.values(workspace.days)) {
+    if (day.tripId === tripId) dayIds.add(day.id);
+  }
+
+  const cardIds = new Set<Id>();
+  for (const entry of Object.values(workspace.entries)) {
+    if (dayIds.has(entry.dayId)) cardIds.add(entry.cardId);
+  }
+  return totalOf(workspace, cardIds);
+}
+
+/** The unique cards {@link tripSpend} counted, as ids — for the 결산 breakdowns. */
+export function tripCardIds(workspace: Workspace, tripId: Id): Id[] {
+  if (!workspace.trips[tripId]) return [];
+
+  const dayIds = new Set<Id>();
+  for (const day of Object.values(workspace.days)) {
+    if (day.tripId === tripId) dayIds.add(day.id);
+  }
+
+  const cardIds = new Set<Id>();
+  for (const entry of Object.values(workspace.entries)) {
+    if (dayIds.has(entry.dayId) && workspace.cards[entry.cardId]) cardIds.add(entry.cardId);
+  }
+  return [...cardIds];
+}
+
 /** True when there is any money to show at all. */
 export const hasSpend = (totals: SpendTotals): boolean =>
   totals.spent > 0 || totals.budget > 0;

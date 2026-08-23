@@ -247,6 +247,8 @@ export default function BoardView() {
           card={dialog.card}
           columnName={columnNameOf(dialog.card.columnId)}
           currency={trip.currency}
+          localCurrency={trip.localCurrency}
+          fxRate={trip.fxRate}
           scheduledCount={scheduledCounts[dialog.card.id] ?? 0}
           onSubmit={submitCard}
           onSchedule={() => setDialog({ kind: 'card-schedule', card: dialog.card })}

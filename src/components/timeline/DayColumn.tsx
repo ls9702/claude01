@@ -3,6 +3,8 @@ import { useDroppable } from '@dnd-kit/core';
 import { useRegisterDayGrid } from '../../dnd/PlanDndContext';
 import { DND_DAY, dayDroppableId } from '../../dnd/planDnd';
 import type { BoardColumn, Card, Day, Id, TimelineEntry } from '../../types/models';
+import type { DayGap } from '../../timeline/gap';
+import { formatDistanceKm } from '../../timeline/route';
 import {
   DAY_COLUMN_PX,
   DAY_HEIGHT_PX,
@@ -11,7 +13,7 @@ import {
   laneMap,
 } from '../../timeline/layout';
 import type { SpendTotals } from '../../utils/spend';
-import { formatDayDate, minToY } from '../../utils/time';
+import { formatClock, formatDayDate, minToY } from '../../utils/time';
 import EntryBlock from './EntryBlock';
 import SpendChip from './SpendChip';
 import { HOURS } from './TimeAxis';
@@ -44,6 +46,13 @@ interface DayColumnProps {
   onDeleteDay: (day: Day) => void;
   /** Mobile pager: the single visible day fills the width. */
   fullWidth?: boolean;
+  /**
+   * Minutes from midnight of the red 현재 시각 line (M7b). Only the day that
+   * *is* today gets one — on any other column the line would be a lie.
+   */
+  nowMin?: number;
+  /** Straight-line gaps between consecutive located stops (M7b). */
+  gaps?: readonly DayGap[];
 }
 
 /**
@@ -64,6 +73,8 @@ export default function DayColumn({
   onOpenEntry,
   onDeleteDay,
   fullWidth = false,
+  nowMin,
+  gaps,
 }: DayColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const headerRef = useRef<HTMLElement | null>(null);
@@ -92,6 +103,8 @@ export default function DayColumn({
   }, [menuOpen]);
 
   const lanes = laneMap(entries);
+  const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+  const showNow = nowMin !== undefined && Number.isFinite(nowMin);
 
   return (
     <section
@@ -189,6 +202,56 @@ export default function DayColumn({
             />
           );
         })}
+
+        {/* 이동 갭: a straight-line fact between two located stops, parked at
+            the midpoint of the empty stretch. `pointer-events-none` keeps the
+            grid's drop target underneath it intact. */}
+        {(gaps ?? []).map((gap) => {
+          const after = entryById.get(gap.afterEntryId);
+          if (!after) return null;
+          const midMin = after.startMin + after.durationMin + gap.gapMin / 2;
+          const distance = formatDistanceKm(gap.distanceKm);
+          if (!distance) return null;
+
+          return (
+            <div
+              key={`gap-${gap.afterEntryId}`}
+              data-testid="gap-chip"
+              data-after={gap.afterEntryId}
+              data-km={gap.distanceKm.toFixed(2)}
+              data-impossible={gap.impossible ? 'true' : 'false'}
+              style={{ top: minToY(midMin, PX_PER_MIN) }}
+              className="pointer-events-none absolute left-1/2 z-10 -translate-x-1/2 -translate-y-1/2"
+            >
+              <span
+                className={[
+                  'block max-w-[13rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums',
+                  gap.impossible
+                    ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300'
+                    : 'bg-stone-100/90 text-stone-500',
+                ].join(' ')}
+              >
+                ↕ 직선 {distance}
+                {gap.impossible ? ' · 시간이 부족해요' : ''}
+              </span>
+            </div>
+          );
+        })}
+
+        {showNow ? (
+          <div
+            data-testid="now-line"
+            data-min={Math.round(nowMin as number)}
+            aria-hidden="true"
+            style={{ top: minToY(nowMin as number, PX_PER_MIN) }}
+            className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+          >
+            <span className="rounded-full bg-rose-500 px-1 py-px text-[9px] font-bold leading-none text-white tabular-nums">
+              {formatClock(nowMin as number)}
+            </span>
+            <span className="h-px flex-1 bg-rose-500" />
+          </div>
+        ) : null}
       </div>
     </section>
   );

@@ -177,10 +177,20 @@ test('일정표가 일자별·시트별 지출 합계를 보여준다', async ({
   await expect(sheetChip).toHaveAttribute('data-spent', '15000');
   await expect(sheetChip).toHaveAttribute('data-budget', '20000');
 
-  // The entry sheet echoes the card's ledger, read-only.
+  // The entry sheet carries the card's *live* ledger (M7b) — the same numbers,
+  // and a receipt can be recorded without walking back to the board.
   await page.getByTestId('timeline-entry').click();
-  await expect(page.getByTestId('entry-spend')).toHaveAttribute('data-spent', '15000');
-  await expect(page.getByTestId('entry-spend')).toContainText('15,000원');
+  const entrySheet = page.getByTestId('entry-sheet');
+  await expect(entrySheet.getByTestId('card-expense-total')).toHaveAttribute('data-total', '15000');
+  await expect(entrySheet.getByTestId('card-expense-row')).toHaveCount(2);
+
+  await entrySheet.getByTestId('card-expense-amount-input').fill('1000');
+  await entrySheet.getByTestId('card-expense-add').click();
+  await expect(entrySheet.getByTestId('card-expense-row')).toHaveCount(3);
+  await expect(entrySheet.getByTestId('card-expense-total')).toHaveAttribute('data-total', '16000');
+  // Undone right here, so the rest of the test still speaks about 15,000원.
+  await entrySheet.getByTestId('card-expense-remove').last().click();
+  await expect(entrySheet.getByTestId('card-expense-total')).toHaveAttribute('data-total', '15000');
   await page.getByTestId('sheet-close').click();
 
   // Removing a receipt flows all the way back to the day chip.

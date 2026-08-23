@@ -287,6 +287,9 @@ test('일수 모드로 날짜 없는 3일짜리 시트를 만든다', async ({ p
   await expect(page.getByTestId('timeline-day')).toHaveCount(3);
   await expect(page.getByTestId('timeline-day-title').first()).toHaveText('1일차');
   await expect(page.getByTestId('timeline-day-title').last()).toHaveText('3일차');
+  // A sheet with no dates can never be "today", whatever the clock says (M7b).
+  await expect(page.getByTestId('today-chip')).toHaveCount(0);
+  await expect(page.getByTestId('now-bar')).toHaveCount(0);
   // No flights, so no ✈️ cards were created.
   await expect(page.getByTestId('timeline-rail').getByTestId('board-card')).toHaveCount(0);
 

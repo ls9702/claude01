@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COLORS, COLOR_HEX, COLOR_TOKENS, colorClasses, colorHex } from './colors';
-import { formatBudget, formatCompactAmount } from './money';
+import { formatBudget, formatCompactAmount, formatLocalAmount, symbolFor } from './money';
 import { formatClock, formatDuration, formatStamp } from './time';
 
 describe('formatDuration', () => {
@@ -95,5 +95,27 @@ describe('colors', () => {
     }
     expect(colorHex('violet')).toBe(COLOR_HEX.violet);
     expect(colorHex('chartreuse')).toBe(COLOR_HEX.slate);
+  });
+});
+
+describe('symbolFor / formatLocalAmount', () => {
+  it('knows the handful of symbols the 현지 통화 toggle needs', () => {
+    expect(symbolFor('JPY')).toBe('¥');
+    expect(symbolFor('usd')).toBe('$');
+    expect(symbolFor('EUR')).toBe('€');
+    expect(symbolFor('KRW')).toBe('₩');
+    expect(symbolFor('GBP')).toBe('£');
+  });
+
+  it('falls back to the code plus a space, so it still glues onto a number', () => {
+    expect(symbolFor('THB')).toBe('THB ');
+    expect(`${symbolFor('THB')}1,200`).toBe('THB 1,200');
+    expect(symbolFor('')).toBe('');
+  });
+
+  it('formats the label prefix a 지출 keeps', () => {
+    expect(formatLocalAmount(1200, 'JPY')).toBe('¥1,200');
+    expect(formatLocalAmount(12.5, 'USD')).toBe('$12.5');
+    expect(formatLocalAmount(Number.NaN, 'JPY')).toBe('');
   });
 });

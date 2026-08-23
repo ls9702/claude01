@@ -7,6 +7,8 @@ import {
   emptySpend,
   hasSpend,
   sheetSpend,
+  tripCardIds,
+  tripSpend,
 } from './spend';
 
 const AT = 1_760_000_000_000;
@@ -208,6 +210,95 @@ describe('sheetSpend', () => {
 
   it('is zero for an unknown sheet', () => {
     expect(sheetSpend(scaffold(), 'nope')).toEqual({ budget: 0, spent: 0 });
+  });
+});
+
+describe('tripSpend', () => {
+  /** Adds a second sheet with one day (`d9`) to the scaffold. */
+  function withSecondSheet(ws: Workspace): Workspace {
+    ws.sheets.s2 = {
+      id: 's2',
+      tripId: 't1',
+      name: '플랜 B',
+      dayOrder: ['d9'],
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    ws.days.d9 = {
+      id: 'd9',
+      tripId: 't1',
+      sheetId: 's2',
+      label: '1일차',
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    ws.trips.t1.sheetOrder.push('s2');
+    return ws;
+  }
+
+  it('adds the whole trip up across its sheets', () => {
+    const ws = withSecondSheet(scaffold());
+    addCard(ws, 'k1', { budget: 10000, expenses: [12000] });
+    addCard(ws, 'k2', { budget: 7000, expenses: [800] });
+    place(ws, 'e1', 'k1', 'd1');
+    place(ws, 'e2', 'k2', 'd9');
+
+    expect(tripSpend(ws, 't1')).toEqual({ budget: 17000, spent: 12800 });
+  });
+
+  it('counts a card placed on two different sheets only once', () => {
+    const ws = withSecondSheet(scaffold());
+    addCard(ws, 'k1', { budget: 10000, expenses: [12000] });
+    place(ws, 'e1', 'k1', 'd1');
+    place(ws, 'e2', 'k1', 'd9');
+
+    // Each sheet reports the card…
+    expect(sheetSpend(ws, 's1')).toEqual({ budget: 10000, spent: 12000 });
+    expect(sheetSpend(ws, 's2')).toEqual({ budget: 10000, spent: 12000 });
+    // …and the trip is not their sum.
+    expect(tripSpend(ws, 't1')).toEqual({ budget: 10000, spent: 12000 });
+  });
+
+  it('leaves an unscheduled card out, the way the day/sheet chips do', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 10000, expenses: [12000] });
+    addCard(ws, 'idea', { budget: 999, expenses: [999] });
+    place(ws, 'e1', 'k1', 'd1');
+
+    expect(tripSpend(ws, 't1')).toEqual({ budget: 10000, spent: 12000 });
+  });
+
+  it('keeps another trip out of it', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 10000, expenses: [12000] });
+    place(ws, 'e1', 'k1', 'd1');
+
+    ws.trips.t2 = { ...ws.trips.t1, id: 't2', sheetOrder: [] };
+    ws.days.dx = { ...ws.days.d1, id: 'dx', tripId: 't2' };
+    ws.cards.k9 = { ...ws.cards.k1, id: 'k9', tripId: 't2', budget: 500 };
+    place(ws, 'e9', 'k9', 'dx');
+
+    expect(tripSpend(ws, 't1')).toEqual({ budget: 10000, spent: 12000 });
+    expect(tripSpend(ws, 't2')).toEqual({ budget: 500, spent: 12000 });
+  });
+
+  it('is zero for an unknown trip', () => {
+    expect(tripSpend(scaffold(), 'nope')).toEqual({ budget: 0, spent: 0 });
+  });
+});
+
+describe('tripCardIds', () => {
+  it('lists each counted card exactly once, skipping dangling entries', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { expenses: [100] });
+    addCard(ws, 'k2', { expenses: [200] });
+    place(ws, 'e1', 'k1', 'd1');
+    place(ws, 'e2', 'k1', 'd2');
+    place(ws, 'e3', 'k2', 'd2');
+    place(ws, 'e4', 'ghost', 'd2');
+
+    expect(tripCardIds(ws, 't1').sort()).toEqual(['k1', 'k2']);
+    expect(tripCardIds(ws, 'nope')).toEqual([]);
   });
 });
 

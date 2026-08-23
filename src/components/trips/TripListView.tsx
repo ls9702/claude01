@@ -6,11 +6,13 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Trip } from '../../types/models';
 import ConfirmDialog from '../common/ConfirmDialog';
 import TripFormDialog, { type TripFormValues } from './TripFormDialog';
+import TripRecapSheet from './TripRecapSheet';
 
 type Dialog =
   | { kind: 'create' }
   | { kind: 'edit'; trip: Trip }
   | { kind: 'delete'; trip: Trip }
+  | { kind: 'recap'; trip: Trip }
   | null;
 
 /** Trip list — the 여행 tab. Entry point to every board. */
@@ -21,6 +23,7 @@ export default function TripListView() {
   const deleteTrip = useWorkspaceStore((s) => s.deleteTrip);
   const setTab = useUiStore((s) => s.setTab);
   const setActiveTrip = useUiStore((s) => s.setActiveTrip);
+  const focusCard = useUiStore((s) => s.focusCard);
   const activeTripId = useUiStore((s) => s.activeTripId);
 
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -55,9 +58,22 @@ export default function TripListView() {
       updateTrip(dialog.trip.id, values);
     } else {
       const id = addTrip(values.title, values.currency);
+      // `addTrip` only knows the two required fields; the 현지 통화 pair (M7b)
+      // is optional, so it arrives as a patch right after.
+      if (values.localCurrency && values.fxRate) {
+        updateTrip(id, { localCurrency: values.localCurrency, fxRate: values.fxRate });
+      }
       setActiveTrip(id);
     }
     setDialog(null);
+  };
+
+  /** 결산's Top 5 → the 보드 tab, with that card's editor already open. */
+  const openCardOnBoard = (tripId: string, cardId: string) => {
+    setDialog(null);
+    setActiveTrip(tripId);
+    focusCard(cardId);
+    setTab('board');
   };
 
   const confirmDelete = () => {
@@ -125,7 +141,7 @@ export default function TripListView() {
                   type="button"
                   data-testid="trip-open"
                   onClick={() => openBoard(trip.id)}
-                  className="w-full rounded-2xl border border-stone-200/80 bg-white px-4 py-4 pr-24 text-left shadow-sm transition-shadow hover:shadow-md"
+                  className="w-full rounded-2xl border border-stone-200/80 bg-white px-4 py-4 pr-32 text-left shadow-sm transition-shadow hover:shadow-md"
                 >
                   <h2 className="truncate text-base font-semibold text-stone-800">{trip.title}</h2>
                   <p className="mt-1 text-xs text-stone-400">
@@ -142,6 +158,15 @@ export default function TripListView() {
                 </button>
 
                 <div className="absolute right-3 top-3 flex gap-1">
+                  <button
+                    type="button"
+                    data-testid="trip-recap-open"
+                    aria-label={`${trip.title} 결산`}
+                    onClick={() => setDialog({ kind: 'recap', trip })}
+                    className="rounded-full px-2 py-1 text-sm text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                  >
+                    📊
+                  </button>
                   <button
                     type="button"
                     data-testid="trip-edit"
@@ -175,6 +200,14 @@ export default function TripListView() {
         <TripFormDialog
           trip={dialog.trip}
           onSubmit={submitDialog}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
+
+      {dialog?.kind === 'recap' ? (
+        <TripRecapSheet
+          trip={dialog.trip}
+          onOpenCard={(cardId) => openCardOnBoard(dialog.trip.id, cardId)}
           onClose={() => setDialog(null)}
         />
       ) : null}
