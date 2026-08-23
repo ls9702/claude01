@@ -103,6 +103,26 @@ export const COLORS: Record<ColorToken, ColorClasses> = {
   },
 };
 
+/**
+ * Same palette as literal hex, for the places Tailwind cannot reach.
+ *
+ * Leaflet builds its `DivIcon` markers from an **HTML string** that never goes
+ * through the Tailwind scanner, so the map pins are styled inline from this
+ * map instead. The values mirror Tailwind's `*-500` shade — one step darker
+ * than {@link ColorClasses.dot} so a white-bordered pin stays readable on top
+ * of map tiles.
+ */
+export const COLOR_HEX: Record<ColorToken, string> = {
+  sky: '#0ea5e9',
+  violet: '#8b5cf6',
+  amber: '#f59e0b',
+  rose: '#f43f5e',
+  emerald: '#10b981',
+  teal: '#14b8a6',
+  orange: '#f97316',
+  slate: '#64748b',
+};
+
 /** Fallback used when a column carries an unknown color token. */
 export const DEFAULT_COLOR: ColorToken = 'slate';
 
@@ -112,3 +132,7 @@ export const isColorToken = (value: string): value is ColorToken =>
 /** Class bundle for any stored color string; unknown tokens fall back to slate. */
 export const colorClasses = (color: string): ColorClasses =>
   COLORS[isColorToken(color) ? color : DEFAULT_COLOR];
+
+/** Hex for any stored color string; unknown tokens fall back to slate. */
+export const colorHex = (color: string): string =>
+  COLOR_HEX[isColorToken(color) ? color : DEFAULT_COLOR];

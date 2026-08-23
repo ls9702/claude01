@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -97,6 +97,8 @@ export default function BoardView() {
   const deleteColumn = useWorkspaceStore((s) => s.deleteColumn);
   const moveCard = useWorkspaceStore((s) => s.moveCard);
   const activeTripId = useUiStore((s) => s.activeTripId);
+  const focusCardId = useUiStore((s) => s.focusCardId);
+  const focusCard = useUiStore((s) => s.focusCard);
 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -131,6 +133,17 @@ export default function BoardView() {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
   );
+
+  /**
+   * 지도's 「보드에서 편집」 switches to this tab and leaves the card id behind;
+   * pick it up once and open the edit sheet for it.
+   */
+  useEffect(() => {
+    if (!focusCardId) return;
+    const card = workspace.cards[focusCardId];
+    focusCard(undefined);
+    if (card) setDialog({ kind: 'card-edit', card });
+  }, [focusCardId, workspace.cards, focusCard]);
 
   if (!trip) return <TripPrompt />;
 

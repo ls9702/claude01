@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COLORS, COLOR_TOKENS, colorClasses } from './colors';
+import { COLORS, COLOR_HEX, COLOR_TOKENS, colorClasses, colorHex } from './colors';
 import { formatBudget } from './money';
 import { formatClock, formatDuration } from './time';
 
@@ -52,5 +52,13 @@ describe('colors', () => {
   it('falls back to slate for unknown tokens', () => {
     expect(colorClasses('sky')).toBe(COLORS.sky);
     expect(colorClasses('chartreuse')).toBe(COLORS.slate);
+  });
+
+  it('carries a hex twin for every token (map pins cannot use classes)', () => {
+    for (const token of COLOR_TOKENS) {
+      expect(COLOR_HEX[token]).toMatch(/^#[0-9a-f]{6}$/);
+    }
+    expect(colorHex('violet')).toBe(COLOR_HEX.violet);
+    expect(colorHex('chartreuse')).toBe(COLOR_HEX.slate);
   });
 });

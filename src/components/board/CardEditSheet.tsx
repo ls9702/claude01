@@ -1,6 +1,9 @@
 import { useState } from 'react';
-import type { Card } from '../../types/models';
+import type { Card, GeoPoint } from '../../types/models';
+import { formatLatLng } from '../../utils/geo';
 import { DURATION_PRESETS, formatDuration } from '../../utils/time';
+import PinPicker from '../map/PinPicker';
+import PlaceSearch from '../map/PlaceSearch';
 import Sheet from '../common/Sheet';
 import {
   DANGER_TEXT_BUTTON_CLASS,
@@ -13,9 +16,14 @@ export interface CardFormValues {
   title: string;
   memo?: string;
   url?: string;
+  /** `undefined` takes the card off the map — the store clears the field. */
+  location?: GeoPoint;
   budget?: number;
   defaultDurationMin?: number;
 }
+
+/** Which location picker is open on top of the sheet, if any. */
+type Picker = 'search' | 'pin' | null;
 
 interface CardEditSheetProps {
   /** Absent → create mode. */
@@ -56,6 +64,8 @@ export default function CardEditSheet({
   const [url, setUrl] = useState(card?.url ?? '');
   const [budget, setBudget] = useState(card?.budget != null ? String(card.budget) : '');
   const [duration, setDuration] = useState<number | undefined>(card?.defaultDurationMin);
+  const [location, setLocation] = useState<GeoPoint | undefined>(card?.location);
+  const [picker, setPicker] = useState<Picker>(null);
 
   const canSubmit = title.trim().length > 0;
 
@@ -65,6 +75,7 @@ export default function CardEditSheet({
       title: title.trim(),
       memo: memo.trim() || undefined,
       url: url.trim() || undefined,
+      location,
       budget: numberOrUndefined(budget),
       defaultDurationMin: duration,
     });
@@ -228,12 +239,72 @@ export default function CardEditSheet({
           </button>
         ) : null}
 
-        <p className="rounded-xl bg-stone-50 px-3 py-2.5 text-xs leading-relaxed text-stone-400">
-          📍 위치는 지도 탭에서 추가할 수 있어요. (준비 중)
-        </p>
+        <div>
+          <span className={LABEL_CLASS}>위치</span>
+          <p
+            data-testid="card-location-address"
+            data-has-location={Boolean(location)}
+            data-lat={location?.lat}
+            data-lng={location?.lng}
+            className={`mt-1.5 break-words rounded-xl bg-stone-50 px-3 py-2.5 text-xs leading-relaxed ${
+              location ? 'text-stone-600' : 'text-stone-400'
+            }`}
+          >
+            {location
+              ? (location.address ?? formatLatLng(location.lat, location.lng))
+              : '없음'}
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              data-testid="card-location-search"
+              onClick={() => setPicker('search')}
+              className="rounded-full bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-200"
+            >
+              🔍 검색
+            </button>
+            <button
+              type="button"
+              data-testid="card-location-pin"
+              onClick={() => setPicker('pin')}
+              className="rounded-full bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-200"
+            >
+              📍 지도에서 선택
+            </button>
+            {location ? (
+              <button
+                type="button"
+                data-testid="card-location-clear"
+                onClick={() => setLocation(undefined)}
+                className="rounded-full px-3 py-1.5 text-xs font-medium text-rose-500 transition-colors hover:bg-rose-50"
+              >
+                ✕ 제거
+              </button>
+            ) : null}
+          </div>
+        </div>
 
         <button type="submit" className="hidden" aria-hidden="true" tabIndex={-1} />
       </form>
+
+      {picker === 'search' ? (
+        <PlaceSearch
+          initialQuery={title.trim()}
+          onPick={setLocation}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
+
+      {picker === 'pin' ? (
+        <PinPicker
+          initial={location}
+          onPick={(point) => {
+            setLocation(point);
+            setPicker(null);
+          }}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
     </Sheet>
   );
 }

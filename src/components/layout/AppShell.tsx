@@ -5,7 +5,7 @@ import TabBar from './TabBar';
 import TripsView from '../trips/TripListView';
 import BoardView from '../board/BoardView';
 import TimelineView from '../timeline/TimelineView';
-import MapView from '../views/MapView';
+import MapView from '../map/MapView';
 import UndoToast from '../common/UndoToast';
 
 const VIEWS: Record<TabId, () => React.JSX.Element> = {
