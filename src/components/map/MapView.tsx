@@ -131,6 +131,34 @@ function FitRoute({ points, fitKey, ready }: FitPinsProps) {
   return null;
 }
 
+/**
+ * `navigator.onLine`, kept live.
+ *
+ * Tiles come from openstreetmap.org and nothing else on this screen does, so
+ * offline means "the map will be blank squares" — worth one line of Korean
+ * rather than letting the user wonder what broke. The service worker still
+ * serves whatever tiles it cached, which is why this is a hint and not an
+ * error state that hides the map.
+ */
+function useOnline(): boolean {
+  const [online, setOnline] = useState(
+    () => typeof navigator === 'undefined' || navigator.onLine !== false,
+  );
+
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine !== false);
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    update();
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
+
+  return online;
+}
+
 /** Which day(s) the route control is drawing: nothing, one day, or all. */
 type RouteSelection = { kind: 'off' } | { kind: 'day'; dayId: Id } | { kind: 'all' };
 
@@ -152,6 +180,7 @@ export default function MapView() {
   const setTab = useUiStore((s) => s.setTab);
   const focusCard = useUiStore((s) => s.focusCard);
   const isDesktop = useIsDesktop();
+  const online = useOnline();
 
   /** Leaflet's measured viewport; `0 × 0` until the container is laid out. */
   const [size, setSize] = useState({ x: 0, y: 0 });
@@ -429,6 +458,12 @@ export default function MapView() {
             </span>
           ) : null}
         </div>
+      ) : null}
+
+      {!online ? (
+        <p data-testid="map-offline-hint" className="px-4 pb-2 text-xs text-stone-400">
+          오프라인이라 지도를 불러올 수 없어요
+        </p>
       ) : null}
 
       {/* `isolate` traps Leaflet's internal z-indexes (panes go up to 700) so

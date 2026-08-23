@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { useUiStore } from '../../stores/uiStore';
+import { deleteWithUndo } from '../../stores/undoDelete';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Trip } from '../../types/models';
 import ConfirmDialog from '../common/ConfirmDialog';
@@ -61,8 +62,8 @@ export default function TripListView() {
 
   const confirmDelete = () => {
     if (dialog?.kind !== 'delete') return;
-    const { id } = dialog.trip;
-    deleteTrip(id);
+    const { id, title } = dialog.trip;
+    deleteWithUndo('trip', title, () => deleteTrip(id));
     if (activeTripId === id) setActiveTrip(undefined);
     setDialog(null);
   };
@@ -181,7 +182,7 @@ export default function TripListView() {
       {dialog?.kind === 'delete' ? (
         <ConfirmDialog
           title={`'${dialog.trip.title}'을(를) 삭제할까요?`}
-          description="이 여행의 보드 카테고리와 카드, 일정까지 모두 사라져요. 되돌릴 수 없어요."
+          description="이 여행의 보드 카테고리와 카드, 일정까지 모두 사라져요. 삭제 직후 10초 동안은 실행 취소할 수 있어요."
           confirmLabel="삭제"
           onConfirm={confirmDelete}
           onCancel={() => setDialog(null)}

@@ -1,5 +1,6 @@
 import { createStore, get, set, del } from 'idb-keyval';
 import type { StateStorage } from 'zustand/middleware';
+import { usePersistHealthStore } from './persistHealth';
 
 /**
  * Dedicated IndexedDB database/store for Trip Board so we never collide with
@@ -28,8 +29,12 @@ export const idbStorage: StateStorage = {
   async setItem(name: string, value: string): Promise<void> {
     try {
       await set(name, value, store);
+      // Only writes are reported to persistHealth: a failed read is visible
+      // (the app comes up empty), a failed write is not.
+      usePersistHealthStore.getState().ok();
     } catch (err) {
       console.warn('[idbStorage] setItem failed', err);
+      usePersistHealthStore.getState().fail();
     }
   },
   async removeItem(name: string): Promise<void> {

@@ -1,4 +1,5 @@
 import { TAB_IDS, TAB_LABELS, useUiStore, type TabId } from '../../stores/uiStore';
+import BackupNudge from '../common/BackupNudge';
 import SyncStatusChip from '../common/SyncStatusChip';
 
 const TAB_ICONS: Record<TabId, string> = {
@@ -55,7 +56,10 @@ export default function TabBar() {
             </button>
           );
         })}
-        <SyncStatusChip />
+        <div className="flex flex-none items-center gap-1 lg:ml-auto">
+          <BackupNudge />
+          <SyncStatusChip />
+        </div>
       </div>
     </nav>
   );

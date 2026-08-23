@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import PlanDndContext from '../../dnd/PlanDndContext';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
+import { deleteWithUndo } from '../../stores/undoDelete';
 import { useUndoStore } from '../../stores/undoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { FIRST_SHEET_NAME, useWorkspaceStore } from '../../stores/workspaceStore';
@@ -474,7 +475,9 @@ export default function TimelineView() {
               : '아직 배치한 일정이 없는 날이에요.'
           }
           onConfirm={() => {
-            deleteDay(dialog.day.id);
+            deleteWithUndo('day', dayTitle(dialog.day, dialog.index), () =>
+              deleteDay(dialog.day.id),
+            );
             setDialog(null);
           }}
           onCancel={() => setDialog(null)}
@@ -522,7 +525,7 @@ export default function TimelineView() {
               : `일자 ${dayCount}개와 배치한 일정 ${entryCount}개가 함께 사라져요. 카드 자체는 보드에 남아요.`;
           })()}
           onConfirm={() => {
-            deleteSheet(dialog.sheet.id);
+            deleteWithUndo('sheet', dialog.sheet.name, () => deleteSheet(dialog.sheet.id));
             setDialog(null);
           }}
           onCancel={() => setDialog(null)}

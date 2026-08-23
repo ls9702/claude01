@@ -12,6 +12,7 @@ import {
 } from '@dnd-kit/core';
 import { resolveBoardDrop, snapshotBoard } from '../../dnd/boardDnd';
 import { useUiStore } from '../../stores/uiStore';
+import { deleteWithUndo } from '../../stores/undoDelete';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
 import type { BoardColumn, Card } from '../../types/models';
@@ -250,7 +251,7 @@ export default function BoardView() {
           onSubmit={submitCard}
           onSchedule={() => setDialog({ kind: 'card-schedule', card: dialog.card })}
           onDelete={() => {
-            deleteCard(dialog.card.id);
+            deleteWithUndo('card', dialog.card.title, () => deleteCard(dialog.card.id));
             setDialog(null);
           }}
           onClose={() => setDialog(null)}
@@ -282,7 +283,7 @@ export default function BoardView() {
               : '카드가 없는 카테고리예요.'
           }
           onConfirm={() => {
-            deleteColumn(dialog.column.id);
+            deleteWithUndo('column', dialog.column.name, () => deleteColumn(dialog.column.id));
             setDialog(null);
           }}
           onCancel={() => setDialog(null)}

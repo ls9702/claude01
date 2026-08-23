@@ -6,6 +6,7 @@ import TripsView from '../trips/TripListView';
 import BoardView from '../board/BoardView';
 import TimelineView from '../timeline/TimelineView';
 import MapView from '../map/MapView';
+import PersistBanner from '../common/PersistBanner';
 import UndoToast from '../common/UndoToast';
 
 const VIEWS: Record<TabId, () => React.JSX.Element> = {
@@ -49,6 +50,9 @@ export default function AppShell() {
         data-active-tab={activeTab}
         className="pb-[calc(4.5rem+env(safe-area-inset-bottom))] pt-0 lg:pb-0 lg:pt-14"
       >
+        {/* Above the active view, under the (fixed) tab bar — the one thing
+            that outranks whatever tab you are on. */}
+        <PersistBanner />
         <View />
       </main>
       <TabBar />

@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import { SYNC_STATUS_LABELS, useSyncStore } from '../../stores/syncStore';
 import { fetchMeta } from '../../sync/api';
+import { daysBetween, formatLastBackup, loadBackupState } from '../../sync/backup';
 import { exportJson, importJson } from '../../sync/exportImport';
 import { clearSettings, loadSettings, normalizeBaseUrl, saveSettings } from '../../sync/settings';
 import { restartSync, syncNow } from '../../sync/syncEngine';
@@ -48,6 +49,8 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const [token, setToken] = useState(stored.token);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Bumped by 내보내기 so 마지막 백업 updates without reopening the sheet. */
+  const [backupRevision, setBackupRevision] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const status = useSyncStore((s) => s.status);
@@ -56,6 +59,11 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const serverVersion = useSyncStore((s) => s.serverVersion);
 
   const configured = normalizeBaseUrl(baseUrl).length > 0;
+
+  void backupRevision; // re-read the stamp on every render (see the state above)
+  const backupState = loadBackupState();
+  /** Whole days since the last 내보내기; `-1` stands for "never". */
+  const backupDays = daysBetween(backupState.lastBackupAt) ?? -1;
 
   /** Runs an async action with the buttons disabled and the result reported. */
   const guard = async (action: () => Promise<Notice>): Promise<void> => {
@@ -105,6 +113,7 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const handleExport = (): void => {
     try {
       exportJson();
+      setBackupRevision((value) => value + 1);
       setNotice({ tone: 'ok', text: '백업 파일을 내려받았어요' });
     } catch (err) {
       setNotice({ tone: 'bad', text: errorText(err) });
@@ -256,6 +265,12 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
 
         <div className="border-t border-stone-100 pt-4">
           <p className={LABEL_CLASS}>백업</p>
+          <p className="mt-1 text-xs text-stone-500">
+            마지막 백업:{' '}
+            <span data-testid="backup-last" data-days={backupDays} className="font-medium">
+              {formatLastBackup(backupState.lastBackupAt)}
+            </span>
+          </p>
           <div className="mt-1.5 flex gap-2">
             <button
               type="button"

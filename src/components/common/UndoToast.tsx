@@ -1,9 +1,12 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { useUndoStore } from '../../stores/undoStore';
+import { UNDO_DEFAULT_MS, useUndoStore } from '../../stores/undoStore';
 
-/** How long the toast (and therefore the undo offer) stays alive. */
-export const UNDO_MS = 4_000;
+/**
+ * Default lifetime of the toast (and therefore of the undo offer). Each offer
+ * may override it — 삭제 asks for {@link UNDO_DESTRUCTIVE_MS}.
+ */
+export const UNDO_MS = UNDO_DEFAULT_MS;
 
 /**
  * Bottom toast for the single-slot undo. Mounted once by the app shell; it
@@ -17,12 +20,13 @@ export default function UndoToast() {
   const clear = useUndoStore((s) => s.clear);
 
   const token = current?.token;
+  const durationMs = current?.durationMs ?? UNDO_MS;
 
   useEffect(() => {
     if (token == null) return;
-    const timer = window.setTimeout(clear, UNDO_MS);
+    const timer = window.setTimeout(clear, durationMs);
     return () => window.clearTimeout(timer);
-  }, [token, clear]);
+  }, [token, durationMs, clear]);
 
   if (!current) return null;
 
@@ -30,6 +34,7 @@ export default function UndoToast() {
     <div
       role="status"
       data-testid="undo-toast"
+      data-duration={durationMs}
       className="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 lg:bottom-6"
     >
       <div className="tb-sheet-panel pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-xl bg-stone-800 px-4 py-3 text-sm text-white shadow-xl">

@@ -16,6 +16,7 @@
 
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import type { Millis, Workspace } from '../types/models';
+import { markBackedUp } from './backup';
 import { merge } from './merge';
 
 /** Shape of the `.json` file written by {@link exportJson}. */
@@ -107,6 +108,11 @@ export function exportJson(now: Millis = Date.now()): void {
 
   // Safari needs the URL to outlive the click by a tick.
   setTimeout(() => URL.revokeObjectURL(url), 1_000);
+
+  // The click is as close to "a file exists now" as the browser will let us
+  // get — there is no completion event for a download — so stamp it here and
+  // let the 백업 넛지 stand down.
+  markBackedUp(now);
 }
 
 /**
