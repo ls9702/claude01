@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+test-results
+playwright-report
+blob-report
+.playwright
+coverage
+server/config.php
+*.local
+.DS_Store
+.vite
