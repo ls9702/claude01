@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '../common/Icon';
+import { raiseTapShield, watchPointerType } from '../common/tapShield';
 
 interface MapModalProps {
   title: string;
@@ -31,6 +32,19 @@ export default function MapModal({
   variant = 'panel',
   testId,
 }: MapModalProps) {
+  /**
+   * 이 모달의 푸터도 탭바 바로 위에 앉는다 — 연타의 두 번째 탭이 사라진 모달
+   * 자리로 새어 나가지 않도록, 닫히는 순간 잠깐 화면을 덮는다.
+   * (자세한 이유는 {@link raiseTapShield}.)
+   */
+  useEffect(() => {
+    watchPointerType();
+    const mountedAt = Date.now();
+    return () => {
+      if (Date.now() - mountedAt > 250) raiseTapShield();
+    };
+  }, []);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -65,8 +79,11 @@ export default function MapModal({
       <div
         className={[
           'tb-sheet-panel relative flex w-full flex-col overflow-hidden bg-surface shadow-float',
+          // `full` owns the whole viewport, notch included — its header would
+          // otherwise sit under the status bar. The bottom sheet starts well
+          // below the top edge and needs nothing.
           full
-            ? 'h-full'
+            ? 'h-full pt-[env(safe-area-inset-top)]'
             : 'max-h-[92dvh] rounded-t-lg sm:max-w-[26rem] sm:rounded-lg lg:max-w-[32rem]',
         ].join(' ')}
       >
@@ -87,7 +104,16 @@ export default function MapModal({
           </button>
         </header>
 
-        <div className={full ? 'relative min-h-0 flex-1' : 'min-h-0 flex-1 overflow-y-auto px-4 pb-4'}>
+        {/* With no footer the body *is* the bottom edge of the sheet, so it
+            has to clear the home indicator itself — 1rem wherever there is
+            none. (A footer, when there is one, pays the inset below.) */}
+        <div
+          className={[
+            'min-h-0 flex-1',
+            full ? 'relative' : 'overflow-y-auto px-4',
+            full ? '' : footer ? 'pb-4' : 'pb-[max(1rem,env(safe-area-inset-bottom))]',
+          ].join(' ')}
+        >
           {children}
         </div>
 

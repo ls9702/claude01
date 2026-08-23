@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   closestCorners,
   useSensor,
@@ -180,8 +180,14 @@ export default function BoardView() {
     [workspace, trip?.id],
   );
 
+  /**
+   * 마우스는 8px, 손가락은 250ms — 일정 탭과 같은 규칙(`PlanDndContext`).
+   *
+   * `PointerSensor` 하나로는 터치가 8px 규칙에 먼저 걸려서, 컬럼을 옆으로
+   * 넘기려는 스와이프가 카드를 집어 들었다.
+   */
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
   );
 

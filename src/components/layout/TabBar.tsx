@@ -31,7 +31,10 @@ export default function TabBar() {
       className={[
         'fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/92 backdrop-blur',
         'pb-[env(safe-area-inset-bottom)]',
+        // From `lg` the bar is at the *top*, so that is where the inset goes —
+        // and `tb-safe-top` adds the same amount under it, so the two agree.
         'lg:inset-x-0 lg:top-0 lg:bottom-auto lg:border-t-0 lg:border-b lg:pb-0',
+        'lg:pt-[env(safe-area-inset-top)]',
       ].join(' ')}
     >
       <div className="mx-auto grid max-w-3xl grid-cols-4 lg:flex lg:h-14 lg:max-w-5xl lg:items-center lg:gap-1 lg:px-6">

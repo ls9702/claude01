@@ -37,8 +37,11 @@ function TrayCard({ card, currency, color, onOpen }: TrayCardProps) {
       data-testid="tray-card"
       data-card-id={card.id}
       data-column-id={card.columnId}
-      // Touch scrolling of the strip must survive: only the card itself opts out.
-      style={{ touchAction: 'none' }}
+      // Touch scrolling of the strip must survive — including when the finger
+      // lands *on* a card, which is most of the strip. The 250 ms long-press
+      // is what separates a scroll from a lift, so the card only takes the
+      // gesture over once it is actually being carried.
+      style={{ touchAction: isDragging ? 'none' : 'manipulation' }}
       className={[
         'w-36 shrink-0 cursor-grab select-none outline-none focus-visible:ring-2 focus-visible:ring-line-strong',
         isDragging ? 'opacity-40' : '',

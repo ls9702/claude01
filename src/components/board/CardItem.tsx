@@ -138,8 +138,12 @@ export function CardSurface({
               disabled={!hasBreakdown}
               title={`시간표에 ${scheduledCount}번 배치됨`}
               // The badge lives inside a draggable card: neither the drag nor
-              // the card's own open-on-click may fire when it is tapped.
+              // the card's own open-on-click may fire when it is tapped. The
+              // sensors listen for mousedown/touchstart, so stopping the
+              // pointer event alone would no longer reach them.
               onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
                 if (hasBreakdown) setPopoverOpen((open) => !open);
@@ -176,6 +180,8 @@ export function CardSurface({
             aria-label="링크 열기"
             data-testid="card-link"
             onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onTouchStart={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
             className="-m-1 shrink-0 rounded-xs p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:text-ink"
           >
@@ -226,8 +232,12 @@ interface CardItemProps {
 /**
  * A draggable board card.
  *
- * `touch-action: none` lives on this element only — never on the board's
- * scroll containers, or horizontal scrolling would die on touch devices.
+ * **Not** `touch-action: none`: the cards cover most of a column, and a finger
+ * that lands on one still has to be able to scroll the board. The drag is
+ * gated by the `TouchSensor`'s 250 ms long-press instead, and dnd-kit stops
+ * the page from moving itself (it `preventDefault`s `touchmove`) once the lift
+ * has actually happened — which is exactly when the card takes the gesture
+ * over, and not one moment earlier.
  */
 export default function CardItem({
   card,
@@ -249,7 +259,9 @@ export default function CardItem({
         // Translate only (no scale): a sortable card must keep its own size.
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
         transition,
-        touchAction: 'none',
+        // Only while it is actually being carried: `manipulation` keeps the
+        // scroll and kills the double-tap zoom delay.
+        touchAction: isDragging ? 'none' : 'manipulation',
       }}
       {...attributes}
       {...listeners}

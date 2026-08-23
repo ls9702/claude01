@@ -202,11 +202,23 @@ export default function TripListView() {
       ) : (
         // Two columns is the ceiling: a third made every card too narrow for
         // the title it exists to show (M9 §4.1-2).
-        <ul className="grid gap-4 sm:grid-cols-2">
+        // `grid-cols-1` is not decoration: the default single `auto` track is
+        // sized by its content, so one long unbreakable title widened the track
+        // — and with it the page — past the viewport. `minmax(0, 1fr)` tracks
+        // (what `grid-cols-*` emits) can never do that.
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {trips.map((trip) => {
             const count = counts[trip.id] ?? { columns: 0, cards: 0 };
             return (
-              <li key={trip.id} data-testid="trip-card" data-trip-id={trip.id} className="relative">
+              // `min-w-0`: a grid item's automatic minimum size is its content,
+              // so without this the `truncate` on the title below never gets to
+              // truncate anything (M9 §4.1-2).
+              <li
+                key={trip.id}
+                data-testid="trip-card"
+                data-trip-id={trip.id}
+                className="relative min-w-0"
+              >
                 <button
                   type="button"
                   data-testid="trip-open"

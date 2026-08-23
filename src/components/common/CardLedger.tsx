@@ -8,7 +8,7 @@ import Icon from './Icon';
 import {
   CHIP_BUTTON_QUIET,
   CHIP_SELECTED,
-  INPUT_CLASS,
+  INLINE_INPUT_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECTION_TITLE_CLASS,
 } from './formStyles';
@@ -136,7 +136,7 @@ export function ExpenseInputRow({
           onChange={(event) => setAmount(event.target.value)}
           onKeyDown={onEnter}
           placeholder={useLocal ? `금액 (${localCurrency})` : '금액'}
-          className={`${INPUT_CLASS} mt-0 w-28 shrink-0`}
+          className={`${INLINE_INPUT_CLASS} w-28 shrink-0`}
         />
         <input
           data-testid="card-expense-label-input"
@@ -145,7 +145,7 @@ export function ExpenseInputRow({
           onChange={(event) => setLabel(event.target.value)}
           onKeyDown={onEnter}
           placeholder="내용 (선택)"
-          className={`${INPUT_CLASS} mt-0 min-w-0 flex-1`}
+          className={`${INLINE_INPUT_CLASS} min-w-0 flex-1`}
         />
         <button
           type="button"
@@ -329,7 +329,7 @@ export default function CardLedger({
                 submitComment();
               }}
               placeholder="한 줄 남기기"
-              className={`${INPUT_CLASS} mt-0 min-w-0 flex-1`}
+              className={`${INLINE_INPUT_CLASS} min-w-0 flex-1`}
             />
             <button
               type="button"

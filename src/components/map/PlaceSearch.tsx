@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GeoPoint } from '../../types/models';
 import { SEARCH_COOLDOWN_MS, SEARCH_ERROR_MESSAGE, searchPlaces } from '../../utils/geo';
-import { INPUT_CLASS, PRIMARY_BUTTON_CLASS } from '../common/formStyles';
+import { INLINE_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from '../common/formStyles';
 import MapModal from './MapModal';
 
 interface PlaceSearchProps {
@@ -93,7 +93,7 @@ export default function PlaceSearch({ initialQuery = '', onPick, onClose }: Plac
             autoFocus
             onChange={(event) => setQuery(event.target.value)}
             placeholder="예) 시부야 스크램블 교차로"
-            className={`${INPUT_CLASS} mt-0 flex-1`}
+            className={`${INLINE_INPUT_CLASS} min-w-0 flex-1`}
           />
           <button
             type="submit"

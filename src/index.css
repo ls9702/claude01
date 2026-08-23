@@ -126,6 +126,24 @@ textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* The one place the top notch / dynamic island is paid for (M9 §3.1).
+
+   `body` cannot do it: the app's main column is `h-dvh`, so padding on the
+   body would push it down and shove the tab bar's worth of layout off the
+   bottom. The scrolling column takes the inset instead — and from `lg` up the
+   top bar is what the content has to clear, so the two are added exactly once,
+   never twice. */
+.tb-safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+@media (min-width: 64rem) {
+  .tb-safe-top {
+    /* 3.5rem = the desktop top bar's own height (`lg:h-14`). */
+    padding-top: calc(3.5rem + env(safe-area-inset-top));
+  }
+}
+
 /* Bottom sheet / dialog entrance. Panels mount on open, so this plays once. */
 @keyframes tb-sheet-up {
   from {

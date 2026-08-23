@@ -11,7 +11,7 @@ import {
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   closestCorners,
   pointerWithin,
@@ -135,8 +135,16 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
     };
   }, []);
 
+  /**
+   * 마우스는 8px, 손가락은 250ms.
+   *
+   * `PointerSensor`로는 이 둘을 나눌 수 없다: 터치도 포인터 이벤트를 내므로
+   * 손가락이 8px만 움직여도 곧바로 드래그가 시작되고, 스크롤하려던 스와이프가
+   * 일정 블록을 끌고 가버린다(TouchSensor의 지연은 시작될 기회조차 없다).
+   * 입력 장치마다 센서를 따로 두면 각자의 규칙이 실제로 적용된다.
+   */
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
   );
 
@@ -168,7 +176,17 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
       const grid = dayId ? grids.current.get(dayId) : undefined;
       if (!entry || !dayId || !grid || clientY == null) return;
       const top = clientY - (grabOffset ?? 0) - grid.getBoundingClientRect().top;
+      // Where it was, before the drop — the drag itself is the only record of
+      // it, and a finger that slipped deserves the same way back as a tap.
+      const from = { dayId: entry.dayId, startMin: entry.startMin };
       moveEntry(entryId, dayId, yToMin(top, PX_PER_MIN));
+
+      // `moveEntry` treats "dropped where it started" as nothing at all; only
+      // an actual change is worth a toast.
+      const moved = useWorkspaceStore.getState().workspace.entries[entryId];
+      if (moved && (moved.dayId !== from.dayId || moved.startMin !== from.startMin)) {
+        offer('일정 이동됨', () => moveEntry(entryId, from.dayId, from.startMin));
+      }
       return;
     }
 

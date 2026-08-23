@@ -8,8 +8,9 @@ import {
   INPUT_CLASS,
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
-  SECONDARY_BUTTON_CLASS,
   SECTION_TITLE_CLASS,
+  SQUARE_BUTTON_CLASS,
+  withoutMarginTop,
 } from '../common/formStyles';
 
 /** Checkbox that borrows the app's ink instead of the browser's blue (§4.5-1). */
@@ -157,7 +158,7 @@ function LegFields({ legend, testId, value, onChange }: LegFieldsProps) {
               value={value.from}
               onChange={(event) => patch({ from: event.target.value })}
               placeholder="ICN"
-              className={`${INPUT_CLASS} mt-1`}
+              className={`${withoutMarginTop(INPUT_CLASS)} mt-1`}
             />
           </div>
           <div>
@@ -168,7 +169,7 @@ function LegFields({ legend, testId, value, onChange }: LegFieldsProps) {
               value={value.to}
               onChange={(event) => patch({ to: event.target.value })}
               placeholder="KIX"
-              className={`${INPUT_CLASS} mt-1`}
+              className={`${withoutMarginTop(INPUT_CLASS)} mt-1`}
             />
           </div>
           <div className="col-span-2 sm:col-span-1">
@@ -179,7 +180,7 @@ function LegFields({ legend, testId, value, onChange }: LegFieldsProps) {
               value={value.flightNo}
               onChange={(event) => patch({ flightNo: event.target.value })}
               placeholder="OZ112"
-              className={`${INPUT_CLASS} mt-1`}
+              className={`${withoutMarginTop(INPUT_CLASS)} mt-1`}
             />
           </div>
         </div>
@@ -207,7 +208,7 @@ function DayStepper({ value, onChange }: DayStepperProps) {
           data-testid="wizard-days-minus"
           aria-label="일수 줄이기"
           onClick={() => step(-1)}
-          className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
+          className={SQUARE_BUTTON_CLASS}
         >
           <Icon name="minus" size={16} />
         </button>
@@ -222,7 +223,7 @@ function DayStepper({ value, onChange }: DayStepperProps) {
           data-testid="wizard-days-plus"
           aria-label="일수 늘리기"
           onClick={() => step(1)}
-          className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
+          className={SQUARE_BUTTON_CLASS}
         >
           <Icon name="plus" size={16} />
         </button>

@@ -1,7 +1,16 @@
 import { useState } from 'react';
 import { SYNC_STATUS_LABELS, useSyncStore, type SyncStatus } from '../../stores/syncStore';
 import SyncSettingsSheet from './SyncSettingsSheet';
-import { CHIP_BASE } from './formStyles';
+import { CHIP_BASE, withoutHeight, withoutPadX } from './formStyles';
+
+/**
+ * 상단 바의 동기화 칩 — 36px 높이의 누를 수 있는 칩.
+ *
+ * `${CHIP_BASE} h-9 px-3`으로 덧쓰면 CHIP_BASE의 `h-6 px-2`와 한 문자열 안에서
+ * 충돌한다(지금은 우연히 h-9가 이기지만, 그건 CSS 출력 순서일 뿐이다). 값을
+ * 덧쓰지 않고 걷어낸 뒤 넣는다.
+ */
+const CHIP_SYNC = `${withoutPadX(withoutHeight(CHIP_BASE))} h-9 px-3`;
 
 /** Dot colour per status — one job each (M9 §4.8-4). `syncing` also pulses. */
 export const SYNC_DOT_CLASS: Record<SyncStatus, string> = {
@@ -38,7 +47,7 @@ export default function SyncStatusChip({ variant = 'chip' }: { variant?: 'chip' 
         className={
           dot
             ? 'grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors duration-[140ms] ease-quick hover:bg-sunken'
-            : `${CHIP_BASE} h-9 px-3 bg-sunken text-ink-muted hover:bg-line`
+            : `${CHIP_SYNC} bg-sunken text-ink-muted hover:bg-line`
         }
       >
         <span

@@ -229,8 +229,10 @@ export default function DayColumn({
 
             When there is no empty stretch at all (`gapMin <= 0`, the back-to-back
             case the 시간이 부족해요 chip exists for) the midpoint lands *inside*
-            the next entry, on top of the now-line badge. Then the chip hangs off
-            the previous entry's end line instead, right-aligned. */}
+            the next entry. Then the chip straddles the boundary line the two
+            entries share — centred **on** it (`-translate-y-1/2`), not hung
+            above it, where it covered the previous block's time. `right-6`
+            keeps it clear of the screen edge and of the now-line's clock. */}
         {(gaps ?? []).map((gap) => {
           const after = entryById.get(gap.afterEntryId);
           if (!after) return null;
@@ -249,8 +251,8 @@ export default function DayColumn({
               data-impossible={gap.impossible ? 'true' : 'false'}
               style={{ top: minToY(topMin, PX_PER_MIN) }}
               className={[
-                'pointer-events-none absolute z-10',
-                spaced ? 'left-1/2 -translate-x-1/2 -translate-y-1/2' : 'right-1 -translate-y-full',
+                'pointer-events-none absolute z-10 -translate-y-1/2',
+                spaced ? 'left-1/2 -translate-x-1/2' : 'right-6',
               ].join(' ')}
             >
               <span

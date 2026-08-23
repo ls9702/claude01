@@ -28,6 +28,45 @@ export const BTN_SIZE_SM = 'h-9 px-3 lg:h-8';
 export const withBtnSize = (recipe: string, size: string): string =>
   recipe.replace(BTN_SIZE, size);
 
+/* ── 레시피에서 유틸리티 걷어내기 ────────────────────── */
+
+/**
+ * 레시피에서 한 유틸리티 그룹을 통째로 걷어낸다.
+ *
+ * {@link withBtnSize}와 같은 이유로 존재한다: 클래스 문자열은 계단식이 아니라
+ * *집합*이고, 같은 속성을 두 번 쓰면 승자를 정하는 건 뒤에 쓴 쪽이 아니라 CSS
+ * 출력 순서다. `${INPUT_CLASS} w-28`의 실제 폭이 `w-full`인 것이 그 증거다.
+ * 호출부가 값을 정하고 싶으면 먼저 레시피 쪽 값을 없앤다.
+ *
+ * 토큰 단위로 지우므로 문자열 위치나 앞뒤 공백을 가정하지 않고, `sm:`/`lg:`
+ * 변종도 같이 걷힌다(`max-w-full`처럼 이름이 다른 유틸리티는 남는다).
+ */
+export const overrideClasses = (recipe: string, strip: RegExp): string =>
+  recipe
+    .split(/\s+/)
+    .filter((token) => token !== '' && !strip.test(token))
+    .join(' ');
+
+/** `lg:px-4` 같은 변종까지 포함해 한 유틸리티 이름을 잡는 패턴. */
+const utility = (name: string) => new RegExp(`^(?:[\\w.-]+:)*${name}-`);
+
+const WIDTH = utility('w');
+const HEIGHT = utility('h');
+const PAD_X = utility('px');
+const MARGIN_TOP = utility('mt');
+
+/** 폭은 호출부가 정한다 — 레시피의 `w-*`를 걷어낸다. */
+export const withoutWidth = (recipe: string): string => overrideClasses(recipe, WIDTH);
+
+/** 높이는 호출부가 정한다 — 레시피의 `h-*`를 걷어낸다. */
+export const withoutHeight = (recipe: string): string => overrideClasses(recipe, HEIGHT);
+
+/** 좌우 패딩은 호출부가 정한다 — 아이콘 하나만 든 정사각 버튼 등. */
+export const withoutPadX = (recipe: string): string => overrideClasses(recipe, PAD_X);
+
+/** 위 여백은 호출부가 정한다 — 라벨 없이 줄 안에 놓이는 입력 등. */
+export const withoutMarginTop = (recipe: string): string => overrideClasses(recipe, MARGIN_TOP);
+
 export const PRIMARY_BUTTON_CLASS =
   `${BTN_BASE} ${BTN_SIZE} bg-inverse text-surface shadow-raise ` +
   'hover:brightness-125 active:brightness-95 ' +
@@ -52,6 +91,15 @@ export const DANGER_TEXT_BUTTON_CLASS =
 export const DANGER_SOLID_BUTTON_CLASS =
   `${BTN_BASE} ${BTN_SIZE} bg-danger text-surface hover:brightness-110`;
 
+/**
+ * 정사각 아이콘 버튼 — 스테퍼의 ＋/－.
+ *
+ * 폭이 높이와 같고 좌우 패딩이 없다. `${SECONDARY_BUTTON_CLASS} px-0`으로는
+ * 만들 수 없다: 레시피의 `px-4`가 CSS 출력 순서로 이겨서 44px 버튼이 옆으로
+ * 퍼졌다. 그래서 패딩을 *덧쓰지* 않고 걷어낸다.
+ */
+export const SQUARE_BUTTON_CLASS = `${withoutPadX(SECONDARY_BUTTON_CLASS)} w-11 shrink-0`;
+
 /** 아이콘 전용 버튼(닫기, ⋯, 스크롤 화살표). 터치 44px는 호출부에서 확보한다. */
 export const ICON_BUTTON_CLASS =
   'inline-grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-faint ' +
@@ -71,7 +119,7 @@ export const CHIP_MONEY = `${CHIP_BASE} bg-warn-wash text-warn-ink`;
 export const CHIP_NOW = `${CHIP_BASE} bg-now text-surface`;
 
 /** 누를 수 있는 칩(필터·세그먼트). 터치 타깃 h-9. */
-const CHIP_PRESSABLE = `${CHIP_BASE} h-9 px-3 lg:h-8`;
+const CHIP_PRESSABLE = `${withoutPadX(withoutHeight(CHIP_BASE))} h-9 px-3 lg:h-8`;
 
 export const CHIP_BUTTON = `${CHIP_PRESSABLE} bg-sunken text-ink-muted hover:bg-line`;
 export const CHIP_SELECTED = `${CHIP_PRESSABLE} bg-inverse text-surface`;
@@ -99,7 +147,10 @@ export const INPUT_CLASS =
   'disabled:bg-sunken disabled:text-ink-faint';
 
 /** textarea. 높이는 rows가 정한다. */
-export const TEXTAREA_CLASS = `${INPUT_CLASS.replace('h-11 ', '')} resize-none py-2`;
+export const TEXTAREA_CLASS = `${withoutHeight(INPUT_CLASS)} resize-none py-2`;
+
+/** 줄 안에 놓이는 입력 — 폭과 위 여백을 호출부가 정한다(지출 입력 행 등). */
+export const INLINE_INPUT_CLASS = withoutMarginTop(withoutWidth(INPUT_CLASS));
 
 /* ── 표면 ────────────────────────────────────────────── */
 export const CARD_SURFACE_CLASS = 'rounded-lg border border-line bg-surface shadow-raise';

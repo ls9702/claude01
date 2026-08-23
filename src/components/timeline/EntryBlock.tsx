@@ -150,7 +150,10 @@ export default function EntryBlock({ entry, card, color, icon, lane, onOpen }: E
         height,
         left: `${(lane.lane / lane.lanes) * 100}%`,
         width: `${100 / lane.lanes}%`,
-        touchAction: 'none',
+        // Blocks cover most of a busy day; a finger landing on one must still
+        // be able to scroll the grid. The 250 ms long-press decides whether
+        // this is a scroll or a move, and only a real lift takes the gesture.
+        touchAction: isDragging ? 'none' : 'manipulation',
       }}
       className={[
         'group cursor-grab select-none p-px outline-none focus-visible:ring-2 focus-visible:ring-line-strong',
@@ -170,7 +173,12 @@ export default function EntryBlock({ entry, card, color, icon, lane, onOpen }: E
         aria-label="길이 조절"
         data-testid="entry-resize"
         onPointerDown={startResize}
+        // The block's own drag listens for mousedown/touchstart, so the handle
+        // has to swallow those too — a resize is not a move.
+        onMouseDown={(event) => event.stopPropagation()}
+        onTouchStart={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
+        // This one *is* a drag handle, and a 12px strip is nobody's scroller.
         style={{ touchAction: 'none' }}
         // The bar only appears on hover/focus: parked permanently it reads as a
         // scrollbar sitting inside the block (M9 §4.4-7).

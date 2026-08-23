@@ -20,6 +20,7 @@ import {
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
+  SQUARE_BUTTON_CLASS,
 } from '../common/formStyles';
 import { dayTitle } from './DayColumn';
 
@@ -194,7 +195,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
                 data-testid="schedule-start-minus"
                 aria-label="시작 15분 줄이기"
                 onClick={() => stepStart(-SNAP_MIN)}
-                className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
+                className={SQUARE_BUTTON_CLASS}
               >
                 <Icon name="minus" size={16} />
               </button>
@@ -209,7 +210,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
                 data-testid="schedule-start-plus"
                 aria-label="시작 15분 늘리기"
                 onClick={() => stepStart(SNAP_MIN)}
-                className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
+                className={SQUARE_BUTTON_CLASS}
               >
                 <Icon name="plus" size={16} />
               </button>
@@ -224,7 +225,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
                 data-testid="schedule-duration-minus"
                 aria-label="소요 시간 15분 줄이기"
                 onClick={() => stepDuration(-SNAP_MIN)}
-                className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
+                className={SQUARE_BUTTON_CLASS}
               >
                 <Icon name="minus" size={16} />
               </button>
@@ -239,7 +240,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
                 data-testid="schedule-duration-plus"
                 aria-label="소요 시간 15분 늘리기"
                 onClick={() => stepDuration(SNAP_MIN)}
-                className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
+                className={SQUARE_BUTTON_CLASS}
               >
                 <Icon name="plus" size={16} />
               </button>

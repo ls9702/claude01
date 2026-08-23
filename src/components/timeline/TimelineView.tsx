@@ -514,12 +514,12 @@ export default function TimelineView() {
               <span className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden">
                 <span
                   data-testid="day-pager-label"
-                  className="truncate text-label font-semibold text-ink"
+                  className="min-w-0 truncate text-label font-semibold text-ink"
                 >
                   {currentDay ? dayTitle(currentDay, safePage) : ''}
                 </span>
                 {currentDay ? (
-                  <span className="truncate text-micro font-normal text-ink-muted">
+                  <span className="min-w-0 truncate text-micro font-normal text-ink-muted">
                     {daySubtitle(currentDay, safePage)}
                   </span>
                 ) : null}

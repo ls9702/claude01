@@ -16,6 +16,7 @@ import {
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
+  SQUARE_BUTTON_CLASS,
   TEXTAREA_CLASS,
 } from '../common/formStyles';
 
@@ -37,7 +38,7 @@ function Stepper({ label, value, testId, onStep }: StepperProps) {
           data-testid={`${testId}-minus`}
           aria-label={`${label} 15분 줄이기`}
           onClick={() => onStep(-SNAP_MIN)}
-          className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
+          className={SQUARE_BUTTON_CLASS}
         >
           <Icon name="minus" size={16} />
         </button>
@@ -52,7 +53,7 @@ function Stepper({ label, value, testId, onStep }: StepperProps) {
           data-testid={`${testId}-plus`}
           aria-label={`${label} 15분 늘리기`}
           onClick={() => onStep(SNAP_MIN)}
-          className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
+          className={SQUARE_BUTTON_CLASS}
         >
           <Icon name="plus" size={16} />
         </button>

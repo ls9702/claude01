@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { selectPersistFailing, usePersistHealthStore } from '../../stores/persistHealth';
 import { exportJson } from '../../sync/exportImport';
 import Icon from './Icon';
-import { BTN_SIZE_SM, SECONDARY_BUTTON_CLASS } from './formStyles';
+import { BTN_SIZE_SM, SECONDARY_BUTTON_CLASS, withBtnSize } from './formStyles';
 
 /**
  * 저장 실패 배너 — the one warning this app is allowed to shout (M7a).
@@ -40,7 +40,7 @@ export default function PersistBanner() {
             exportJson();
             setExported(true);
           }}
-          className={`${SECONDARY_BUTTON_CLASS} ${BTN_SIZE_SM}`}
+          className={withBtnSize(SECONDARY_BUTTON_CLASS, BTN_SIZE_SM)}
         >
           백업
         </button>

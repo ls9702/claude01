@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from './Icon';
+import { raiseTapShield, watchPointerType } from './tapShield';
+
+/** 그래버를 이만큼 끌어내리면 닫는다. */
+const CLOSE_DRAG_PX = 80;
 
 interface SheetProps {
   /** Title rendered in the sticky header and used as the dialog label. */
@@ -29,6 +33,8 @@ export default function Sheet({ title, onClose, children, footer, testId }: Shee
   const [scrolled, setScrolled] = useState(false);
   /** Is there anything left below the fold? The fade lies unless we ask. */
   const [moreBelow, setMoreBelow] = useState(false);
+  /** How far the grabber has been pulled down, in px. `0` = not dragging. */
+  const [dragY, setDragY] = useState(0);
 
   /**
    * A fade that is always on says "there is more" on a short sheet with
@@ -56,6 +62,22 @@ export default function Sheet({ title, onClose, children, footer, testId }: Shee
     return () => observer.disconnect();
   });
 
+  /**
+   * 닫히는 *모든* 길(닫기 버튼, 오버레이, Escape, 부모가 그냥 언마운트)을 한
+   * 곳에서 잡을 수 있는 지점은 언마운트뿐이다. 그래서 방패는 여기서 올린다.
+   *
+   * 개발 모드의 StrictMode는 마운트 직후 한 번 언마운트했다가 다시 붙이는데,
+   * 그건 사람이 시트를 닫은 게 아니다. 실제 닫기는 열림 애니메이션(240ms)보다
+   * 빠를 수 없으므로, 방금 열린 시트의 언마운트는 방패 없이 넘긴다.
+   */
+  useEffect(() => {
+    watchPointerType();
+    const mountedAt = Date.now();
+    return () => {
+      if (Date.now() - mountedAt > 250) raiseTapShield();
+    };
+  }, []);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -68,6 +90,42 @@ export default function Sheet({ title, onClose, children, footer, testId }: Shee
       document.body.style.overflow = previousOverflow;
     };
   }, [onClose]);
+
+  /**
+   * 그래버를 끌어내려 닫기 (모바일).
+   *
+   * 손잡이 위에서만 듣는다. 본문에 달면 스크롤과 싸우게 되고, 「밑으로 조금
+   * 내렸을 뿐인데 시트가 닫힌다」가 된다. 손잡이는 원래 그것 말고 할 일이
+   * 없으므로 `touch-action: none`이 정당한 유일한 자리이기도 하다.
+   */
+  const startGrabberDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const zone = event.currentTarget;
+    const originY = event.clientY;
+    let offset = 0;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      // 위로 끄는 건 시트를 늘리는 동작이 아니다 — 0에서 멈춘다.
+      offset = Math.max(0, moveEvent.clientY - originY);
+      setDragY(offset);
+    };
+    const stop = () => {
+      zone.removeEventListener('pointermove', onMove);
+      zone.removeEventListener('pointerup', stop);
+      zone.removeEventListener('pointercancel', stop);
+      try {
+        zone.releasePointerCapture(event.pointerId);
+      } catch {
+        /* the capture may already be gone */
+      }
+      setDragY(0);
+      if (offset > CLOSE_DRAG_PX) onClose();
+    };
+
+    zone.setPointerCapture(event.pointerId);
+    zone.addEventListener('pointermove', onMove);
+    zone.addEventListener('pointerup', stop);
+    zone.addEventListener('pointercancel', stop);
+  };
 
   return createPortal(
     <div
@@ -84,9 +142,21 @@ export default function Sheet({ title, onClose, children, footer, testId }: Shee
         onClick={onClose}
         className="tb-overlay absolute inset-0 h-full w-full cursor-default bg-ink/45 backdrop-blur-[2px]"
       />
-      <div className="tb-sheet-panel relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-lg bg-surface shadow-float sm:max-w-[26rem] sm:rounded-lg lg:max-w-[32rem]">
-        {/* Says "drag me" on a phone; pointless on a centered desktop card. */}
-        <span aria-hidden="true" className="mx-auto mt-2 h-1 w-9 rounded-full bg-line sm:hidden" />
+      <div
+        style={dragY > 0 ? { transform: `translateY(${dragY}px)` } : undefined}
+        className="tb-sheet-panel relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-lg bg-surface shadow-float sm:max-w-[26rem] sm:rounded-lg lg:max-w-[32rem]"
+      >
+        {/* Says "drag me" on a phone — and now means it. The bar is 4px tall,
+            so the *zone* that listens is the padded row around it; pointless on
+            a centered desktop card, which is why the pair is `sm:hidden`. */}
+        <div
+          data-testid="sheet-grabber"
+          onPointerDown={startGrabberDrag}
+          style={{ touchAction: 'none' }}
+          className="flex shrink-0 cursor-grab justify-center py-2 sm:hidden"
+        >
+          <span aria-hidden="true" className="h-1 w-9 rounded-full bg-line" />
+        </div>
 
         <header
           data-scrolled={scrolled ? 'true' : 'false'}
