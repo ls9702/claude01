@@ -17,6 +17,14 @@ export interface RouteDrawing {
   dayId: Id;
   /** Heading used in the arrow popups (`1일차`, `10/12 (토)`, …). */
   dayTitle: string;
+  /**
+   * 1-based position of the day inside the sheet, set **only** in 전체 mode.
+   *
+   * With several days drawn at once the per-day stop numbers restart, so the
+   * badges read `1 · 1 · 2` — which looks like a bug rather than like two
+   * days. When this is set the badge says `일자-순번` (`2-1`) instead.
+   */
+  dayIndex?: number;
   /** Line color as literal hex — Leaflet never sees a Tailwind class. */
   color: string;
   route: DayRoute;
@@ -46,21 +54,24 @@ const SHADOW = 'box-shadow:0 1px 4px rgba(28,25,23,0.35)';
  * rather than replacing it: the pin still answers "what kind of place is this",
  * the badge answers "when do I get there".
  */
-function stopIcon(order: number, cardId: Id, color: string): DivIcon {
+function stopIcon(order: number, cardId: Id, color: string, dayIndex?: number): DivIcon {
+  // `data-order` stays the plain stop number whatever the badge reads.
+  const label = dayIndex === undefined ? String(order) : `${dayIndex}-${order}`;
+  const width = dayIndex === undefined ? 18 : 26;
   const html = [
     `<div data-testid="route-stop" data-order="${order}"`,
     ` data-card-id="${escapeHtml(cardId)}"`,
-    ` style="width:18px;height:18px;border-radius:9999px;background:${color};`,
+    ` style="width:${width}px;height:18px;border-radius:9999px;background:${color};`,
     `border:2px solid #fff;${SHADOW};display:flex;align-items:center;justify-content:center;`,
     `color:#fff;font-size:10px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;">`,
-    String(order),
+    escapeHtml(label),
     '</div>',
   ].join('');
 
   return divIcon({
     html,
     className: 'tb-route-stop',
-    iconSize: [18, 18],
+    iconSize: [width, 18],
     // Up and to the right of the pin's tip, clear of the emoji.
     iconAnchor: [-6, 38],
   });
@@ -137,7 +148,7 @@ export default function RouteLayer({ drawings, cards, columns }: RouteLayerProps
   return (
     <>
       {drawings.map((drawing) => {
-        const { route, color, dayId, dayTitle } = drawing;
+        const { route, color, dayId, dayTitle, dayIndex } = drawing;
         if (route.stops.length === 0) return null;
 
         return (
@@ -153,7 +164,7 @@ export default function RouteLayer({ drawings, cards, columns }: RouteLayerProps
               <Marker
                 key={`${dayId}:${stop.order}`}
                 position={[stop.lat, stop.lng]}
-                icon={stopIcon(stop.order, stop.cardId, color)}
+                icon={stopIcon(stop.order, stop.cardId, color, dayIndex)}
                 // The category pin underneath owns the popup; this badge is
                 // pure decoration and must not swallow the tap.
                 interactive={false}
@@ -182,12 +193,12 @@ export default function RouteLayer({ drawings, cards, columns }: RouteLayerProps
                 >
                   <Popup>
                     <div data-testid="route-leg-popup" data-day-id={dayId} className="min-w-40">
-                      <p className="text-[11px] text-stone-400">{dayTitle}</p>
-                      <p className="text-sm font-semibold text-stone-800">
+                      <p className="text-micro font-normal text-ink-faint">{dayTitle}</p>
+                      <p className="mt-1 text-title text-ink">
                         {cards[leg.from.cardId]?.title ?? '출발'} →{' '}
                         {cards[leg.to.cardId]?.title ?? '도착'}
                       </p>
-                      <p className="mt-0.5 text-[11px] tabular-nums text-stone-500">
+                      <p className="mt-1 text-label font-normal tabular-nums text-ink-muted">
                         {legTiming(leg)}
                       </p>
                       {/* The same straight-line fact the 일정 tab's gap chip
@@ -195,15 +206,15 @@ export default function RouteLayer({ drawings, cards, columns }: RouteLayerProps
                       <p
                         data-testid="route-leg-distance"
                         data-km={haversineKm(leg.from, leg.to).toFixed(2)}
-                        className="text-[11px] tabular-nums text-stone-500"
+                        className="text-label font-normal tabular-nums text-ink-muted"
                       >
-                        ↕ 직선 {formatDistanceKm(haversineKm(leg.from, leg.to))}
+                        직선 {formatDistanceKm(haversineKm(leg.from, leg.to))}
                       </p>
                       {ride ? (
                         <p
                           data-testid="route-leg-transport"
                           data-card-id={ride.id}
-                          className="mt-1 text-[11px] font-medium text-stone-600"
+                          className="mt-1 text-label text-ink"
                         >
                           {rideIcon ?? '🚗'} {ride.title}
                         </p>

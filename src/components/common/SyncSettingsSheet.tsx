@@ -5,14 +5,28 @@ import { daysBetween, formatLastBackup, loadBackupState } from '../../sync/backu
 import { exportJson, importJson } from '../../sync/exportImport';
 import { clearSettings, loadSettings, normalizeBaseUrl, saveSettings } from '../../sync/settings';
 import { restartSync, syncNow } from '../../sync/syncEngine';
+import Icon from './Icon';
 import Sheet from './Sheet';
+import { SYNC_DOT_CLASS } from './SyncStatusChip';
 import {
-  GHOST_BUTTON_CLASS,
+  CHIP_NEUTRAL,
+  DANGER_TEXT_BUTTON_CLASS,
   INPUT_CLASS,
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
-  DANGER_TEXT_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+  SECTION_TITLE_CLASS,
 } from './formStyles';
+
+/** One read-only fact. No box, no background — it is not pressable (§4.8-1). */
+function Fact({ term, children }: { term: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-line py-2 text-label">
+      <dt className="shrink-0 font-normal text-ink-muted">{term}</dt>
+      <dd className="min-w-0 truncate font-semibold tabular-nums text-ink">{children}</dd>
+    </div>
+  );
+}
 
 /** A short outcome line under the buttons: green for good news, rose for bad. */
 interface Notice {
@@ -141,7 +155,7 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
       testId="sync-settings"
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             data-testid="sync-clear"
@@ -151,22 +165,23 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
           >
             해제
           </button>
-          <div className="flex gap-2">
+          <div className="ml-auto flex min-w-0 flex-1 justify-end gap-2">
             <button
               type="button"
               data-testid="sync-test"
               onClick={handleTest}
               disabled={busy || !configured}
-              className={`${GHOST_BUTTON_CLASS} disabled:cursor-not-allowed disabled:text-stone-300`}
+              className={SECONDARY_BUTTON_CLASS}
             >
               연결 테스트
             </button>
+            {/* Primary is the biggest button on the screen. It was the smallest. */}
             <button
               type="button"
               data-testid="sync-save"
               onClick={handleSave}
               disabled={busy}
-              className={PRIMARY_BUTTON_CLASS}
+              className={`${PRIMARY_BUTTON_CLASS} flex-1 sm:flex-none sm:min-w-28`}
             >
               저장
             </button>
@@ -174,10 +189,14 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
         </div>
       }
     >
-      <div className="space-y-4">
-        <div className="flex items-center justify-between rounded-xl bg-stone-50 px-3.5 py-2.5">
-          <span className="text-xs font-medium text-stone-500">상태</span>
-          <span data-testid="sync-status-text" className="text-sm font-semibold text-stone-700">
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <span className={SECTION_TITLE_CLASS}>서버</span>
+          <span data-testid="sync-status-text" className={CHIP_NEUTRAL}>
+            <span
+              aria-hidden="true"
+              className={`h-2 w-2 rounded-full ${SYNC_DOT_CLASS[status]}`}
+            />
             {SYNC_STATUS_LABELS[status]}
           </span>
         </div>
@@ -198,8 +217,9 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
             placeholder="/api 또는 https://xxx.synology.me/travel/api"
             className={INPUT_CLASS}
           />
-          <p className="mt-1 text-[11px] text-stone-400">
-            data.php가 있는 폴더예요. 같은 서버에서 열었다면 <code>/api</code>면 충분해요.
+          <p className="mt-2 text-micro font-normal text-ink-faint">
+            data.php가 있는 폴더예요. 같은 서버에서 열었다면{' '}
+            <code className="rounded-xs bg-sunken px-1">/api</code>면 충분해요.
           </p>
         </div>
 
@@ -224,32 +244,29 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
           <p
             data-testid="sync-notice"
             data-tone={notice.tone}
-            className={`text-sm ${notice.tone === 'ok' ? 'text-emerald-600' : 'text-rose-500'}`}
+            className={`flex items-center gap-2 text-label ${
+              notice.tone === 'ok' ? 'text-ok' : 'text-danger'
+            }`}
           >
+            <Icon name={notice.tone === 'ok' ? 'check' : 'alert'} size={16} />
             {notice.text}
           </p>
         ) : null}
 
-        <dl className="space-y-1 rounded-xl bg-stone-50 px-3.5 py-2.5 text-xs text-stone-500">
-          <div className="flex justify-between gap-3">
-            <dt>마지막 동기화</dt>
-            <dd data-testid="sync-last" className="text-stone-700">
-              {formatSyncedAt(lastSyncedAt)}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt>서버 버전</dt>
-            <dd data-testid="sync-version" className="text-stone-700">
-              {serverVersion}
-            </dd>
-          </div>
+        {/* Read-only facts. Rows, not boxes — nothing here can be pressed. */}
+        <dl>
+          <Fact term="마지막 동기화">
+            <span data-testid="sync-last">{formatSyncedAt(lastSyncedAt)}</span>
+          </Fact>
+          <Fact term="서버 버전">
+            <span data-testid="sync-version">{serverVersion}</span>
+          </Fact>
           {lastError ? (
-            <div className="flex justify-between gap-3">
-              <dt>최근 오류</dt>
-              <dd data-testid="sync-error" className="min-w-0 truncate text-rose-500">
+            <Fact term="최근 오류">
+              <span data-testid="sync-error" className="text-danger">
                 {lastError}
-              </dd>
-            </div>
+              </span>
+            </Fact>
           ) : null}
         </dl>
 
@@ -258,25 +275,26 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
           data-testid="sync-now"
           onClick={handleSyncNow}
           disabled={busy || !configured}
-          className={`${GHOST_BUTTON_CLASS} w-full disabled:cursor-not-allowed disabled:text-stone-300`}
+          className={`${SECONDARY_BUTTON_CLASS} w-full`}
         >
           지금 동기화
         </button>
 
-        <div className="border-t border-stone-100 pt-4">
-          <p className={LABEL_CLASS}>백업</p>
-          <p className="mt-1 text-xs text-stone-500">
-            마지막 백업:{' '}
-            <span data-testid="backup-last" data-days={backupDays} className="font-medium">
-              {formatLastBackup(backupState.lastBackupAt)}
-            </span>
-          </p>
-          <div className="mt-1.5 flex gap-2">
+        <div className="border-t border-line pt-6">
+          <h3 className={SECTION_TITLE_CLASS}>백업</h3>
+          <dl className="mt-2">
+            <Fact term="마지막 백업">
+              <span data-testid="backup-last" data-days={backupDays}>
+                {formatLastBackup(backupState.lastBackupAt)}
+              </span>
+            </Fact>
+          </dl>
+          <div className="mt-4 flex gap-2">
             <button
               type="button"
               data-testid="sync-export"
               onClick={handleExport}
-              className={`${GHOST_BUTTON_CLASS} flex-1`}
+              className={`${SECONDARY_BUTTON_CLASS} flex-1`}
             >
               내보내기
             </button>
@@ -285,7 +303,7 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
               data-testid="sync-import"
               onClick={() => fileInput.current?.click()}
               disabled={busy}
-              className={`${GHOST_BUTTON_CLASS} flex-1`}
+              className={`${SECONDARY_BUTTON_CLASS} flex-1`}
             >
               가져오기
             </button>
@@ -298,7 +316,7 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
             onChange={handleImport}
             className="hidden"
           />
-          <p className="mt-2 text-[11px] leading-relaxed text-stone-400">
+          <p className="mt-3 text-micro font-normal text-ink-faint">
             가져오기는 덮어쓰지 않고 지금 데이터와 합쳐요. NAS 없이도 로컬 저장으로 동작해요.
           </p>
         </div>

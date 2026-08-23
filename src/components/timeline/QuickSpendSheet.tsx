@@ -36,14 +36,20 @@ export default function QuickSpendSheet({
   return (
     <Sheet title="지출 기록" onClose={onClose} testId="quick-spend-sheet">
       <div className="space-y-1">
-        <p data-testid="quick-spend-card" data-card-id={card.id} className="text-sm font-semibold text-stone-800">
+        <p
+          data-testid="quick-spend-card"
+          data-card-id={card.id}
+          className="text-title text-ink"
+        >
           {live?.title ?? card.title}
         </p>
-        {subtitle ? <p className="text-xs tabular-nums text-stone-400">{subtitle}</p> : null}
+        {subtitle ? (
+          <p className="text-label font-normal tabular-nums text-ink-muted">{subtitle}</p>
+        ) : null}
         <p
           data-testid="quick-spend-total"
           data-total={total}
-          className="text-xs tabular-nums text-stone-500"
+          className="text-label font-normal tabular-nums text-ink-muted"
         >
           지금까지 {formatBudget(total, currency)}
         </p>

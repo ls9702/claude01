@@ -85,7 +85,7 @@ export default function PlaceSearch({ initialQuery = '', onPick, onClose }: Plac
         }}
         className="space-y-3"
       >
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 pt-2">
           <input
             data-testid="place-search-input"
             aria-label="장소 이름"
@@ -105,7 +105,7 @@ export default function PlaceSearch({ initialQuery = '', onPick, onClose }: Plac
           </button>
         </div>
 
-        <p className="text-[11px] leading-relaxed text-stone-400">
+        <p className="text-micro font-normal text-ink-faint">
           OpenStreetMap(Nominatim)에서 찾아요. 검색 버튼을 눌러야 요청해요.
         </p>
       </form>
@@ -114,7 +114,7 @@ export default function PlaceSearch({ initialQuery = '', onPick, onClose }: Plac
         <p
           data-testid="place-search-error"
           role="alert"
-          className="mt-3 rounded-xl bg-rose-50 px-3 py-2.5 text-xs leading-relaxed text-rose-600"
+          className="mt-3 rounded-md bg-danger-wash px-3 py-2 text-label font-normal text-danger"
         >
           {error}
         </p>
@@ -123,14 +123,14 @@ export default function PlaceSearch({ initialQuery = '', onPick, onClose }: Plac
       {status === 'done' && !error && results.length === 0 ? (
         <p
           data-testid="place-search-empty"
-          className="mt-3 rounded-xl bg-stone-50 px-3 py-2.5 text-xs leading-relaxed text-stone-400"
+          className="mt-3 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-faint"
         >
           검색 결과가 없어요. 다른 이름으로 찾아보세요.
         </p>
       ) : null}
 
       {results.length > 0 ? (
-        <ul data-testid="place-search-results" className="mt-3 space-y-1.5">
+        <ul data-testid="place-search-results" className="mt-3 space-y-2">
           {results.map((place, index) => (
             <li key={`${place.lat},${place.lng},${index}`}>
               <button
@@ -143,10 +143,10 @@ export default function PlaceSearch({ initialQuery = '', onPick, onClose }: Plac
                   onPick(place);
                   onClose();
                 }}
-                className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-2.5 text-left text-xs leading-relaxed text-stone-700 hover:border-stone-300 hover:bg-stone-50"
+                className="w-full rounded-md border border-line bg-surface px-3 py-3 text-left transition-colors duration-[140ms] ease-quick hover:border-line-strong hover:bg-sunken"
               >
-                <span className="block font-medium">{place.address}</span>
-                <span className="mt-0.5 block text-[11px] tabular-nums text-stone-400">
+                <span className="block text-label text-ink">{place.address}</span>
+                <span className="mt-1 block text-micro font-normal tabular-nums text-ink-faint">
                   {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
                 </span>
               </button>

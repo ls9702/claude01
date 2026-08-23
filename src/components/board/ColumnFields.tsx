@@ -28,7 +28,7 @@ export default function ColumnFields({
   autoFocus = false,
 }: ColumnFieldsProps) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div>
         <label className={LABEL_CLASS} htmlFor={`${idPrefix}-name`}>
           카테고리 이름
@@ -46,7 +46,7 @@ export default function ColumnFields({
 
       <div>
         <span className={LABEL_CLASS}>아이콘</span>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-2">
           {ICON_PRESETS.map((preset) => (
             <button
               key={preset}
@@ -55,9 +55,12 @@ export default function ColumnFields({
               aria-pressed={icon === preset}
               data-testid={`column-icon-${preset}`}
               onClick={() => onIconChange(preset)}
+              style={{ fontSize: 16, lineHeight: 1 }}
               className={[
-                'h-9 w-9 rounded-lg text-base transition-colors',
-                icon === preset ? 'bg-stone-800' : 'bg-stone-100 hover:bg-stone-200',
+                'grid h-11 w-11 place-items-center rounded-md transition-colors duration-[140ms] ease-quick lg:h-9 lg:w-9',
+                icon === preset
+                  ? 'bg-inverse ring-2 ring-line-strong ring-offset-2 ring-offset-surface'
+                  : 'bg-sunken hover:bg-line',
               ].join(' ')}
             >
               {preset}
@@ -68,7 +71,7 @@ export default function ColumnFields({
 
       <div>
         <span className={LABEL_CLASS}>색상</span>
-        <div className="mt-1.5 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           {COLOR_TOKENS.map((token) => (
             <button
               key={token}
@@ -78,10 +81,10 @@ export default function ColumnFields({
               data-testid={`column-color-${token}`}
               onClick={() => onColorChange(token)}
               className={[
-                'h-7 w-7 rounded-full transition-transform',
+                'h-8 w-8 rounded-full transition-transform duration-[140ms] ease-quick',
                 COLORS[token].dot,
                 color === token
-                  ? 'scale-110 ring-2 ring-stone-800 ring-offset-2'
+                  ? 'scale-110 ring-2 ring-ink ring-offset-2 ring-offset-surface'
                   : 'hover:scale-105',
               ].join(' ')}
             />

@@ -45,7 +45,7 @@ export default function ColumnEditSheet({
       onClose={onClose}
       testId="column-form"
       footer={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-2">
           {canDelete ? (
             <button
               type="button"
@@ -61,7 +61,7 @@ export default function ColumnEditSheet({
             data-testid="column-submit"
             disabled={!canSubmit}
             onClick={() => canSubmit && onSubmit({ name: name.trim(), color, icon })}
-            className={`ml-auto flex-1 ${PRIMARY_BUTTON_CLASS}`}
+            className={`flex-1 ${PRIMARY_BUTTON_CLASS}`}
           >
             저장
           </button>
@@ -78,7 +78,7 @@ export default function ColumnEditSheet({
         idPrefix="edit-column"
       />
       {!canDelete ? (
-        <p className="mt-4 rounded-xl bg-stone-50 px-3 py-2.5 text-xs leading-relaxed text-stone-400">
+        <p className="mt-6 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-muted">
           마지막 카테고리는 삭제할 수 없어요.
         </p>
       ) : null}

@@ -1,5 +1,10 @@
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  DANGER_SOLID_BUTTON_CLASS,
+  PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+} from './formStyles';
 
 interface ConfirmDialogProps {
   title: string;
@@ -15,7 +20,8 @@ interface ConfirmDialogProps {
 }
 
 /**
- * Centered yes/no dialog. Mount it only while it should be visible.
+ * Centered yes/no dialog — a sheet shrunk to one question (M9 §3.2).
+ * Mount it only while it should be visible.
  */
 export default function ConfirmDialog({
   title,
@@ -47,19 +53,19 @@ export default function ConfirmDialog({
         type="button"
         aria-label="취소"
         onClick={onCancel}
-        className="absolute inset-0 h-full w-full cursor-default bg-stone-900/40"
+        className="tb-overlay absolute inset-0 h-full w-full cursor-default bg-ink/45 backdrop-blur-[2px]"
       />
-      <div className="tb-sheet-panel relative w-full max-w-xs rounded-2xl bg-white p-5 shadow-2xl">
-        <h2 className="text-base font-semibold text-stone-800">{title}</h2>
+      <div className="tb-sheet-panel relative w-full max-w-[20rem] rounded-lg bg-surface p-5 shadow-float">
+        <h2 className="text-title text-ink">{title}</h2>
         {description ? (
-          <div className="mt-2 text-sm leading-relaxed text-stone-500">{description}</div>
+          <div className="mt-2 text-label font-normal text-ink-muted">{description}</div>
         ) : null}
-        <div className="mt-5 flex gap-2">
+        <div className="mt-6 flex gap-2">
           <button
             type="button"
             onClick={onCancel}
             data-testid="confirm-cancel"
-            className="flex-1 rounded-xl bg-stone-100 px-4 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-200"
+            className={`flex-1 ${SECONDARY_BUTTON_CLASS}`}
           >
             {cancelLabel}
           </button>
@@ -67,10 +73,7 @@ export default function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             data-testid="confirm-accept"
-            className={[
-              'flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold text-white',
-              danger ? 'bg-rose-500 hover:bg-rose-600' : 'bg-stone-800 hover:bg-stone-900',
-            ].join(' ')}
+            className={`flex-1 ${danger ? DANGER_SOLID_BUTTON_CLASS : PRIMARY_BUTTON_CLASS}`}
           >
             {confirmLabel}
           </button>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -16,7 +16,12 @@ import { deleteWithUndo } from '../../stores/undoDelete';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
 import type { BoardColumn, Card } from '../../types/models';
+import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
+import Icon from '../common/Icon';
+import SyncStatusChip from '../common/SyncStatusChip';
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../common/formStyles';
+import { useIsDesktop } from '../../hooks/useMediaQuery';
 import ScheduleSheet from '../timeline/ScheduleSheet';
 import AddColumnPanel from './AddColumnPanel';
 import BoardColumnView from './BoardColumnView';
@@ -45,13 +50,11 @@ function TripPrompt() {
   return (
     <section
       data-testid="view-board"
-      className="mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-16 text-center"
+      className="mx-auto flex w-full max-w-md shrink-0 flex-col items-center gap-4 px-6 pb-16 pt-12 text-center"
     >
-      <span aria-hidden="true" className="text-4xl">
-        🗂️
-      </span>
-      <h1 className="text-xl font-semibold text-stone-800">보드</h1>
-      <p className="text-sm leading-relaxed text-stone-400">
+      <Icon name="board" size={24} className="text-ink-faint" />
+      <h1 className="text-title text-ink">보드</h1>
+      <p className="text-label font-normal text-ink-muted">
         {trips.length > 0
           ? '어떤 여행의 보드를 열까요?'
           : '먼저 여행을 만들면 보드가 열려요.'}
@@ -66,7 +69,7 @@ function TripPrompt() {
                 data-testid="board-trip-option"
                 data-trip-id={trip.id}
                 onClick={() => setActiveTrip(trip.id)}
-                className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-left text-sm font-medium text-stone-700 shadow-sm hover:shadow-md"
+                className={`${SECONDARY_BUTTON_CLASS} w-full justify-start`}
               >
                 {trip.title}
               </button>
@@ -78,7 +81,7 @@ function TripPrompt() {
           type="button"
           data-testid="board-goto-trips"
           onClick={() => setTab('trips')}
-          className="rounded-full bg-stone-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-stone-900"
+          className={PRIMARY_BUTTON_CLASS}
         >
           여행 만들러 가기
         </button>
@@ -103,6 +106,53 @@ export default function BoardView() {
 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const isDesktop = useIsDesktop();
+
+  /** The horizontal scroller, and which way it still has room to go. */
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const [reach, setReach] = useState({ before: false, after: false });
+  /**
+   * Where the arrows sit, in px from the scroller's top.
+   *
+   * The columns stretch to a viewport-tall minimum so the empty space below
+   * the last card stays a drop zone — which means `top-1/2` centred the arrows
+   * against that emptiness, level with nothing at all. They centre against the
+   * tallest column's *content* instead (M9 §4.2-4).
+   */
+  const [armTop, setArmTop] = useState<number | null>(null);
+
+  const measure = useCallback(() => {
+    const node = scrollerRef.current;
+    if (!node) return;
+    const before = node.scrollLeft > 8;
+    const after = node.scrollWidth - node.clientWidth - node.scrollLeft > 8;
+    setReach((current) =>
+      current.before === before && current.after === after ? current : { before, after },
+    );
+
+    const top = node.getBoundingClientRect().top;
+    let bottom = 0;
+    node.querySelectorAll<HTMLElement>('[data-column-body]').forEach((body) => {
+      const last = body.lastElementChild as HTMLElement | null;
+      const end = (last ?? body).getBoundingClientRect().bottom - top;
+      if (end > bottom) bottom = end;
+    });
+    const next = bottom > 0 ? Math.round(bottom / 2) : null;
+    setArmTop((current) => (current === next ? current : next));
+  }, []);
+
+  useLayoutEffect(() => {
+    measure();
+    const node = scrollerRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  });
+
+  /** One column-plus-gap of horizontal travel. */
+  const nudge = (direction: -1 | 1) =>
+    scrollerRef.current?.scrollBy({ left: direction * 288, behavior: 'smooth' });
 
   const trip = activeTripId ? workspace.trips[activeTripId] : undefined;
 
@@ -181,15 +231,26 @@ export default function BoardView() {
   const columnNameOf = (columnId: string) => workspace.columns[columnId]?.name ?? '';
 
   return (
-    <section data-testid="view-board" aria-labelledby="view-board-title" className="pb-6">
-      <header className="flex items-baseline gap-2 px-4 pb-3 pt-5">
-        <h1 id="view-board-title" className="text-2xl font-bold tracking-tight text-stone-800">
-          보드
-        </h1>
-        <p data-testid="board-trip-title" className="min-w-0 truncate text-sm text-stone-400">
-          {trip.title}
-        </p>
+    <section data-testid="view-board" aria-labelledby="view-board-title" className="shrink-0">
+      <header className="flex items-center gap-3 px-4 pb-4 pt-6">
+        <div className="min-w-0">
+          <h1 id="view-board-title" className="text-display text-ink">
+            보드
+          </h1>
+          <p data-testid="board-trip-title" className="mt-1 min-w-0 truncate text-label text-ink-muted">
+            {trip.title}
+          </p>
+        </div>
+        {isDesktop ? null : (
+          <span className="ml-auto">
+            <SyncStatusChip variant="dot" />
+          </span>
+        )}
       </header>
+
+      {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
+          top bar instead, so only one of the two ever mounts. */}
+      {isDesktop ? null : <BackupNudge variant="banner" className="mx-4 mb-4" />}
 
       <DndContext
         sensors={sensors}
@@ -198,28 +259,77 @@ export default function BoardView() {
         onDragEnd={onDragEnd}
         onDragCancel={() => setDraggingId(null)}
       >
-        <div
-          data-testid="board-scroller"
-          className="flex snap-x snap-mandatory items-start gap-3 overflow-x-auto px-4 pb-4 lg:snap-none"
-        >
-          {columns.map((column) => (
-            <BoardColumnView
-              key={column.id}
-              column={column}
-              cards={cardsByColumn[column.id] ?? []}
-              currency={trip.currency}
-              scheduledCounts={scheduledCounts}
-              scheduleBreakdowns={scheduleBreakdowns}
-              onAddCard={(target) => setDialog({ kind: 'card-create', column: target })}
-              onOpenCard={(card) => setDialog({ kind: 'card-edit', card })}
-              onEditColumn={(target) => setDialog({ kind: 'column-edit', column: target })}
-            />
-          ))}
+        <div className="relative">
+          {/* The scroller keeps its own affordances: a fade on the right while
+              anything is still off-screen, and a pair of desktop arrows. A
+              board that runs past the viewport must say so. */}
+          <div
+            ref={scrollerRef}
+            onScroll={measure}
+            data-testid="board-scroller"
+            data-overflow={reach.after ? 'true' : 'false'}
+            className="flex snap-x snap-mandatory items-stretch gap-4 overflow-x-auto px-4 pb-4 min-h-[calc(100dvh-13rem)] lg:min-h-[calc(100dvh-11rem)] lg:snap-none"
+          >
+            {columns.map((column) => (
+              <BoardColumnView
+                key={column.id}
+                column={column}
+                cards={cardsByColumn[column.id] ?? []}
+                currency={trip.currency}
+                scheduledCounts={scheduledCounts}
+                scheduleBreakdowns={scheduleBreakdowns}
+                onAddCard={(target) => setDialog({ kind: 'card-create', column: target })}
+                onOpenCard={(card) => setDialog({ kind: 'card-edit', card })}
+                onEditColumn={(target) => setDialog({ kind: 'column-edit', column: target })}
+              />
+            ))}
 
-          <AddColumnPanel
-            usedColors={columns.map((column) => column.color)}
-            onAdd={(name, color, icon) => addColumn(trip.id, name, color, icon)}
-          />
+            <AddColumnPanel
+              usedColors={columns.map((column) => column.color)}
+              onAdd={(name, color, icon) => addColumn(trip.id, name, color, icon)}
+            />
+          </div>
+
+          {/* The fade is the honest half of the pair: it says "there is more"
+              on touch, where there are no arrows to press. Same condition as
+              the 다음 arrow, so the two can never disagree. */}
+          {reach.after ? (
+            <span
+              data-testid="board-scroll-fade"
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-canvas via-canvas/70 to-transparent"
+            />
+          ) : null}
+
+          {/* Each arrow exists only while it has somewhere to go. */}
+          {reach.before ? (
+            <button
+              type="button"
+              data-testid="board-scroll-prev"
+              aria-label="이전 카테고리"
+              onClick={() => nudge(-1)}
+              style={armTop === null ? undefined : { top: armTop }}
+              className={`absolute left-1 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-surface text-ink shadow-float transition-colors duration-[140ms] ease-quick hover:bg-sunken lg:grid ${
+                armTop === null ? 'top-1/2' : ''
+              }`}
+            >
+              <Icon name="chevron-left" size={20} />
+            </button>
+          ) : null}
+          {reach.after ? (
+            <button
+              type="button"
+              data-testid="board-scroll-next"
+              aria-label="다음 카테고리"
+              onClick={() => nudge(1)}
+              style={armTop === null ? undefined : { top: armTop }}
+              className={`absolute right-1 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-surface text-ink shadow-float transition-colors duration-[140ms] ease-quick hover:bg-sunken lg:grid ${
+                armTop === null ? 'top-1/2' : ''
+              }`}
+            >
+              <Icon name="chevron-right" size={20} />
+            </button>
+          ) : null}
         </div>
 
         <DragOverlay dropAnimation={null}>

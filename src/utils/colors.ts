@@ -20,16 +20,26 @@ export const COLOR_TOKENS = [
 
 export type ColorToken = (typeof COLOR_TOKENS)[number];
 
+/**
+ * Each slot has **exactly one** job (M9 §2.1). The class strings never change —
+ * the Tailwind scanner needs them written out — but where they may be used is
+ * now fixed, because one token doing two jobs at two intensities is what made
+ * the palette unreadable.
+ */
 export interface ColorClasses {
   /** Korean name shown in the color picker. */
   label: string;
-  /** Small pill used for card chips. */
+  /**
+   * The **map legend only**. Card chips are neutral now: a card's left accent
+   * bar already names its category, and colouring the chips too meant 예산 and
+   * 지출 were the same colour on the same card.
+   */
   chip: string;
-  /** Left accent border of a card. */
+  /** Left accent bar — board card (3px) and timeline entry (3px). */
   accent: string;
-  /** Column header background + text. */
+  /** Column header background + text. Headers, and nothing else. */
   header: string;
-  /** Column body / drop-zone tint. */
+  /** Timeline entry block background (the column body is neutral canvas). */
   surface: string;
   /** Solid dot used in the picker and next to the column name. */
   dot: string;
@@ -106,9 +116,10 @@ export const COLORS: Record<ColorToken, ColorClasses> = {
 /**
  * Same palette as literal hex, for the places Tailwind cannot reach.
  *
- * Leaflet builds its `DivIcon` markers from an **HTML string** that never goes
- * through the Tailwind scanner, so the map pins are styled inline from this
- * map instead. The values mirror Tailwind's `*-500` shade — one step darker
+ * **Map pins only.** Leaflet builds its `DivIcon` markers from an HTML string
+ * that never goes through the Tailwind scanner, so the pins are styled inline
+ * from this map. Route lines used to cycle through it too; they are one ink
+ * colour now, so a day-2 route can never be mistaken for the 할일 category. The values mirror Tailwind's `*-500` shade — one step darker
  * than {@link ColorClasses.dot} so a white-bordered pin stays readable on top
  * of map tiles.
  */

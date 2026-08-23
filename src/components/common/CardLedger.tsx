@@ -4,7 +4,14 @@ import type { Card, Id } from '../../types/models';
 import { formatBudget, formatLocalAmount } from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatStamp } from '../../utils/time';
-import { INPUT_CLASS, LABEL_CLASS } from './formStyles';
+import Icon from './Icon';
+import {
+  CHIP_BUTTON_QUIET,
+  CHIP_SELECTED,
+  INPUT_CLASS,
+  PRIMARY_BUTTON_CLASS,
+  SECTION_TITLE_CLASS,
+} from './formStyles';
 
 /** `"12,000"` → `12000`; blank or garbled → `undefined`. */
 export const numberOrUndefined = (raw: string): number | undefined => {
@@ -99,10 +106,7 @@ export function ExpenseInputRow({
         data-active={active ? 'true' : 'false'}
         aria-pressed={active}
         onClick={() => setInLocal(mode === 'local')}
-        className={[
-          'rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors',
-          active ? 'bg-stone-800 text-white' : 'text-stone-500 hover:bg-stone-200',
-        ].join(' ')}
+        className={active ? CHIP_SELECTED : CHIP_BUTTON_QUIET}
       >
         {text}
       </button>
@@ -110,19 +114,19 @@ export function ExpenseInputRow({
   };
 
   return (
-    <div className="mt-1.5">
+    <div className="mt-2">
       {local ? (
         <div
           data-testid="expense-mode-toggle"
           data-mode={inLocal ? 'local' : 'base'}
-          className="mb-1.5 flex w-fit items-center gap-0.5 rounded-full bg-stone-100 p-0.5"
+          className="mb-2 inline-flex w-fit items-center gap-1 rounded-full bg-sunken p-1"
         >
           {modeButton('local', `현지 ${localCurrency}`)}
           {modeButton('base', `기준 ${currency}`)}
         </div>
       ) : null}
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2">
         <input
           data-testid="card-expense-amount-input"
           aria-label="금액"
@@ -148,7 +152,7 @@ export function ExpenseInputRow({
           data-testid="card-expense-add"
           onClick={submit}
           disabled={parsed == null}
-          className="shrink-0 rounded-xl bg-stone-800 px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-stone-900 disabled:bg-stone-200 disabled:text-stone-400"
+          className={`${PRIMARY_BUTTON_CLASS} shrink-0`}
         >
           추가
         </button>
@@ -158,7 +162,7 @@ export function ExpenseInputRow({
         <p
           data-testid="expense-converted"
           data-amount={converted}
-          className="mt-1 text-[11px] tabular-nums text-stone-400"
+          className="mt-2 text-micro font-normal tabular-nums text-ink-faint"
         >
           ≈ {formatBudget(converted, currency)}
         </p>
@@ -209,36 +213,36 @@ export default function CardLedger({
   };
 
   return (
-    <div className="mt-5 space-y-5 border-t border-stone-100 pt-4">
+    <div className="mt-6 space-y-6 border-t border-line pt-6">
       <section>
         <div className="flex items-baseline justify-between gap-2">
-          <span className={LABEL_CLASS}>지출 기록</span>
+          <h3 className={SECTION_TITLE_CLASS}>지출 기록</h3>
           <span
             data-testid="card-expense-total"
             data-total={total}
-            className="text-xs font-semibold tabular-nums text-stone-600"
+            className="text-label font-semibold tabular-nums text-ink"
           >
             합계 {formatBudget(total, currency)}
           </span>
         </div>
 
         {expenses.length > 0 ? (
-          <ul className="mt-1.5 space-y-1">
+          <ul className="mt-2 space-y-1">
             {expenses.map((expense) => (
               <li
                 key={expense.id}
                 data-testid="card-expense-row"
                 data-expense-id={expense.id}
                 data-amount={expense.amount}
-                className="flex items-center gap-2 rounded-xl bg-stone-50 px-3 py-2"
+                className="flex h-11 items-center gap-2 rounded-md bg-sunken px-3"
               >
-                <span className="min-w-0 flex-1 truncate text-xs text-stone-600">
+                <span className="min-w-0 flex-1 truncate text-label font-normal text-ink">
                   {expense.label?.trim() || '지출'}
                 </span>
-                <span className="shrink-0 text-xs font-semibold tabular-nums text-stone-700">
+                <span className="shrink-0 text-label font-semibold tabular-nums text-ink">
                   {formatBudget(expense.amount, currency)}
                 </span>
-                <span className="shrink-0 text-[10px] tabular-nums text-stone-400">
+                <span className="shrink-0 text-micro font-normal tabular-nums text-ink-faint">
                   {formatStamp(expense.at)}
                 </span>
                 <button
@@ -246,15 +250,15 @@ export default function CardLedger({
                   data-testid="card-expense-remove"
                   aria-label="지출 삭제"
                   onClick={() => removeExpense(card.id, expense.id)}
-                  className="-mr-1 shrink-0 rounded-full px-1.5 py-0.5 text-xs text-stone-300 hover:bg-rose-50 hover:text-rose-500"
+                  className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-danger-wash hover:text-danger"
                 >
-                  ✕
+                  <Icon name="close" size={16} />
                 </button>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="mt-1.5 rounded-xl bg-stone-50 px-3 py-2.5 text-xs text-stone-400">
+          <p className="mt-2 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-faint">
             아직 기록한 지출이 없어요.
           </p>
         )}
@@ -270,29 +274,29 @@ export default function CardLedger({
       {showComments ? (
         <section>
           <div className="flex items-baseline justify-between gap-2">
-            <span className={LABEL_CLASS}>코멘트</span>
+            <h3 className={SECTION_TITLE_CLASS}>코멘트</h3>
             <span
               data-testid="card-comment-count"
               data-count={comments.length}
-              className="text-xs tabular-nums text-stone-400"
+              className="text-label tabular-nums text-ink-muted"
             >
               {comments.length}개
             </span>
           </div>
 
           {comments.length > 0 ? (
-            <ul className="mt-1.5 max-h-48 space-y-1 overflow-y-auto">
+            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
               {comments.map((entry) => (
                 <li
                   key={entry.id}
                   data-testid="card-comment-row"
                   data-comment-id={entry.id}
-                  className="flex items-start gap-2 rounded-xl bg-stone-50 px-3 py-2"
+                  className="flex items-start gap-2 rounded-md bg-sunken px-3 py-2"
                 >
-                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-stone-600">
+                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-label font-normal text-ink">
                     {entry.text}
                   </span>
-                  <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-stone-400">
+                  <span className="shrink-0 text-micro font-normal tabular-nums text-ink-faint">
                     {formatStamp(entry.at)}
                   </span>
                   <button
@@ -300,20 +304,20 @@ export default function CardLedger({
                     data-testid="card-comment-remove"
                     aria-label="코멘트 삭제"
                     onClick={() => removeComment(card.id, entry.id)}
-                    className="-mr-1 shrink-0 rounded-full px-1.5 py-0.5 text-xs text-stone-300 hover:bg-rose-50 hover:text-rose-500"
+                    className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-danger-wash hover:text-danger"
                   >
-                    ✕
+                    <Icon name="close" size={16} />
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="mt-1.5 rounded-xl bg-stone-50 px-3 py-2.5 text-xs text-stone-400">
+            <p className="mt-2 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-faint">
               첫 코멘트를 남겨보세요.
             </p>
           )}
 
-          <div className="mt-1.5 flex items-center gap-1.5">
+          <div className="mt-2 flex items-center gap-2">
             <input
               data-testid="card-comment-input"
               aria-label="코멘트"
@@ -332,7 +336,7 @@ export default function CardLedger({
               data-testid="card-comment-add"
               onClick={submitComment}
               disabled={!canAddComment}
-              className="shrink-0 rounded-xl bg-stone-800 px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-stone-900 disabled:bg-stone-200 disabled:text-stone-400"
+              className={`${PRIMARY_BUTTON_CLASS} shrink-0`}
             >
               등록
             </button>

@@ -42,9 +42,9 @@ export default function UpdateToast() {
     <div
       role="status"
       data-testid="update-toast"
-      className="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 lg:bottom-6"
+      className="pointer-events-none fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.75rem)] z-50 flex justify-center px-4 lg:bottom-6"
     >
-      <div className="tb-sheet-panel pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-xl bg-stone-800 px-4 py-3 text-sm text-white shadow-xl">
+      <div className="tb-sheet-panel pointer-events-auto flex w-full max-w-[24rem] items-center gap-3 rounded-md bg-inverse px-4 py-3 text-body text-surface shadow-float">
         <span className="min-w-0 flex-1">새 버전이 있어요</span>
         <button
           type="button"
@@ -53,7 +53,7 @@ export default function UpdateToast() {
             setNeedRefresh(false);
             void updateSW.current?.(true);
           }}
-          className="shrink-0 rounded-lg px-2 py-1 text-sm font-semibold text-amber-300 hover:bg-white/10"
+          className="shrink-0 rounded-xs px-2 py-1 text-label font-semibold text-surface underline decoration-surface/40 underline-offset-4 hover:decoration-surface"
         >
           새로고침
         </button>

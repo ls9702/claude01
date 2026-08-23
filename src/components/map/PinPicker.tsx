@@ -3,7 +3,8 @@ import { MapContainer, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { GeoPoint } from '../../types/models';
 import { formatLatLng, pinAddress } from '../../utils/geo';
-import { GHOST_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from '../common/formStyles';
+import Icon from '../common/Icon';
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../common/formStyles';
 import MapModal from './MapModal';
 import MapReady from './MapReady';
 import { OsmTiles, SEOUL_CENTER, SEOUL_ZOOM } from './mapBase';
@@ -79,15 +80,16 @@ export default function PinPicker({ initial, onPick, onClose }: PinPickerProps) 
             data-testid="pin-picker-center"
             data-lat={center.lat}
             data-lng={center.lng}
-            className="min-w-0 flex-1 truncate text-xs tabular-nums text-stone-500"
+            className="flex min-w-0 flex-1 items-center gap-1 truncate text-label font-normal tabular-nums text-ink-muted"
           >
-            📍 {formatLatLng(center.lat, center.lng)}
+            <Icon name="pin" size={16} />
+            {formatLatLng(center.lat, center.lng)}
           </span>
           <button
             type="button"
             data-testid="pin-picker-cancel"
             onClick={onClose}
-            className={GHOST_BUTTON_CLASS}
+            className={SECONDARY_BUTTON_CLASS}
           >
             취소
           </button>
@@ -123,11 +125,13 @@ export default function PinPicker({ initial, onPick, onClose }: PinPickerProps) 
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center"
         >
-          <div className="-mt-6 text-3xl drop-shadow-md">📍</div>
+          <span className="-mt-6" style={{ fontSize: 32, lineHeight: 1 }}>
+            📍
+          </span>
         </div>
 
-        <p className="pointer-events-none absolute inset-x-0 top-3 z-[500] text-center text-[11px] text-stone-600">
-          <span className="rounded-full bg-white/90 px-3 py-1 shadow-sm">
+        <p className="pointer-events-none absolute inset-x-0 top-3 z-[500] text-center text-micro font-normal text-ink">
+          <span className="rounded-full bg-surface/90 px-3 py-1 shadow-raise">
             지도를 움직여 원하는 위치를 가운데에 두세요
           </span>
         </p>

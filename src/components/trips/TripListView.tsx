@@ -1,10 +1,17 @@
 import { useMemo, useState } from 'react';
 import { format } from 'date-fns';
+import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { useUiStore } from '../../stores/uiStore';
 import { deleteWithUndo } from '../../stores/undoDelete';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import type { Trip } from '../../types/models';
+import type { Id, Trip } from '../../types/models';
+import { todayIso } from '../../timeline/today';
+import { diffDaysIso, formatShortDate, isIsoDate } from '../../utils/flights';
+import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
+import Icon from '../common/Icon';
+import SyncStatusChip from '../common/SyncStatusChip';
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../common/formStyles';
 import TripFormDialog, { type TripFormValues } from './TripFormDialog';
 import TripRecapSheet from './TripRecapSheet';
 
@@ -14,6 +21,18 @@ type Dialog =
   | { kind: 'delete'; trip: Trip }
   | { kind: 'recap'; trip: Trip }
   | null;
+
+/**
+ * 결산 / 수정 / 삭제 on a trip card.
+ *
+ * The visual disc stays 36px so three of them fit in a card's corner, but the
+ * `::before` blows the *hit* area out to 44px — the finger target the phone
+ * needs, without the padding the eye would have to look past (M9 §4.1-6).
+ */
+const TRIP_ICON_BUTTON =
+  "-m-1 relative grid h-9 w-9 place-items-center rounded-full p-1 text-ink-faint " +
+  "transition-colors duration-[140ms] ease-quick " +
+  "before:absolute before:-inset-1 before:content-['']";
 
 /** Trip list — the 여행 tab. Entry point to every board. */
 export default function TripListView() {
@@ -27,6 +46,7 @@ export default function TripListView() {
   const activeTripId = useUiStore((s) => s.activeTripId);
 
   const [dialog, setDialog] = useState<Dialog>(null);
+  const isDesktop = useIsDesktop();
 
   const trips = useMemo(
     () => Object.values(workspace.trips).sort((a, b) => b.createdAt - a.createdAt),
@@ -47,6 +67,36 @@ export default function TripListView() {
     }
     return acc;
   }, [workspace.trips, workspace.columns, workspace.cards]);
+
+  /**
+   * tripId → `5월 3일 ~ 5월 7일 · 5일간` (or `D-7` before it starts).
+   *
+   * Read straight off the dates the trip's days already carry, in exactly the
+   * shape 결산 shows — a traveller wants to know *when*, and only then how much
+   * of the board is filled in.
+   */
+  const periods = useMemo(() => {
+    const byTrip: Record<Id, string[]> = {};
+    for (const day of Object.values(workspace.days)) {
+      if (isIsoDate(day.date)) (byTrip[day.tripId] ??= []).push(day.date);
+    }
+    const today = todayIso(new Date());
+    const out: Record<Id, string> = {};
+    for (const [tripId, dates] of Object.entries(byTrip)) {
+      if (dates.length === 0) continue;
+      dates.sort();
+      const start = dates[0];
+      const end = dates[dates.length - 1];
+      const span = diffDaysIso(start, end) + 1;
+      const untilStart = diffDaysIso(today, start);
+      const range =
+        start === end
+          ? formatShortDate(start)
+          : `${formatShortDate(start)} ~ ${formatShortDate(end)}`;
+      out[tripId] = `${range} · ${untilStart > 0 ? `D-${untilStart}` : `${span}일간`}`;
+    }
+    return out;
+  }, [workspace.days]);
 
   const openBoard = (tripId: string) => {
     setActiveTrip(tripId);
@@ -84,55 +134,75 @@ export default function TripListView() {
     setDialog(null);
   };
 
+  const hasTrips = trips.length > 0;
+
   return (
     <section
       data-testid="view-trips"
       aria-labelledby="view-trips-title"
-      className="mx-auto max-w-3xl px-4 pb-8 pt-5 lg:max-w-5xl lg:pt-8"
+      className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-8 pt-6 lg:max-w-5xl"
     >
-      <header className="mb-5 flex items-center justify-between gap-3">
-        <div>
-          <h1 id="view-trips-title" className="text-2xl font-bold tracking-tight text-stone-800">
+      {/* The button lines up with the h1's cap height, not with the middle of
+          the two-line block beside it (M9 §4.1-5). */}
+      <header className="mb-6 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 id="view-trips-title" className="text-display text-ink">
             여행
           </h1>
-          <p className="mt-0.5 text-sm text-stone-400">
-            {trips.length > 0 ? `${trips.length}개의 여행` : '아직 만든 여행이 없어요'}
+          <p className="mt-1 text-label text-ink-muted">
+            {hasTrips ? `${trips.length}개의 여행` : '아직 만든 여행이 없어요'}
           </p>
         </div>
-        <button
-          type="button"
-          data-testid="add-trip"
-          onClick={() => setDialog({ kind: 'create' })}
-          className="rounded-full bg-stone-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-stone-900"
-        >
-          ＋ 새 여행
-        </button>
-      </header>
-
-      {trips.length === 0 ? (
-        <div
-          data-testid="trips-empty"
-          className="mt-10 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-stone-200 bg-white/60 px-6 py-14 text-center"
-        >
-          <span aria-hidden="true" className="text-4xl">
-            🧳
-          </span>
-          <p className="text-base font-semibold text-stone-700">첫 여행을 만들어보세요 ✈️</p>
-          <p className="max-w-xs text-sm leading-relaxed text-stone-400">
-            여행을 만들면 이동수단 · 할일 · 식사 · 숙소 · 볼거리 카테고리가 담긴 보드가 함께
-            생겨요.
-          </p>
+        <div className="mt-1 flex shrink-0 items-center gap-2">
+          {isDesktop ? null : <SyncStatusChip variant="dot" />}
+          {/* One primary per screen: with no trips yet the card below owns it. */}
           <button
             type="button"
-            data-testid="add-trip-empty"
+            data-testid="add-trip"
             onClick={() => setDialog({ kind: 'create' })}
-            className="mt-2 rounded-full bg-stone-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-stone-900"
+            className={hasTrips ? PRIMARY_BUTTON_CLASS : SECONDARY_BUTTON_CLASS}
           >
-            ＋ 새 여행 만들기
+            <Icon name="plus" size={16} />
+            새 여행
           </button>
         </div>
+      </header>
+
+      {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
+          top bar instead, so only one of the two ever mounts. */}
+      {isDesktop ? null : <BackupNudge variant="banner" className="mb-6" />}
+
+      {!hasTrips ? (
+        <div
+          data-testid="trips-empty"
+          className="rounded-lg bg-surface px-6 py-12 text-center shadow-raise"
+        >
+          {/* The card spans the page; its *contents* do not. An invitation set
+              in a 1200px-wide measure reads as a banner (M9 §4.1-4). */}
+          <div className="mx-auto flex max-w-[36rem] flex-col items-center gap-3">
+            <span aria-hidden="true" style={{ fontSize: 32, lineHeight: 1 }}>
+              🧳
+            </span>
+            <p className="text-title text-ink">첫 여행을 만들어보세요</p>
+            <p className="mx-auto max-w-[22rem] text-label font-normal text-ink-muted">
+              여행을 만들면 이동수단 · 할일 · 식사 · 숙소 · 볼거리 카테고리가 담긴 보드가 함께
+              생겨요.
+            </p>
+            <button
+              type="button"
+              data-testid="add-trip-empty"
+              onClick={() => setDialog({ kind: 'create' })}
+              className={`mt-2 ${PRIMARY_BUTTON_CLASS}`}
+            >
+              <Icon name="plus" size={16} />
+              새 여행 만들기
+            </button>
+          </div>
+        </div>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
+        // Two columns is the ceiling: a third made every card too narrow for
+        // the title it exists to show (M9 §4.1-2).
+        <ul className="grid gap-4 sm:grid-cols-2">
           {trips.map((trip) => {
             const count = counts[trip.id] ?? { columns: 0, cards: 0 };
             return (
@@ -141,19 +211,17 @@ export default function TripListView() {
                   type="button"
                   data-testid="trip-open"
                   onClick={() => openBoard(trip.id)}
-                  className="w-full rounded-2xl border border-stone-200/80 bg-white px-4 py-4 pr-32 text-left shadow-sm transition-shadow hover:shadow-md"
+                  className="w-full rounded-lg border border-line bg-surface px-4 py-4 pr-28 text-left shadow-raise transition-colors duration-[140ms] ease-quick hover:border-line-strong"
                 >
-                  <h2 className="truncate text-base font-semibold text-stone-800">{trip.title}</h2>
-                  <p className="mt-1 text-xs text-stone-400">
-                    {format(new Date(trip.createdAt), 'yyyy.MM.dd')} 만듦 · {trip.currency}
+                  <h2 className="truncate text-title text-ink">{trip.title}</h2>
+                  <p data-testid="trip-period" className="mt-1 text-label text-ink-muted">
+                    {periods[trip.id] ?? trip.currency}
                   </p>
-                  <p className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-stone-500">
-                      카테고리 {count.columns}
-                    </span>
-                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-stone-500">
-                      카드 {count.cards}
-                    </span>
+                  {/* Third rank, joined by interpuncts — three grey pills were
+                      three objects competing with the title (M9 §4.1-3). */}
+                  <p className="mt-2 text-micro font-normal text-ink-faint">
+                    카테고리 {count.columns} · 카드 {count.cards} ·{' '}
+                    {format(new Date(trip.createdAt), 'yyyy.MM.dd')} 만듦
                   </p>
                 </button>
 
@@ -163,27 +231,27 @@ export default function TripListView() {
                     data-testid="trip-recap-open"
                     aria-label={`${trip.title} 결산`}
                     onClick={() => setDialog({ kind: 'recap', trip })}
-                    className="rounded-full px-2 py-1 text-sm text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                    className={`${TRIP_ICON_BUTTON} hover:bg-sunken hover:text-ink`}
                   >
-                    📊
+                    <Icon name="chart" size={16} />
                   </button>
                   <button
                     type="button"
                     data-testid="trip-edit"
                     aria-label={`${trip.title} 수정`}
                     onClick={() => setDialog({ kind: 'edit', trip })}
-                    className="rounded-full px-2 py-1 text-sm text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                    className={`${TRIP_ICON_BUTTON} hover:bg-sunken hover:text-ink`}
                   >
-                    ✏️
+                    <Icon name="pencil" size={16} />
                   </button>
                   <button
                     type="button"
                     data-testid="trip-delete"
                     aria-label={`${trip.title} 삭제`}
                     onClick={() => setDialog({ kind: 'delete', trip })}
-                    className="rounded-full px-2 py-1 text-sm text-stone-400 hover:bg-rose-50"
+                    className={`${TRIP_ICON_BUTTON} hover:bg-danger-wash hover:text-danger`}
                   >
-                    🗑️
+                    <Icon name="trash" size={16} />
                   </button>
                 </div>
               </li>

@@ -2,11 +2,18 @@ import { useMemo } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { BoardColumn, Card, Id, Trip } from '../../types/models';
 import { todayIso } from '../../timeline/today';
-import { colorClasses, colorHex } from '../../utils/colors';
-import { diffDaysIso, formatShortDate, isIsoDate } from '../../utils/flights';
+
+import {
+  FLIGHT_CARD_PREFIX,
+  diffDaysIso,
+  formatShortDate,
+  isIsoDate,
+} from '../../utils/flights';
 import { formatBudget } from '../../utils/money';
 import { cardSpent, tripCardIds, tripSpend } from '../../utils/spend';
+import { EmojiIcon } from '../common/Icon';
 import Sheet from '../common/Sheet';
+import { SECTION_TITLE_CLASS } from '../common/formStyles';
 
 interface TripRecapSheetProps {
   trip: Trip;
@@ -71,6 +78,48 @@ export default function TripRecapSheet({ trip, onOpenCard, onClose }: TripRecapS
 
   const categoryMax = categories.reduce((max, row) => Math.max(max, row.amount), 0);
 
+  const spentCategories = categories.filter((row) => row.spent);
+  const plannedCategories = categories.filter((row) => !row.spent);
+
+  /**
+   * One ranking row. The bar's job is length, not hue — the name beside it
+   * already says which category this is, so a full-colour bar only added a
+   * sixth palette to the screen (M9 §4.6-1).
+   */
+  const categoryRow = (row: CategoryTotal) => (
+    <li
+      key={row.column.id}
+      data-testid="recap-cat-bar"
+      data-column-id={row.column.id}
+      data-amount={row.amount}
+      data-spent={row.spent ? 'true' : 'false'}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1 truncate text-label font-normal text-ink">
+          <EmojiIcon emoji={row.column.icon} className="bg-surface/70" />
+          {row.column.name}
+        </span>
+        <span className="shrink-0 text-label font-semibold tabular-nums text-ink">
+          {formatBudget(row.amount, trip.currency)}
+        </span>
+      </div>
+      <div
+        className={`mt-1 h-2 overflow-hidden rounded-full ${
+          row.spent ? 'bg-sunken' : 'bg-transparent ring-1 ring-line ring-inset'
+        }`}
+      >
+        {row.spent ? (
+          <div
+            className="h-full rounded-full bg-inverse"
+            style={{
+              width: `${categoryMax > 0 ? Math.max((row.amount / categoryMax) * 100, 4) : 0}%`,
+            }}
+          />
+        ) : null}
+      </div>
+    </li>
+  );
+
   const topCards = useMemo<Card[]>(
     () =>
       cards
@@ -105,34 +154,34 @@ export default function TripRecapSheet({ trip, onOpenCard, onClose }: TripRecapS
 
   return (
     <Sheet title="결산" onClose={onClose} testId="recap-sheet">
-      <div className="space-y-5">
-        <p data-testid="recap-trip-title" className="text-sm font-semibold text-stone-700">
+      <div className="space-y-6">
+        <p data-testid="recap-trip-title" className="text-title text-ink">
           {trip.title}
           {period ? (
-            <span data-testid="recap-period" className="ml-1.5 text-xs font-normal text-stone-400">
+            <span data-testid="recap-period" className="ml-2 text-label text-ink-muted">
               {period.range} · {period.tail}
             </span>
           ) : null}
         </p>
 
-        <section className="rounded-2xl bg-stone-50 px-4 py-3.5">
+        <section className="rounded-lg bg-sunken px-4 py-4">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-[11px] font-semibold text-stone-400">총지출</p>
+              <p className="text-micro text-ink-muted">총지출</p>
               <p
                 data-testid="recap-spent"
                 data-amount={totals.spent}
-                className="text-2xl font-bold tabular-nums text-stone-800"
+                className="text-display tabular-nums text-ink"
               >
                 {formatBudget(totals.spent, trip.currency)}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-[11px] font-semibold text-stone-400">총예산</p>
+              <p className="text-micro text-ink-muted">총예산</p>
               <p
                 data-testid="recap-budget"
                 data-amount={totals.budget}
-                className="text-base font-semibold tabular-nums text-stone-500"
+                className="text-title tabular-nums text-ink-muted"
               >
                 {formatBudget(totals.budget, trip.currency)}
               </p>
@@ -143,8 +192,8 @@ export default function TripRecapSheet({ trip, onOpenCard, onClose }: TripRecapS
             data-testid="recap-diff"
             data-amount={diff}
             data-over={overspent ? 'true' : 'false'}
-            className={`mt-2 text-xs font-semibold tabular-nums ${
-              overspent ? 'text-rose-600' : 'text-emerald-600'
+            className={`mt-3 text-label font-semibold tabular-nums ${
+              overspent ? 'text-danger' : 'text-ok'
             }`}
           >
             {overspent
@@ -154,78 +203,67 @@ export default function TripRecapSheet({ trip, onOpenCard, onClose }: TripRecapS
         </section>
 
         <section>
-          <p className="text-xs font-semibold text-stone-500">카테고리별</p>
+          <h3 className={SECTION_TITLE_CLASS}>카테고리별</h3>
           {categories.length === 0 ? (
-            <p className="mt-1.5 rounded-xl bg-stone-50 px-3 py-2.5 text-xs text-stone-400">
+            <p className="mt-2 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-faint">
               아직 예산도 지출도 없어요.
             </p>
           ) : (
-            <ul className="mt-1.5 space-y-2">
-              {categories.map((row) => (
-                <li
-                  key={row.column.id}
-                  data-testid="recap-cat-bar"
-                  data-column-id={row.column.id}
-                  data-amount={row.amount}
-                  data-spent={row.spent ? 'true' : 'false'}
-                >
-                  <div className="flex items-baseline justify-between gap-2 text-xs">
-                    <span className="min-w-0 truncate text-stone-600">
-                      <span aria-hidden="true">{row.column.icon}</span> {row.column.name}
-                    </span>
-                    <span className="shrink-0 font-semibold tabular-nums text-stone-700">
-                      {formatBudget(row.amount, trip.currency)}
-                      {row.spent ? '' : ' (예산)'}
-                    </span>
-                  </div>
-                  <div className={`mt-1 h-2 overflow-hidden rounded-full ${colorClasses(row.column.color).surface}`}>
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${categoryMax > 0 ? Math.max((row.amount / categoryMax) * 100, 4) : 0}%`,
-                        backgroundColor: colorHex(row.column.color),
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="mt-2 space-y-3">{spentCategories.map(categoryRow)}</ul>
+              {plannedCategories.length > 0 ? (
+                <>
+                  {/* Budget and spend are two different questions; ranking them
+                      in one list was what forced the "(예산)" hedge (§4.6-2). */}
+                  <p className="mt-4 text-micro text-ink-faint">아직 지출 없음</p>
+                  <ul className="mt-2 space-y-3">{plannedCategories.map(categoryRow)}</ul>
+                </>
+              ) : null}
+            </>
           )}
         </section>
 
         <section>
-          <p className="text-xs font-semibold text-stone-500">지출 Top {TOP_ROWS}</p>
+          <h3 className={SECTION_TITLE_CLASS}>지출 Top {TOP_ROWS}</h3>
           {topCards.length === 0 ? (
-            <p className="mt-1.5 rounded-xl bg-stone-50 px-3 py-2.5 text-xs text-stone-400">
+            <p className="mt-2 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-faint">
               아직 기록한 지출이 없어요.
             </p>
           ) : (
-            <ul className="mt-1.5 space-y-1">
-              {topCards.map((card, index) => (
-                <li key={card.id}>
-                  <button
-                    type="button"
-                    data-testid="recap-top-row"
-                    data-card-id={card.id}
-                    data-amount={cardSpent(card)}
-                    onClick={() => onOpenCard(card.id)}
-                    className="flex w-full items-center gap-2 rounded-xl bg-stone-50 px-3 py-2 text-left transition-colors hover:bg-stone-100"
-                  >
-                    <span className="w-3 shrink-0 text-[11px] font-bold tabular-nums text-stone-400">
-                      {index + 1}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-xs text-stone-700">
-                      <span aria-hidden="true">
-                        {workspace.columns[card.columnId]?.icon ?? '🗓'}
-                      </span>{' '}
-                      {card.title}
-                    </span>
-                    <span className="shrink-0 text-xs font-semibold tabular-nums text-stone-800">
-                      {formatBudget(cardSpent(card), trip.currency)}
-                    </span>
-                  </button>
-                </li>
-              ))}
+            <ul className="mt-2">
+              {topCards.map((card, index) => {
+                const title = card.title;
+                const icon = workspace.columns[card.columnId]?.icon ?? '📌';
+                // Rank, name, money: three sizes, so the eye can skim one
+                // column at a time instead of reading every row (§4.6-3).
+                return (
+                  <li key={card.id}>
+                    <button
+                      type="button"
+                      data-testid="recap-top-row"
+                      data-card-id={card.id}
+                      data-amount={cardSpent(card)}
+                      onClick={() => onOpenCard(card.id)}
+                      // A ranking is a table of five, not five cards: one
+                      // 44px row per line, told apart by a hairline (§4.6-3).
+                      className="flex h-11 w-full items-center gap-2 border-b border-line px-3 text-left transition-colors duration-[140ms] ease-quick hover:bg-sunken"
+                    >
+                      <span className="w-4 shrink-0 text-micro font-normal tabular-nums text-ink-faint">
+                        {index + 1}
+                      </span>
+                      {title.trimStart().startsWith(FLIGHT_CARD_PREFIX) ? null : (
+                        <EmojiIcon emoji={icon} className="bg-surface/70" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-label font-normal text-ink">
+                        {title}
+                      </span>
+                      <span className="shrink-0 text-label font-semibold tabular-nums text-ink">
+                        {formatBudget(cardSpent(card), trip.currency)}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

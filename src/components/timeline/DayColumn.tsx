@@ -14,6 +14,8 @@ import {
 } from '../../timeline/layout';
 import type { SpendTotals } from '../../utils/spend';
 import { formatClock, formatDayDate, minToY } from '../../utils/time';
+import Icon from '../common/Icon';
+import { POPOVER_CLASS, POPOVER_ROW_DANGER_CLASS } from '../common/formStyles';
 import EntryBlock from './EntryBlock';
 import SpendChip from './SpendChip';
 import { HOURS } from './TimeAxis';
@@ -111,78 +113,96 @@ export default function DayColumn({
       data-testid="timeline-day"
       data-day-id={day.id}
       aria-label={dayTitle(day, index)}
-      className={`flex flex-col border-l border-stone-200 ${fullWidth ? 'min-w-0 flex-1' : 'shrink-0'}`}
+      className={`flex flex-col border-l border-line ${fullWidth ? 'min-w-0 flex-1' : 'shrink-0'}`}
       style={fullWidth ? undefined : { width: DAY_COLUMN_PX }}
     >
+      {/* Below `lg` the pager above the grid says all of this, so the header
+          folds down to a screen-reader line rather than repeating itself
+          (M9 §4.4-2). It stays in the DOM: it is this day's accessible name. */}
       <header
         ref={headerRef}
         data-testid="timeline-day-header"
-        className="sticky top-0 z-20 flex items-center gap-1 border-b border-stone-200 bg-white/95 px-2 backdrop-blur"
-        style={{ height: HEADER_PX }}
+        className={
+          fullWidth
+            ? 'sr-only'
+            : 'sticky top-0 z-20 flex items-center gap-1 border-b border-line bg-surface/95 px-2 backdrop-blur'
+        }
+        style={fullWidth ? undefined : { height: HEADER_PX }}
       >
         <div className="min-w-0 flex-1">
-          <p
-            data-testid="timeline-day-title"
-            className="truncate text-xs font-semibold text-stone-700"
-          >
+          <p data-testid="timeline-day-title" className="truncate text-label font-semibold text-ink">
             {dayTitle(day, index)}
           </p>
-          <p className="truncate text-[10px] text-stone-400">{daySubtitle(day, index)}</p>
+          <p className="truncate text-micro font-normal text-ink-muted">
+            {daySubtitle(day, index)}
+          </p>
         </div>
         {/* On mobile the pager carries the day's money chip instead — one
-            `day-spend` per visible day, wherever the day heading lives. */}
+            `day-spend` per visible day, wherever the day heading lives.
+            The slot is reserved either way so headers stay on one rhythm. */}
         {fullWidth ? null : (
-          <SpendChip totals={spend} currency={currency} testId="day-spend" dayId={day.id} />
+          <span className="flex w-14 shrink-0 justify-end">
+            <SpendChip totals={spend} currency={currency} testId="day-spend" dayId={day.id} />
+          </span>
         )}
         <span
           data-testid="timeline-day-count"
-          className="rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-stone-500"
+          className="rounded-full bg-sunken px-2 py-px text-micro tabular-nums text-ink-muted"
         >
           {entries.length}
         </span>
-        <button
-          type="button"
-          data-testid="day-menu"
-          aria-label={`${dayTitle(day, index)} 메뉴`}
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((open) => !open)}
-          className="rounded-full px-1.5 py-0.5 text-sm leading-none text-stone-400 hover:bg-stone-100 hover:text-stone-600"
-        >
-          ⋯
-        </button>
-
-        {menuOpen ? (
-          <div
-            data-testid="day-menu-panel"
-            className="absolute right-1 top-full z-30 w-24 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg"
-          >
+        {/* The pager owns the ⋯ on mobile; one menu per visible day, always. */}
+        {fullWidth ? null : (
+          <>
             <button
               type="button"
-              data-testid="day-delete"
-              onClick={() => {
-                setMenuOpen(false);
-                onDeleteDay(day);
-              }}
-              className="block w-full px-3 py-2 text-left text-xs font-medium text-rose-500 hover:bg-rose-50"
+              data-testid="day-menu"
+              aria-label={`${dayTitle(day, index)} 메뉴`}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+              className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink"
             >
-              삭제
+              <Icon name="more" size={16} />
             </button>
-          </div>
-        ) : null}
+
+            {menuOpen ? (
+              <div data-testid="day-menu-panel" className={`${POPOVER_CLASS} right-1 top-full`}>
+                <button
+                  type="button"
+                  data-testid="day-delete"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDeleteDay(day);
+                  }}
+                  className={POPOVER_ROW_DANGER_CLASS}
+                >
+                  <Icon name="trash" size={16} />
+                  삭제
+                </button>
+              </div>
+            ) : null}
+          </>
+        )}
       </header>
 
       <div
         ref={gridRef}
         data-testid="timeline-day-grid"
         data-day-id={day.id}
-        className={`relative transition-colors ${isOver ? 'bg-sky-50' : 'bg-white'}`}
+        className={`relative transition-colors duration-[140ms] ease-quick ${
+          isOver ? 'bg-sunken ring-2 ring-line-strong ring-inset' : 'bg-surface'
+        }`}
         style={{ height: DAY_HEIGHT_PX }}
       >
         {HOURS.map((hour) => (
           <div
             key={hour}
             aria-hidden="true"
-            className={hour % 6 === 0 ? 'absolute inset-x-0 border-t border-stone-200' : 'absolute inset-x-0 border-t border-stone-100'}
+            className={
+              hour % 6 === 0
+                ? 'absolute inset-x-0 border-t border-line-strong/60'
+                : 'absolute inset-x-0 border-t border-line/70'
+            }
             style={{ top: minToY(hour * 60, PX_PER_MIN) }}
           />
         ))}
@@ -196,7 +216,7 @@ export default function DayColumn({
               entry={entry}
               card={card}
               color={column?.color ?? 'slate'}
-              icon={column?.icon ?? '🗓'}
+              icon={column?.icon ?? '📌'}
               lane={lanes[entry.id] ?? { id: entry.id, lane: 0, lanes: 1 }}
               onOpen={onOpenEntry}
             />
@@ -205,11 +225,18 @@ export default function DayColumn({
 
         {/* 이동 갭: a straight-line fact between two located stops, parked at
             the midpoint of the empty stretch. `pointer-events-none` keeps the
-            grid's drop target underneath it intact. */}
+            grid's drop target underneath it intact.
+
+            When there is no empty stretch at all (`gapMin <= 0`, the back-to-back
+            case the 시간이 부족해요 chip exists for) the midpoint lands *inside*
+            the next entry, on top of the now-line badge. Then the chip hangs off
+            the previous entry's end line instead, right-aligned. */}
         {(gaps ?? []).map((gap) => {
           const after = entryById.get(gap.afterEntryId);
           if (!after) return null;
-          const midMin = after.startMin + after.durationMin + gap.gapMin / 2;
+          const endMin = after.startMin + after.durationMin;
+          const spaced = gap.gapMin > 0;
+          const topMin = spaced ? endMin + gap.gapMin / 2 : endMin;
           const distance = formatDistanceKm(gap.distanceKm);
           if (!distance) return null;
 
@@ -220,19 +247,25 @@ export default function DayColumn({
               data-after={gap.afterEntryId}
               data-km={gap.distanceKm.toFixed(2)}
               data-impossible={gap.impossible ? 'true' : 'false'}
-              style={{ top: minToY(midMin, PX_PER_MIN) }}
-              className="pointer-events-none absolute left-1/2 z-10 -translate-x-1/2 -translate-y-1/2"
+              style={{ top: minToY(topMin, PX_PER_MIN) }}
+              className={[
+                'pointer-events-none absolute z-10',
+                spaced ? 'left-1/2 -translate-x-1/2 -translate-y-1/2' : 'right-1 -translate-y-full',
+              ].join(' ')}
             >
               <span
                 className={[
-                  'block max-w-[13rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums',
+                  'inline-flex h-6 max-w-[13rem] items-center gap-1 rounded-full px-2 text-micro tabular-nums',
                   gap.impossible
-                    ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300'
-                    : 'bg-stone-100/90 text-stone-500',
+                    ? 'bg-warn-wash text-warn-ink ring-1 ring-warn/40'
+                    : 'bg-sunken text-ink-muted',
                 ].join(' ')}
               >
-                ↕ 직선 {distance}
-                {gap.impossible ? ' · 시간이 부족해요' : ''}
+                <Icon name="arrow-up-down" size={16} />
+                <span className="truncate">
+                  직선 {distance}
+                  {gap.impossible ? ' · 시간이 부족해요' : ''}
+                </span>
               </span>
             </div>
           );
@@ -244,12 +277,12 @@ export default function DayColumn({
             data-min={Math.round(nowMin as number)}
             aria-hidden="true"
             style={{ top: minToY(nowMin as number, PX_PER_MIN) }}
-            className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+            className="pointer-events-none absolute inset-x-0 z-30 flex items-center"
           >
-            <span className="rounded-full bg-rose-500 px-1 py-px text-[9px] font-bold leading-none text-white tabular-nums">
+            <span className="rounded-full bg-now px-2 py-px text-micro leading-none text-surface tabular-nums">
               {formatClock(nowMin as number)}
             </span>
-            <span className="h-px flex-1 bg-rose-500" />
+            <span className="h-px flex-1 bg-now" />
           </div>
         ) : null}
       </div>

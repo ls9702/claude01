@@ -6,23 +6,33 @@ import {
   shouldNudgeBackup,
   snoozeBackupNudge,
 } from '../../sync/backup';
+import Icon from './Icon';
 import SyncSettingsSheet from './SyncSettingsSheet';
+import { BTN_SIZE_SM, SECONDARY_BUTTON_CLASS, withBtnSize } from './formStyles';
 
 /**
- * 백업 넛지 — a small chip beside the sync status that appears when this
- * device has not produced a backup file in a fortnight and there is now
- * something worth losing (M7a).
+ * 백업 넛지 — the hint that appears when this device has not produced a backup
+ * file in a fortnight and there is now something worth losing (M7a).
  *
- * It sits in the tab bar rather than in a view because it is about the
- * workspace, not about whichever tab happens to be open. Tapping it opens the
+ * Two shapes, one instance (M9 §3.3 / §3.5): a compact chip in the desktop top
+ * bar's utility zone, and a **one-line** warn banner on a phone. The banner is
+ * mounted by each view *below* its own h1 — a hint about last month's backup
+ * does not outrank the name of the screen you are on — and it is one `h-11`
+ * row, the same height as every other control in the app. Tapping it opens the
  * same 동기화 설정 sheet the chip next door opens, where 내보내기 lives; ✕
  * snoozes it for a week so it can never turn into wallpaper.
  *
  * The stamps live in `localStorage` and are read once per mount (plus after a
- * dismissal): nothing here needs to be reactive to the millisecond, and
- * polling the clock to hide a hint chip would be silly.
+ * dismissal): nothing here needs to be reactive to the millisecond.
  */
-export default function BackupNudge() {
+export default function BackupNudge({
+  variant = 'chip',
+  className = '',
+}: {
+  variant?: 'chip' | 'banner';
+  /** Margins the mounting view wants around the banner. Presentational only. */
+  className?: string;
+}) {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const [open, setOpen] = useState(false);
   /** Bumped by ✕ and by closing the sheet, to re-read the stored stamps. */
@@ -31,51 +41,71 @@ export default function BackupNudge() {
   const worthBacking = useMemo(() => isWorkspaceWorthBacking(workspace), [workspace]);
 
   // Read straight through on every render rather than memoizing: `revision`
-  // exists precisely to force this re-read after ✕ or after 내보내기, and one
-  // `localStorage.getItem` of a two-number object costs nothing.
+  // exists precisely to force this re-read after ✕ or after 내보내기.
   void revision;
   const visible = shouldNudgeBackup(loadBackupState(), worthBacking);
 
   const closeSheet = useCallback(() => {
     setOpen(false);
-    // 내보내기 inside the sheet stamps `lastBackupAt`; re-read so the chip goes.
+    // 내보내기 inside the sheet stamps `lastBackupAt`; re-read so the hint goes.
     setRevision((value) => value + 1);
   }, []);
 
+  const dismiss = () => {
+    snoozeBackupNudge();
+    setRevision((value) => value + 1);
+  };
+
   if (!visible) return null;
+
+  const banner = variant === 'banner';
 
   return (
     <>
       <div
+        role="status"
         data-testid="backup-nudge"
         className={[
-          'flex flex-none items-center gap-0.5 rounded-full bg-amber-100 pl-2 pr-1',
-          'text-[11px] font-medium text-amber-800 lg:h-9 lg:pl-3 lg:text-xs',
-        ].join(' ')}
+          banner
+            ? 'flex h-11 shrink-0 items-center gap-2 rounded-md border border-warn/35 bg-warn-wash pl-3 pr-1 text-label text-warn-ink'
+            : 'flex h-9 flex-none items-center gap-1 rounded-full border border-warn/35 bg-warn-wash pl-3 pr-1 text-micro text-warn-ink',
+          className,
+        ]
+          .filter(Boolean)
+          .join(' ')}
       >
+        <Icon name="package" size={16} className="text-warn" />
         <button
           type="button"
           data-testid="backup-nudge-open"
           onClick={() => setOpen(true)}
           title="백업한 지 오래됐어요"
-          className="min-w-0 py-1.5 hover:text-amber-900"
+          className={
+            banner
+              ? 'min-w-0 flex-1 truncate text-left hover:underline'
+              : 'min-w-0 truncate py-1 hover:underline'
+          }
         >
-          <span aria-hidden="true">📦</span>
-          {/* The full sentence needs room; a phone tab bar has none. */}
-          <span className="ml-1 hidden lg:inline">백업한 지 오래됐어요</span>
-          <span className="sr-only lg:hidden">백업한 지 오래됐어요</span>
+          백업한 지 오래됐어요
         </button>
+        {banner ? (
+          <button
+            type="button"
+            data-testid="backup-nudge-export"
+            onClick={() => setOpen(true)}
+            className={`${withBtnSize(SECONDARY_BUTTON_CLASS, BTN_SIZE_SM)} shrink-0`}
+          >
+            내보내기
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid="backup-nudge-dismiss"
           aria-label="백업 알림 숨기기"
-          onClick={() => {
-            snoozeBackupNudge();
-            setRevision((value) => value + 1);
-          }}
-          className="rounded-full px-1.5 py-1 leading-none text-amber-600 hover:text-amber-900"
+          onClick={dismiss}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-warn/70 transition-colors duration-[140ms] ease-quick hover:bg-warn/10 hover:text-warn-ink"
         >
-          ✕
+          <Icon name="close" size={16} />
         </button>
       </div>
 

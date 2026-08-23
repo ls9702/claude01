@@ -1,17 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { latLngBounds } from 'leaflet';
-import { MapContainer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { BoardColumn, Card, Day, Id, Sheet as SheetModel } from '../../types/models';
 import { dayRoute } from '../../timeline/route';
-import { COLOR_HEX, COLOR_TOKENS, colorClasses } from '../../utils/colors';
+import { colorClasses } from '../../utils/colors';
 import { formatBudget } from '../../utils/money';
 import { cardCommentCount, cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
 import { dayTitle } from '../timeline/DayColumn';
+import Icon, { EmojiIcon } from '../common/Icon';
+import BackupNudge from '../common/BackupNudge';
+import SyncStatusChip from '../common/SyncStatusChip';
+import {
+  CHIP_BUTTON,
+  CHIP_MONEY,
+  CHIP_NEUTRAL,
+  CHIP_SELECTED,
+  DANGER_TEXT_BUTTON_CLASS,
+  PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+} from '../common/formStyles';
 import MapReady from './MapReady';
 import RouteLayer, { type RouteDrawing } from './RouteLayer';
 import {
@@ -42,13 +54,11 @@ function TripPrompt() {
   return (
     <section
       data-testid="view-map"
-      className="mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-16 text-center"
+      className="mx-auto flex w-full max-w-md shrink-0 flex-col items-center gap-4 px-6 pb-16 pt-12 text-center"
     >
-      <span aria-hidden="true" className="text-4xl">
-        🗺️
-      </span>
-      <h1 className="text-xl font-semibold text-stone-800">지도</h1>
-      <p className="text-sm leading-relaxed text-stone-400">
+      <Icon name="map" size={24} className="text-ink-faint" />
+      <h1 className="text-title text-ink">지도</h1>
+      <p className="text-label font-normal text-ink-muted">
         {trips.length > 0 ? '어떤 여행의 지도를 열까요?' : '먼저 여행을 만들면 지도가 열려요.'}
       </p>
 
@@ -61,7 +71,7 @@ function TripPrompt() {
                 data-testid="map-trip-option"
                 data-trip-id={trip.id}
                 onClick={() => setActiveTrip(trip.id)}
-                className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-left text-sm font-medium text-stone-700 shadow-sm hover:shadow-md"
+                className={`${SECONDARY_BUTTON_CLASS} w-full justify-start`}
               >
                 {trip.title}
               </button>
@@ -73,7 +83,7 @@ function TripPrompt() {
           type="button"
           data-testid="map-goto-trips"
           onClick={() => setTab('trips')}
-          className="rounded-full bg-stone-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-stone-900"
+          className={PRIMARY_BUTTON_CLASS}
         >
           여행 만들러 가기
         </button>
@@ -162,8 +172,15 @@ function useOnline(): boolean {
 /** Which day(s) the route control is drawing: nothing, one day, or all. */
 type RouteSelection = { kind: 'off' } | { kind: 'day'; dayId: Id } | { kind: 'all' };
 
-/** Line color of a single-day route — neutral, so the pins keep the palette. */
-const SINGLE_ROUTE_HEX = '#334155';
+/**
+ * The route's only colour.
+ *
+ * Ink, for one day and for 전체 alike (M9 §4.7-6): a route answers "in what
+ * order", not "of what kind", and borrowing the category palette for it meant
+ * the 할일 purple and the day-2 purple were the same purple. Days are told
+ * apart by the numbered stop badges instead.
+ */
+const ROUTE_HEX = '#453f3a';
 
 /**
  * The 지도 tab: every located card of the active trip as a colored pin.
@@ -189,6 +206,17 @@ export default function MapView() {
   /** 경로 controls: which sheet is being read, and what is drawn from it. */
   const [routeSheetId, setRouteSheetId] = useState<Id | undefined>(undefined);
   const [selection, setSelection] = useState<RouteSelection>({ kind: 'off' });
+
+  /** The day-chip strip only wears its right-hand fade while it has more. */
+  const routeStripRef = useRef<HTMLDivElement | null>(null);
+  const [routeOverflow, setRouteOverflow] = useState(false);
+  const measureRouteStrip = () => {
+    const node = routeStripRef.current;
+    if (!node) return;
+    const more = node.scrollWidth - node.clientWidth - node.scrollLeft > 4;
+    setRouteOverflow((current) => (current === more ? current : more));
+  };
+  useEffect(measureRouteStrip);
 
   const onSize = useCallback((next: { x: number; y: number }) => {
     setSize((current) => (current.x === next.x && current.y === next.y ? current : next));
@@ -266,12 +294,11 @@ export default function MapView() {
       .map<RouteDrawing>((day) => ({
         dayId: day.id,
         dayTitle: dayTitle(day, routeDays.indexOf(day)),
-        // One neutral line for a single day; the palette cycles for 전체 so
-        // two days crossing the same street stay tellable apart.
-        color:
-          selection.kind === 'all'
-            ? COLOR_HEX[COLOR_TOKENS[routeDays.indexOf(day) % COLOR_TOKENS.length]]
-            : SINGLE_ROUTE_HEX,
+        // Only 전체 needs the 일자-순번 badge: on a single day the stop
+        // numbers already run 1, 2, 3 with nothing to confuse them with.
+        ...(selection.kind === 'all' ? { dayIndex: routeDays.indexOf(day) + 1 } : {}),
+        // One ink line whatever is drawn — days are told apart by the badges.
+        color: ROUTE_HEX,
         route: dayRoute(workspace, day.id),
       }))
       .filter((drawing) => drawing.route.stops.length > 0);
@@ -310,7 +337,6 @@ export default function MapView() {
   if (!trip) return <TripPrompt />;
 
   const ready = size.x > 0 && size.y > 0;
-  const height = isDesktop ? 'calc(100dvh - 12rem)' : 'calc(100dvh - 15rem)';
 
   const toggleColumn = (columnId: Id) =>
     setMutedColumns((current) =>
@@ -326,27 +352,37 @@ export default function MapView() {
   };
 
   return (
-    <section data-testid="view-map" aria-labelledby="view-map-title" className="pb-2">
-      <header className="flex items-baseline gap-2 px-4 pb-2 pt-5">
-        <h1 id="view-map-title" className="text-2xl font-bold tracking-tight text-stone-800">
-          지도
-        </h1>
-        <p data-testid="map-trip-title" className="min-w-0 truncate text-sm text-stone-400">
-          {trip.title}
-        </p>
-        <span
-          data-testid="map-pin-count"
-          data-count={visiblePins.length}
-          className="ml-auto shrink-0 text-xs tabular-nums text-stone-400"
-        >
-          📍 {visiblePins.length}
-        </span>
+    <section
+      data-testid="view-map"
+      aria-labelledby="view-map-title"
+      // One flex column: the map takes the height the rows above it leave over
+      // rather than a `calc(100dvh - 15rem)` guess (M9 §S6).
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <header className="flex shrink-0 items-center gap-3 px-4 pb-4 pt-6">
+        <div className="min-w-0">
+          <h1 id="view-map-title" className="text-display text-ink">
+            지도
+          </h1>
+          <p data-testid="map-trip-title" className="mt-1 min-w-0 truncate text-label text-ink-muted">
+            {trip.title}
+          </p>
+        </div>
+        {isDesktop ? null : (
+          <span className="ml-auto">
+            <SyncStatusChip variant="dot" />
+          </span>
+        )}
       </header>
+
+      {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
+          top bar instead, so only one of the two ever mounts. */}
+      {isDesktop ? null : <BackupNudge variant="banner" className="mx-4 mb-4" />}
 
       {legendColumns.length > 0 ? (
         <div
           data-testid="map-legend"
-          className="flex flex-wrap items-center gap-1.5 px-4 pb-2"
+          className="flex shrink-0 flex-wrap items-center gap-2 px-4 pb-2"
           role="group"
           aria-label="카테고리 필터"
         >
@@ -362,106 +398,147 @@ export default function MapView() {
                 data-active={active}
                 aria-pressed={active}
                 onClick={() => toggleColumn(column.id)}
+                // The legend is the one place the category palette survives on
+                // this screen — it is a colour key, so it has to be coloured.
                 className={[
-                  'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
-                  active ? colors.chip : 'bg-stone-100 text-stone-400 line-through',
+                  'inline-flex h-9 shrink-0 items-center gap-1 rounded-full px-3 text-micro',
+                  'transition-colors duration-[140ms] ease-quick lg:h-8',
+                  active ? colors.chip : 'bg-sunken text-ink-faint line-through',
                 ].join(' ')}
               >
-                <span aria-hidden="true">{column.icon}</span>
+                <EmojiIcon emoji={column.icon} className="bg-surface/60" />
                 <span className="max-w-24 truncate">{column.name}</span>
               </button>
             );
           })}
+          {/* Third-rank fact, so it sits at the end of the key rather than
+              beside the h1 (M9 §4.7-7). */}
+          <span
+            data-testid="map-pin-count"
+            data-count={visiblePins.length}
+            className="ml-auto inline-flex shrink-0 items-center gap-1 text-micro font-normal tabular-nums text-ink-muted"
+          >
+            <Icon name="pin" size={16} />
+            {visiblePins.length}
+          </span>
         </div>
-      ) : null}
+      ) : (
+        <div className="flex shrink-0 items-center px-4 pb-2">
+          <span
+            data-testid="map-pin-count"
+            data-count={visiblePins.length}
+            className="ml-auto inline-flex shrink-0 items-center gap-1 text-micro font-normal tabular-nums text-ink-muted"
+          >
+            <Icon name="pin" size={16} />
+            {visiblePins.length}
+          </span>
+        </div>
+      )}
 
       {routeDays.length > 0 ? (
         <div
-          data-testid="map-route-controls"
-          className="flex flex-wrap items-center gap-1.5 px-4 pb-2"
-          role="group"
-          aria-label="일자별 경로"
+          // The fade belongs to a *wrapper*, not to the scroller: an `::after`
+          // pinned to the right inside an `overflow-x-auto` box is positioned
+          // against the scrolled content, so it slides away with the chips
+          // instead of standing at the viewport's edge (§4.7-2).
+          className={[
+            'relative shrink-0',
+            routeOverflow ? 'tb-strip-fade' : '',
+          ].join(' ')}
         >
-          <span className="text-[11px] font-medium text-stone-400">경로</span>
-
-          {sheets.length > 0 ? (
-            <select
-              data-testid="map-route-sheet-select"
-              aria-label="일정표 선택"
-              value={routeSheet?.id ?? ''}
-              onChange={(event) => {
-                setRouteSheetId(event.target.value);
-                setSelection({ kind: 'off' });
-              }}
-              className="max-w-32 rounded-full border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-600"
-            >
-              {sheets.map((sheet) => (
-                <option key={sheet.id} value={sheet.id}>
-                  {sheet.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-
-          <button
-            type="button"
-            data-testid="map-route-all"
-            data-active={selection.kind === 'all'}
-            aria-pressed={selection.kind === 'all'}
-            onClick={() =>
-              setSelection((current) =>
-                current.kind === 'all' ? { kind: 'off' } : { kind: 'all' },
-              )
-            }
-            className={[
-              'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
-              selection.kind === 'all'
-                ? 'bg-stone-800 text-white'
-                : 'bg-stone-100 text-stone-500 hover:bg-stone-200',
-            ].join(' ')}
+          <div
+            ref={routeStripRef}
+            onScroll={measureRouteStrip}
+            data-testid="map-route-controls"
+            // One line that scrolls, not two lines that push the map down.
+            className="flex items-center gap-2 overflow-x-auto px-4 pb-2"
+            role="group"
+            aria-label="일자별 경로"
           >
-            전체
-          </button>
+            <span className="shrink-0 text-micro font-normal text-ink-muted">경로</span>
 
-          {routeDays.map((day, index) => {
-            const active = selection.kind === 'day' && selection.dayId === day.id;
-            return (
-              <button
-                key={day.id}
-                type="button"
-                data-testid="map-route-day"
-                data-day-id={day.id}
-                data-active={active}
-                aria-pressed={active}
-                onClick={() =>
-                  setSelection((current) =>
-                    current.kind === 'day' && current.dayId === day.id
-                      ? { kind: 'off' }
-                      : { kind: 'day', dayId: day.id },
-                  )
-                }
-                className={[
-                  'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
-                  active
-                    ? 'bg-stone-800 text-white'
-                    : 'bg-stone-100 text-stone-500 hover:bg-stone-200',
-                ].join(' ')}
+            {sheets.length > 0 ? (
+              <div className="relative shrink-0">
+                <select
+                  data-testid="map-route-sheet-select"
+                  aria-label="일정표 선택"
+                  value={routeSheet?.id ?? ''}
+                  onChange={(event) => {
+                    setRouteSheetId(event.target.value);
+                    setSelection({ kind: 'off' });
+                  }}
+                  className="h-9 max-w-32 appearance-none rounded-md border border-line bg-surface pl-3 pr-8 text-label text-ink outline-none transition-colors duration-[140ms] ease-quick hover:border-line-strong focus:border-ink lg:h-8"
+                >
+                  {sheets.map((sheet) => (
+                    <option key={sheet.id} value={sheet.id}>
+                      {sheet.name}
+                    </option>
+                  ))}
+                </select>
+                <Icon
+                  name="chevron-down"
+                  size={16}
+                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-faint"
+                />
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              data-testid="map-route-all"
+              data-active={selection.kind === 'all'}
+              aria-pressed={selection.kind === 'all'}
+              onClick={() =>
+                setSelection((current) =>
+                  current.kind === 'all' ? { kind: 'off' } : { kind: 'all' },
+                )
+              }
+              className={selection.kind === 'all' ? CHIP_SELECTED : CHIP_BUTTON}
+            >
+              전체
+            </button>
+
+            {routeDays.map((day, index) => {
+              const active = selection.kind === 'day' && selection.dayId === day.id;
+              return (
+                <button
+                  key={day.id}
+                  type="button"
+                  data-testid="map-route-day"
+                  data-day-id={day.id}
+                  data-active={active}
+                  aria-pressed={active}
+                  onClick={() =>
+                    setSelection((current) =>
+                      current.kind === 'day' && current.dayId === day.id
+                        ? { kind: 'off' }
+                        : { kind: 'day', dayId: day.id },
+                    )
+                  }
+                  className={active ? CHIP_SELECTED : CHIP_BUTTON}
+                >
+                  {dayTitle(day, index)}
+                </button>
+              );
+            })}
+
+            {selection.kind !== 'off' && routePoints.length === 0 ? (
+              <span
+                data-testid="map-route-empty"
+                className="shrink-0 text-micro font-normal text-ink-faint"
               >
-                {dayTitle(day, index)}
-              </button>
-            );
-          })}
-
-          {selection.kind !== 'off' && routePoints.length === 0 ? (
-            <span data-testid="map-route-empty" className="text-[11px] text-stone-400">
-              위치가 있는 일정이 없어요
-            </span>
-          ) : null}
+                위치가 있는 일정이 없어요
+              </span>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
       {!online ? (
-        <p data-testid="map-offline-hint" className="px-4 pb-2 text-xs text-stone-400">
+        <p
+          data-testid="map-offline-hint"
+          className="shrink-0 px-4 pb-2 text-label font-normal text-ink-muted"
+        >
           오프라인이라 지도를 불러올 수 없어요
         </p>
       ) : null}
@@ -473,15 +550,18 @@ export default function MapView() {
         data-ready={ready}
         data-map-width={size.x}
         data-map-height={size.y}
-        className="relative isolate mx-4 overflow-hidden rounded-2xl border border-stone-200 bg-stone-100"
-        style={{ height }}
+        className="relative isolate mx-4 mb-4 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-sunken"
       >
         <MapContainer
           center={WORLD_CENTER}
           zoom={WORLD_ZOOM}
           scrollWheelZoom
+          // Zoom lives top-right so a popup opening above a pin never has to
+          // share the top-left corner with it (M9 §4.7-1).
+          zoomControl={false}
           className="h-full w-full"
         >
+          <ZoomControl position="topright" />
           <OsmTiles />
           <MapReady onSize={onSize} />
           <FitPins points={fitPoints} fitKey={trip.id} ready={ready} />
@@ -494,64 +574,74 @@ export default function MapView() {
               icon={cardPinIcon(column.color, column.icon, card.id, column.id)}
             >
               <Popup>
-                <div data-testid="map-popup" data-card-id={card.id} className="min-w-44">
-                  <p className="text-sm font-semibold text-stone-800">{card.title}</p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-stone-500">
-                    {card.location?.address ?? ''}
-                  </p>
+                <div
+                  data-testid="map-popup"
+                  data-card-id={card.id}
+                  className="min-w-52 max-w-[17rem] space-y-3"
+                >
+                  <div>
+                    <p className="text-title text-ink">{card.title}</p>
+                    {/* Full address in the tooltip, two lines on screen. */}
+                    <p
+                      title={card.location?.address ?? ''}
+                      className="mt-1 line-clamp-2 text-label font-normal text-ink-muted"
+                    >
+                      {card.location?.address ?? ''}
+                    </p>
+                  </div>
 
-                  <div className="mt-1.5 flex flex-wrap gap-1">
+                  <div className="flex flex-wrap gap-1">
                     {typeof card.defaultDurationMin === 'number' &&
                     card.defaultDurationMin > 0 ? (
-                      <span
-                        data-testid="map-popup-chip-duration"
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${colorClasses(column.color).chip}`}
-                      >
-                        ⏱ {formatDuration(card.defaultDurationMin)}
+                      <span data-testid="map-popup-chip-duration" className={CHIP_NEUTRAL}>
+                        <Icon name="clock" size={16} />
+                        {formatDuration(card.defaultDurationMin)}
                       </span>
                     ) : null}
                     {typeof card.budget === 'number' && Number.isFinite(card.budget) ? (
-                      <span
-                        data-testid="map-popup-chip-budget"
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${colorClasses(column.color).chip}`}
-                      >
-                        💰 {formatBudget(card.budget, trip.currency)}
+                      <span data-testid="map-popup-chip-budget" className={CHIP_NEUTRAL}>
+                        <Icon name="wallet" size={16} />
+                        {formatBudget(card.budget, trip.currency)}
                       </span>
                     ) : null}
                     {cardSpent(card) > 0 ? (
                       <span
                         data-testid="map-popup-chip-spent"
                         data-spent={cardSpent(card)}
-                        className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600"
+                        className={CHIP_MONEY}
                       >
-                        💸 {formatBudget(cardSpent(card), trip.currency)}
+                        <Icon name="receipt" size={16} />
+                        {formatBudget(cardSpent(card), trip.currency)}
                       </span>
                     ) : null}
                     {cardCommentCount(card) > 0 ? (
                       <span
                         data-testid="map-popup-chip-comments"
                         data-count={cardCommentCount(card)}
-                        className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600"
+                        className={CHIP_NEUTRAL}
                       >
-                        💬 {cardCommentCount(card)}
+                        <Icon name="comment" size={16} />
+                        {cardCommentCount(card)}
                       </span>
                     ) : null}
                   </div>
 
-                  <div className="mt-2 flex flex-col gap-1">
+                  <div className="flex flex-col gap-1">
                     <button
                       type="button"
                       data-testid="map-popup-edit"
                       onClick={() => editOnBoard(card)}
-                      className="rounded-lg bg-stone-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-900"
+                      className={`${PRIMARY_BUTTON_CLASS} w-full`}
                     >
                       보드에서 편집
                     </button>
+                    {/* The same destructive action wears the same clothes here
+                        as in every sheet footer (M9 §4.7-4). */}
                     <button
                       type="button"
                       data-testid="map-popup-remove"
                       onClick={() => updateCard(card.id, { location: undefined })}
-                      className="rounded-lg px-3 py-1.5 text-xs font-medium text-rose-500 hover:bg-rose-50"
+                      className={`${DANGER_TEXT_BUTTON_CLASS} w-full`}
                     >
                       지도에서 제거
                     </button>
@@ -574,16 +664,12 @@ export default function MapView() {
           <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center p-6">
             <div
               data-testid="map-empty"
-              className="max-w-xs rounded-2xl border border-stone-200 bg-white/95 px-5 py-4 text-center shadow-lg"
+              className="max-w-[22rem] rounded-lg bg-surface/95 px-5 py-4 text-center shadow-float"
             >
-              <span aria-hidden="true" className="text-3xl">
-                📍
-              </span>
-              <p className="mt-2 text-sm font-semibold text-stone-700">
-                카드에 위치를 추가하면 여기에 표시돼요
-              </p>
-              <p className="mt-1 text-xs leading-relaxed text-stone-400">
-                보드에서 카드를 열고 「🔍 검색」이나 「📍 지도에서 선택」을 눌러보세요.
+              <Icon name="pin" size={24} className="mx-auto text-ink-faint" />
+              <p className="mt-2 text-title text-ink">카드에 위치를 추가하면 여기에 표시돼요</p>
+              <p className="mt-1 text-label font-normal text-ink-muted">
+                보드에서 카드를 열고 「검색」이나 「지도에서 선택」을 눌러보세요.
               </p>
             </div>
           </div>

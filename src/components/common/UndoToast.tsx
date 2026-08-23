@@ -35,9 +35,9 @@ export default function UndoToast() {
       role="status"
       data-testid="undo-toast"
       data-duration={durationMs}
-      className="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 lg:bottom-6"
+      className="pointer-events-none fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.75rem)] z-50 flex justify-center px-4 lg:bottom-6"
     >
-      <div className="tb-sheet-panel pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-xl bg-stone-800 px-4 py-3 text-sm text-white shadow-xl">
+      <div className="tb-sheet-panel pointer-events-auto flex w-full max-w-[24rem] items-center gap-3 rounded-md bg-inverse px-4 py-3 text-body text-surface shadow-float">
         <span data-testid="undo-message" className="min-w-0 flex-1 truncate">
           {current.message}
         </span>
@@ -45,7 +45,7 @@ export default function UndoToast() {
           type="button"
           data-testid="undo-action"
           onClick={runUndo}
-          className="shrink-0 rounded-lg px-2 py-1 text-sm font-semibold text-amber-300 hover:bg-white/10"
+          className="shrink-0 rounded-xs px-2 py-1 text-label font-semibold text-surface underline decoration-surface/40 underline-offset-4 hover:decoration-surface"
         >
           실행 취소
         </button>

@@ -10,8 +10,10 @@ interface BoardRailProps {
   /** cardId → per-sheet split behind the badge's popover. */
   scheduleBreakdowns?: Record<Id, SheetScheduleCount[]>;
   onOpenCard: (card: Card) => void;
-  /** Matches the grid's height so the rail scrolls on its own. */
-  height: string;
+  /** Explicit height; omitted, the rail stretches to the grid row it sits in. */
+  height?: string;
+  /** True while this sheet is still empty — the drag hint is worth a line then. */
+  showHint?: boolean;
 }
 
 /**
@@ -30,17 +32,22 @@ export default function BoardRail({
   scheduleBreakdowns,
   onOpenCard,
   height,
+  showHint = false,
 }: BoardRailProps) {
   return (
     <aside
       data-testid="timeline-rail"
       aria-label="보드 카드"
-      className="hidden w-60 shrink-0 flex-col overflow-y-auto border-r border-stone-200 bg-stone-50/40 lg:flex"
+      className="hidden w-60 shrink-0 flex-col overflow-y-auto border-r border-line bg-canvas lg:flex"
       style={{ height }}
     >
-      <p className="sticky top-0 z-10 bg-white/90 px-3 py-2 text-[11px] font-medium text-stone-400 backdrop-blur">
-        카드를 오른쪽 시간표로 끌어다 놓으세요
-      </p>
+      {/* Shown only while there is something to drag and nowhere it has landed
+          yet — a permanent instruction is wallpaper (M9 §4.4-9). */}
+      {showHint ? (
+        <p className="sticky top-0 z-10 bg-surface/90 px-3 py-2 text-micro font-normal text-ink-faint backdrop-blur">
+          카드를 오른쪽 시간표로 끌어다 놓으세요
+        </p>
+      ) : null}
       <div className="flex flex-col gap-2 p-2">
         {columns.map((column) => (
           <BoardColumnView

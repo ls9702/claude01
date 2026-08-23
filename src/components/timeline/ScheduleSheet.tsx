@@ -12,7 +12,15 @@ import {
   formatTimeRange,
 } from '../../utils/time';
 import Sheet from '../common/Sheet';
-import { GHOST_BUTTON_CLASS, LABEL_CLASS, PRIMARY_BUTTON_CLASS } from '../common/formStyles';
+import Icon from '../common/Icon';
+import {
+  CHIP_BUTTON,
+  CHIP_SELECTED,
+  INPUT_CLASS,
+  LABEL_CLASS,
+  PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+} from '../common/formStyles';
 import { dayTitle } from './DayColumn';
 
 /** Opening time offered when a card is scheduled from the board. */
@@ -115,7 +123,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
         </button>
       }
     >
-      <div className="space-y-4">
+      <div className="space-y-6">
         {sheets.length > 1 ? (
           <div>
             <label className={LABEL_CLASS} htmlFor="schedule-sheet-select">
@@ -129,7 +137,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
                 setSheetId(event.target.value);
                 setDayId(undefined);
               }}
-              className="mt-1.5 w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-sm text-stone-800"
+              className={INPUT_CLASS}
             >
               {sheets.map((sheet) => (
                 <option key={sheet.id} value={sheet.id}>
@@ -143,19 +151,20 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
         <div>
           <span className={LABEL_CLASS}>일자</span>
           {days.length === 0 ? (
-            <div className="mt-1.5 rounded-xl border border-dashed border-stone-200 px-3 py-4 text-center">
-              <p className="text-xs text-stone-400">아직 일자가 없어요.</p>
+            <div className="mt-2 rounded-md border border-dashed border-line px-3 py-6 text-center">
+              <p className="text-label font-normal text-ink-faint">아직 일자가 없어요.</p>
               <button
                 type="button"
                 data-testid="schedule-add-day"
                 onClick={createDay}
-                className={`mt-2 ${GHOST_BUTTON_CLASS}`}
+                className={`mt-3 ${SECONDARY_BUTTON_CLASS}`}
               >
-                ＋ 일자 추가
+                <Icon name="plus" size={16} />
+                일자 추가
               </button>
             </div>
           ) : (
-            <div data-testid="schedule-day-picker" className="mt-1.5 flex flex-wrap gap-1.5">
+            <div data-testid="schedule-day-picker" className="mt-2 flex flex-wrap gap-2">
               {days.map((day, index) => {
                 const active = day.id === selectedDayId;
                 return (
@@ -166,12 +175,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
                     data-day-id={day.id}
                     aria-pressed={active}
                     onClick={() => setDayId(day.id)}
-                    className={[
-                      'rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
-                      active
-                        ? 'bg-stone-800 text-white'
-                        : 'bg-stone-100 text-stone-500 hover:bg-stone-200',
-                    ].join(' ')}
+                    className={active ? CHIP_SELECTED : CHIP_BUTTON}
                   >
                     {dayTitle(day, index)}
                   </button>
@@ -181,22 +185,22 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <span className={LABEL_CLASS}>시작</span>
-            <div className="mt-1.5 flex items-center gap-1">
+            <div className="mt-2 flex items-center gap-1">
               <button
                 type="button"
                 data-testid="schedule-start-minus"
                 aria-label="시작 15분 줄이기"
                 onClick={() => stepStart(-SNAP_MIN)}
-                className="h-9 w-9 rounded-lg bg-stone-100 text-base font-semibold text-stone-600 hover:bg-stone-200"
+                className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
               >
-                −
+                <Icon name="minus" size={16} />
               </button>
               <output
                 data-testid="schedule-start-value"
-                className="flex-1 text-center text-sm font-semibold tabular-nums text-stone-800"
+                className="flex-1 text-center text-body font-semibold tabular-nums text-ink"
               >
                 {formatClock(startMin)}
               </output>
@@ -205,28 +209,28 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
                 data-testid="schedule-start-plus"
                 aria-label="시작 15분 늘리기"
                 onClick={() => stepStart(SNAP_MIN)}
-                className="h-9 w-9 rounded-lg bg-stone-100 text-base font-semibold text-stone-600 hover:bg-stone-200"
+                className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
               >
-                ＋
+                <Icon name="plus" size={16} />
               </button>
             </div>
           </div>
 
           <div>
             <span className={LABEL_CLASS}>소요</span>
-            <div className="mt-1.5 flex items-center gap-1">
+            <div className="mt-2 flex items-center gap-1">
               <button
                 type="button"
                 data-testid="schedule-duration-minus"
                 aria-label="소요 시간 15분 줄이기"
                 onClick={() => stepDuration(-SNAP_MIN)}
-                className="h-9 w-9 rounded-lg bg-stone-100 text-base font-semibold text-stone-600 hover:bg-stone-200"
+                className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
               >
-                −
+                <Icon name="minus" size={16} />
               </button>
               <output
                 data-testid="schedule-duration-value"
-                className="flex-1 text-center text-sm font-semibold tabular-nums text-stone-800"
+                className="flex-1 text-center text-body font-semibold tabular-nums text-ink"
               >
                 {formatDuration(durationMin)}
               </output>
@@ -235,9 +239,9 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
                 data-testid="schedule-duration-plus"
                 aria-label="소요 시간 15분 늘리기"
                 onClick={() => stepDuration(SNAP_MIN)}
-                className="h-9 w-9 rounded-lg bg-stone-100 text-base font-semibold text-stone-600 hover:bg-stone-200"
+                className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
               >
-                ＋
+                <Icon name="plus" size={16} />
               </button>
             </div>
           </div>
@@ -245,7 +249,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
 
         <p
           data-testid="schedule-preview"
-          className="rounded-xl bg-stone-50 px-3 py-2.5 text-center text-sm font-semibold tabular-nums text-stone-600"
+          className="rounded-md bg-sunken px-3 py-3 text-center text-title tabular-nums text-ink"
         >
           {formatTimeRange(startMin, durationMin)}
         </p>

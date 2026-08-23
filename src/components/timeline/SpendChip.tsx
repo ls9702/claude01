@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { Id } from '../../types/models';
 import { formatBudget, formatCompactAmount } from '../../utils/money';
 import { hasSpend, type SpendTotals } from '../../utils/spend';
+import Icon from '../common/Icon';
+import { CHIP_MONEY, CHIP_NEUTRAL, POPOVER_CLASS } from '../common/formStyles';
 
 interface SpendChipProps {
   totals: SpendTotals;
@@ -62,28 +64,23 @@ export default function SpendChip({
         aria-expanded={open}
         title={`${budgetLine} / ${spentLine}`}
         onClick={() => setOpen((value) => !value)}
-        className={[
-          'rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums transition-colors',
-          spent ? 'bg-amber-100 text-amber-700' : 'bg-stone-100 text-stone-500',
-        ].join(' ')}
+        className={spent ? CHIP_MONEY : CHIP_NEUTRAL}
       >
-        {spent ? '💸' : '💰'} {label}
+        <Icon name={spent ? 'receipt' : 'wallet'} size={16} />
+        {label}
       </button>
 
       {open ? (
-        <div
-          data-testid={`${testId}-popover`}
-          className="absolute right-0 top-full z-40 mt-1 w-32 overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
-        >
+        <div data-testid={`${testId}-popover`} className={`${POPOVER_CLASS} right-0 top-full`}>
           <p
             data-testid={`${testId}-budget`}
-            className="px-2.5 py-1 text-[11px] tabular-nums text-stone-500"
+            className="px-3 py-2 text-label font-normal tabular-nums text-ink-muted"
           >
             {budgetLine}
           </p>
           <p
             data-testid={`${testId}-spent`}
-            className="px-2.5 py-1 text-[11px] font-semibold tabular-nums text-stone-700"
+            className="px-3 py-2 text-label font-semibold tabular-nums text-ink"
           >
             {spentLine}
           </p>

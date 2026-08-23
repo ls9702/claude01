@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import Icon from '../common/Icon';
 
 interface MapModalProps {
   title: string;
@@ -59,33 +60,39 @@ export default function MapModal({
         aria-label="닫기"
         data-testid="map-modal-overlay"
         onClick={onClose}
-        className="absolute inset-0 h-full w-full cursor-default bg-stone-900/50"
+        className="tb-overlay absolute inset-0 h-full w-full cursor-default bg-ink/45 backdrop-blur-[2px]"
       />
       <div
         className={[
-          'tb-sheet-panel relative flex w-full flex-col overflow-hidden bg-white shadow-2xl',
-          full ? 'h-full' : 'max-h-[88dvh] rounded-t-2xl sm:max-w-md sm:rounded-2xl',
+          'tb-sheet-panel relative flex w-full flex-col overflow-hidden bg-surface shadow-float',
+          full
+            ? 'h-full'
+            : 'max-h-[92dvh] rounded-t-lg sm:max-w-[26rem] sm:rounded-lg lg:max-w-[32rem]',
         ].join(' ')}
       >
-        <header className="flex items-center justify-between gap-3 border-b border-stone-100 px-5 py-3.5">
-          <h2 className="text-base font-semibold text-stone-800">{title}</h2>
+        {full ? null : (
+          <span aria-hidden="true" className="mx-auto mt-2 h-1 w-9 rounded-full bg-line sm:hidden" />
+        )}
+
+        <header className="flex items-center justify-between gap-3 px-4 pb-3 pt-3 sm:pt-4">
+          <h2 className="min-w-0 truncate text-title text-ink">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             data-testid="map-modal-close"
             aria-label="닫기"
-            className="-mr-2 rounded-full px-2 py-1 text-lg leading-none text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+            className="-mr-1 grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink"
           >
-            ✕
+            <Icon name="close" size={20} />
           </button>
         </header>
 
-        <div className={full ? 'relative min-h-0 flex-1' : 'flex-1 overflow-y-auto px-5 py-4'}>
+        <div className={full ? 'relative min-h-0 flex-1' : 'min-h-0 flex-1 overflow-y-auto px-4 pb-4'}>
           {children}
         </div>
 
         {footer ? (
-          <footer className="border-t border-stone-100 px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-3">
+          <footer className="border-t border-line bg-surface px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-3">
             {footer}
           </footer>
         ) : null}

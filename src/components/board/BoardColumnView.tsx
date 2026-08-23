@@ -4,6 +4,8 @@ import { DND_COLUMN } from '../../dnd/boardDnd';
 import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { BoardColumn, Card, Id } from '../../types/models';
 import { colorClasses } from '../../utils/colors';
+import Icon from '../common/Icon';
+import { EmojiIcon } from '../common/Icon';
 import CardItem from './CardItem';
 
 interface BoardColumnViewProps {
@@ -11,7 +13,7 @@ interface BoardColumnViewProps {
   /** The column's cards, already in `cardOrder`. */
   cards: Card[];
   currency: string;
-  /** cardId → how many timeline entries it has, for the 🗓 badge. */
+  /** cardId → how many timeline entries it has, for the 일정 badge. */
   scheduledCounts?: Record<Id, number>;
   /** cardId → per-sheet split behind the badge's popover. */
   scheduleBreakdowns?: Record<Id, SheetScheduleCount[]>;
@@ -29,6 +31,10 @@ interface BoardColumnViewProps {
 
 /**
  * One kanban column: header, sortable card list, add-card footer.
+ *
+ * Only the **header** carries the category colour (M9 §2.1). The body is plain
+ * canvas so the white cards inside it read as objects on a surface rather than
+ * as tint on tint.
  *
  * The whole column is a droppable so cards can be dropped onto empty space;
  * the cards themselves are the sortable targets.
@@ -58,19 +64,17 @@ export default function BoardColumnView({
       data-column-name={column.name}
       aria-label={column.name}
       className={[
-        'flex shrink-0 flex-col rounded-2xl border transition-colors',
-        compact ? 'w-full' : 'w-[85vw] snap-start sm:w-72 lg:min-w-72',
-        isOver ? 'border-stone-400 bg-stone-100/80' : 'border-stone-200/70 bg-stone-50/70',
+        'flex shrink-0 flex-col overflow-hidden rounded-lg border bg-canvas transition-colors duration-[140ms] ease-quick',
+        compact ? 'w-full' : 'w-[85vw] snap-start sm:w-[17rem]',
+        isOver ? 'border-line-strong ring-2 ring-line-strong ring-inset' : 'border-line',
       ].join(' ')}
     >
-      <header className={`flex items-center gap-2 rounded-t-2xl px-3 py-2.5 ${colors.header}`}>
-        <span aria-hidden="true" className="text-base leading-none">
-          {column.icon}
-        </span>
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{column.name}</h2>
+      <header className={`flex h-11 shrink-0 items-center gap-2 px-3 ${colors.header}`}>
+        <EmojiIcon emoji={column.icon} className="bg-surface/70" />
+        <h2 className="min-w-0 flex-1 truncate text-label font-semibold">{column.name}</h2>
         <span
           data-testid="column-count"
-          className="rounded-full bg-white/70 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+          className="rounded-full bg-surface/70 px-2 py-px text-micro tabular-nums"
         >
           {cards.length}
         </span>
@@ -80,9 +84,9 @@ export default function BoardColumnView({
             data-testid="add-card"
             aria-label={`${column.name}에 카드 추가`}
             onClick={() => onAddCard(column)}
-            className="rounded-full px-1.5 py-0.5 text-base leading-none hover:bg-white/70"
+            className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 transition-colors duration-[140ms] ease-quick hover:bg-surface/70"
           >
-            ＋
+            <Icon name="plus" size={16} />
           </button>
         ) : null}
         {onEditColumn ? (
@@ -91,14 +95,16 @@ export default function BoardColumnView({
             data-testid="edit-column"
             aria-label={`${column.name} 카테고리 수정`}
             onClick={() => onEditColumn(column)}
-            className="rounded-full px-1.5 py-0.5 text-sm leading-none opacity-60 hover:bg-white/70 hover:opacity-100"
+            className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 opacity-60 transition-colors duration-[140ms] ease-quick hover:bg-surface/70 hover:opacity-100"
           >
-            ⋯
+            <Icon name="more" size={16} />
           </button>
         ) : null}
       </header>
 
-      <div className={`flex flex-1 flex-col gap-2 ${compact ? 'p-1.5' : 'p-2'}`}>
+      {/* `data-column-body` is how the board's scroll arrows find where the
+          real content of the tallest column ends. */}
+      <div data-column-body className="flex flex-1 flex-col gap-2 p-2">
         <SortableContext items={cards.map((card) => card.id)} strategy={verticalListSortingStrategy}>
           {cards.map((card) => (
             <CardItem
@@ -116,7 +122,7 @@ export default function BoardColumnView({
         {cards.length === 0 ? (
           <p
             data-testid="column-empty"
-            className="rounded-xl border border-dashed border-stone-200 px-3 py-6 text-center text-xs text-stone-300"
+            className="rounded-md bg-surface/60 px-3 py-8 text-center text-micro font-normal text-ink-faint"
           >
             카드를 여기로 옮겨보세요
           </p>
@@ -127,9 +133,13 @@ export default function BoardColumnView({
             type="button"
             data-testid="add-card-footer"
             onClick={() => onAddCard(column)}
-            className="mt-auto rounded-xl px-3 py-2 text-left text-xs font-medium text-stone-400 transition-colors hover:bg-white hover:text-stone-600"
+            // Right under the last card, not pinned to the bottom of a
+            // viewport-tall column: 「＋ 카드 추가」 belongs to the list it adds
+            // to. The space left over below it stays a drop zone (M9 §4.2-3).
+            className="flex items-center gap-1 rounded-md px-3 py-2 text-left text-label text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-surface hover:text-ink"
           >
-            ＋ 카드 추가
+            <Icon name="plus" size={16} />
+            카드 추가
           </button>
         ) : null}
       </div>

@@ -4,9 +4,12 @@ import { DND_CARD } from '../../dnd/boardDnd';
 import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { Card } from '../../types/models';
 import { colorClasses } from '../../utils/colors';
+import { shortPlace } from '../../utils/geo';
 import { formatBudget } from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
+import Icon, { type IconName } from '../common/Icon';
+import { CHIP_MONEY, CHIP_NEUTRAL, POPOVER_CLASS } from '../common/formStyles';
 
 interface CardSurfaceProps {
   card: Card;
@@ -26,11 +29,21 @@ interface CardSurfaceProps {
    * button that opens a read-only "일정 1: 2회" popover.
    */
   scheduleBreakdown?: readonly SheetScheduleCount[];
+  /** Tray variant: title + one chip, no memo — a drag source needs no more. */
+  terse?: boolean;
 }
+
+/** How many chips a card may show before the rest fold into `＋N`. */
+const MAX_CHIPS = 3;
 
 /**
  * The card's looks, with no drag wiring — shared by the sortable card and by
  * the `DragOverlay` ghost.
+ *
+ * Chips are **neutral** (M9 §2.1): the 3px left bar already says which category
+ * this is, and repeating it four times in colour was what made 예산 and 지출
+ * indistinguishable. The single exception is 지출 — money actually spent is the
+ * one thing on a card that has to catch the eye.
  */
 export function CardSurface({
   card,
@@ -39,6 +52,7 @@ export function CardSurface({
   lifted = false,
   scheduledCount = 0,
   scheduleBreakdown,
+  terse = false,
 }: CardSurfaceProps) {
   const colors = colorClasses(color);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -54,44 +68,64 @@ export function CardSurface({
     return () => window.removeEventListener('pointerdown', onDown);
   }, [popoverOpen]);
 
-  const chips: { key: string; icon: string; text: string; title?: string }[] = [];
+  const chips: {
+    key: string;
+    icon: IconName;
+    text: string;
+    title?: string;
+    tone?: 'money';
+  }[] = [];
 
-  if (typeof card.defaultDurationMin === 'number' && card.defaultDurationMin > 0) {
-    chips.push({ key: 'duration', icon: '⏱', text: formatDuration(card.defaultDurationMin) });
-  }
-  if (card.location?.address) {
-    chips.push({
-      key: 'location',
-      icon: '📍',
-      text: card.location.address,
-      title: card.location.address,
-    });
-  }
-  if (typeof card.budget === 'number' && Number.isFinite(card.budget)) {
-    chips.push({ key: 'budget', icon: '💰', text: formatBudget(card.budget, currency) });
-  }
+  // Priority, most decision-worthy first: 지출 > 예산 > 소요시간 > 위치.
   // 💰 is the plan, 💸 is what it actually cost — they sit side by side on
   // purpose, so a card that ran over its budget says so at a glance.
   const spent = cardSpent(card);
   if (spent > 0) {
     chips.push({
       key: 'spent',
-      icon: '💸',
+      icon: 'receipt',
       text: formatBudget(spent, currency),
       title: `지출 ${card.expenses?.length ?? 0}건`,
+      tone: 'money',
     });
   }
+  if (typeof card.budget === 'number' && Number.isFinite(card.budget)) {
+    chips.push({ key: 'budget', icon: 'wallet', text: formatBudget(card.budget, currency) });
+  }
+  if (typeof card.defaultDurationMin === 'number' && card.defaultDurationMin > 0) {
+    chips.push({ key: 'duration', icon: 'clock', text: formatDuration(card.defaultDurationMin) });
+  }
+  if (card.location?.address) {
+    chips.push({
+      key: 'location',
+      icon: 'pin',
+      // Display-only shortening; the stored address is untouched.
+      text: shortPlace(card.location.address),
+      title: card.location.address,
+    });
+  }
+
+  const shown = terse ? chips.slice(0, 1) : chips.slice(0, MAX_CHIPS);
+  // A tray card only has to be identifiable; it does not owe a chip count.
+  const folded = terse ? 0 : chips.length - shown.length;
+  // ＋2 says how many, never what. The tooltip says what, so the count is a
+  // question the card can answer without being opened (M9 §4.2-5).
+  const foldedTitle = chips
+    .slice(shown.length)
+    .map((chip) => chip.text)
+    .join(' · ');
 
   return (
     <article
       className={[
-        'relative rounded-xl border border-stone-200/70 border-l-4 bg-white px-3 py-2.5',
+        'relative rounded-lg border border-line border-l-[3px] bg-surface px-3 py-3',
+        'transition-shadow duration-[140ms] ease-quick',
         colors.accent,
-        lifted ? 'rotate-1 shadow-lg' : 'shadow-sm',
+        lifted ? 'rotate-[0.75deg] shadow-float' : 'shadow-raise',
       ].join(' ')}
     >
       <div className="flex items-start gap-2">
-        <h3 className="min-w-0 flex-1 break-words text-sm font-semibold leading-snug text-stone-800">
+        <h3 className="min-w-0 flex-1 break-words text-label font-semibold text-ink">
           {card.title}
         </h3>
         {scheduledCount > 0 ? (
@@ -110,23 +144,21 @@ export function CardSurface({
                 event.stopPropagation();
                 if (hasBreakdown) setPopoverOpen((open) => !open);
               }}
-              className="rounded-full bg-stone-800 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white"
+              className="inline-flex h-5 items-center gap-1 rounded-full bg-sunken px-2 text-micro tabular-nums text-ink-muted"
             >
-              🗓 {scheduledCount}
+              <Icon name="calendar" size={16} />
+              {scheduledCount}
             </button>
 
             {popoverOpen && hasBreakdown ? (
-              <div
-                data-testid="card-schedule-popover"
-                className="absolute right-0 top-full z-40 mt-1 w-36 overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
-              >
+              <div data-testid="card-schedule-popover" className={`${POPOVER_CLASS} right-0 top-full`}>
                 {scheduleBreakdown?.map((row) => (
                   <p
                     key={row.sheetId}
                     data-testid="card-schedule-popover-row"
                     data-sheet-id={row.sheetId}
                     data-count={row.count}
-                    className="flex items-baseline gap-1 px-2.5 py-1 text-[11px] text-stone-600"
+                    className="flex items-baseline gap-2 px-3 py-2 text-label text-ink"
                   >
                     <span className="min-w-0 flex-1 truncate">{row.sheetName}</span>
                     <span className="font-semibold tabular-nums">{row.count}회</span>
@@ -145,30 +177,35 @@ export function CardSurface({
             data-testid="card-link"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
-            className="-mr-1 shrink-0 rounded-md px-1 text-xs text-stone-300 hover:text-sky-500"
+            className="-m-1 shrink-0 rounded-xs p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:text-ink"
           >
-            🔗
+            <Icon name="link" size={16} />
           </a>
         ) : null}
       </div>
 
-      {card.memo ? (
-        <p className="mt-1 truncate text-xs leading-relaxed text-stone-400">{card.memo}</p>
+      {card.memo && !terse ? (
+        <p className="mt-1 truncate text-micro font-normal text-ink-faint">{card.memo}</p>
       ) : null}
 
-      {chips.length > 0 ? (
+      {shown.length > 0 ? (
         <div className="mt-2 flex flex-wrap items-center gap-1">
-          {chips.map((chip) => (
+          {shown.map((chip) => (
             <span
               key={chip.key}
               title={chip.title}
               data-testid={`card-chip-${chip.key}`}
-              className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${colors.chip}`}
+              className={chip.tone === 'money' ? CHIP_MONEY : CHIP_NEUTRAL}
             >
-              <span aria-hidden="true">{chip.icon}</span>
+              <Icon name={chip.icon} size={16} />
               <span className="truncate">{chip.text}</span>
             </span>
           ))}
+          {folded > 0 ? (
+            <span title={foldedTitle} className={CHIP_NEUTRAL}>
+              ＋{folded}
+            </span>
+          ) : null}
         </div>
       ) : null}
     </article>
@@ -179,7 +216,7 @@ interface CardItemProps {
   card: Card;
   currency: string;
   color: string;
-  /** Timeline entries for this card; drives the 🗓 badge. */
+  /** Timeline entries for this card; drives the 일정 badge. */
   scheduledCount?: number;
   /** Per-sheet split behind the badge's popover. */
   scheduleBreakdown?: readonly SheetScheduleCount[];
@@ -221,7 +258,7 @@ export default function CardItem({
       data-card-id={card.id}
       data-column-id={card.columnId}
       className={[
-        'cursor-grab select-none outline-none focus-visible:ring-2 focus-visible:ring-stone-400',
+        'cursor-grab select-none outline-none focus-visible:ring-2 focus-visible:ring-line-strong',
         isDragging ? 'opacity-40' : '',
       ].join(' ')}
     >

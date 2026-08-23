@@ -21,7 +21,7 @@ export default function TimeAxis() {
       {HOURS.map((hour) => (
         <span
           key={hour}
-          className="absolute right-1.5 text-[10px] leading-none tabular-nums text-stone-400"
+          className="absolute right-2 text-micro font-normal leading-none tabular-nums text-ink-faint"
           style={{ top: minToY(hour * 60, PX_PER_MIN) + 2 }}
         >
           {formatClock(hour * 60)}

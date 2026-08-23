@@ -21,10 +21,22 @@ import { currentAndNext, nowMin, todayDayId, todayIso } from '../../timeline/tod
 import { daySpend, emptySpend, sheetSpend, type SpendTotals } from '../../utils/spend';
 import { formatTimeRange, minToY } from '../../utils/time';
 import ConfirmDialog from '../common/ConfirmDialog';
+import Icon from '../common/Icon';
+import BackupNudge from '../common/BackupNudge';
+import SyncStatusChip from '../common/SyncStatusChip';
+import {
+  CHIP_BUTTON,
+  CHIP_NOW,
+  GHOST_BUTTON_CLASS,
+  POPOVER_CLASS,
+  POPOVER_ROW_DANGER_CLASS,
+  PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+} from '../common/formStyles';
 import BoardRail from './BoardRail';
 import NowBar from './NowBar';
 import QuickSpendSheet from './QuickSpendSheet';
-import DayColumn, { dayTitle } from './DayColumn';
+import DayColumn, { dayTitle, daySubtitle } from './DayColumn';
 import SpendChip from './SpendChip';
 import EntryDetailSheet from './EntryDetailSheet';
 import ScheduleSheet from './ScheduleSheet';
@@ -58,13 +70,11 @@ function TripPrompt() {
   return (
     <section
       data-testid="view-timeline"
-      className="mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-16 text-center"
+      className="mx-auto flex w-full max-w-md shrink-0 flex-col items-center gap-4 px-6 pb-16 pt-12 text-center"
     >
-      <span aria-hidden="true" className="text-4xl">
-        🗓️
-      </span>
-      <h1 className="text-xl font-semibold text-stone-800">일정</h1>
-      <p className="text-sm leading-relaxed text-stone-400">
+      <Icon name="calendar" size={24} className="text-ink-faint" />
+      <h1 className="text-title text-ink">일정</h1>
+      <p className="text-label font-normal text-ink-muted">
         {trips.length > 0
           ? '어떤 여행의 시간표를 열까요?'
           : '먼저 여행을 만들면 시간표가 열려요.'}
@@ -79,7 +89,7 @@ function TripPrompt() {
                 data-testid="timeline-trip-option"
                 data-trip-id={trip.id}
                 onClick={() => setActiveTrip(trip.id)}
-                className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-left text-sm font-medium text-stone-700 shadow-sm hover:shadow-md"
+                className={`${SECONDARY_BUTTON_CLASS} w-full justify-start`}
               >
                 {trip.title}
               </button>
@@ -91,7 +101,7 @@ function TripPrompt() {
           type="button"
           data-testid="timeline-goto-trips"
           onClick={() => setTab('trips')}
-          className="rounded-full bg-stone-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-stone-900"
+          className={PRIMARY_BUTTON_CLASS}
         >
           여행 만들러 가기
         </button>
@@ -127,6 +137,9 @@ export default function TimelineView() {
   const isDesktop = useIsDesktop();
   const [dialog, setDialog] = useState<Dialog>(null);
   const [pageIndex, setPageIndex] = useState(0);
+  /** The pager's own ⋯ menu — mobile only; desktop keeps it on the day header. */
+  const [dayMenuOpen, setDayMenuOpen] = useState(false);
+  const dayMenuRef = useRef<HTMLDivElement | null>(null);
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   /** `tripId:sheetId` this view has already positioned itself for. */
@@ -273,6 +286,15 @@ export default function TimelineView() {
     if (safePage !== pageIndex) setPageIndex(safePage);
   }, [safePage, pageIndex]);
 
+  useEffect(() => {
+    if (!dayMenuOpen) return;
+    const onDown = (event: PointerEvent) => {
+      if (!dayMenuRef.current?.contains(event.target as Node)) setDayMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [dayMenuOpen]);
+
   /** Puts `minute` an hour below the top of the grid (never above midnight). */
   const scrollToMinute = useCallback((minute: number) => {
     const scroller = scrollerRef.current;
@@ -320,9 +342,9 @@ export default function TimelineView() {
 
   if (!trip) return <TripPrompt />;
 
-  // Mobile leaves room for the collapsed 미배치 tray under the grid.
-  const gridHeight = isDesktop ? 'calc(100dvh - 15rem)' : 'calc(100dvh - 21rem)';
   const visibleDays = isDesktop ? days : days.slice(safePage, safePage + 1);
+  const currentDay = days[safePage];
+  const nothingPlaced = Object.values(entriesByDay).every((list) => list.length === 0);
   const dialogEntry = dialog?.kind === 'entry' ? workspace.entries[dialog.entry.id] : undefined;
   const quickSpendCard =
     dialog?.kind === 'quick-spend' ? workspace.cards[dialog.entry.cardId] : undefined;
@@ -346,91 +368,137 @@ export default function TimelineView() {
   };
 
   return (
-    <section data-testid="view-timeline" aria-labelledby="view-timeline-title" className="pb-2">
-      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-4 pb-2 pt-5">
-        <h1 id="view-timeline-title" className="text-2xl font-bold tracking-tight text-stone-800">
-          일정
-        </h1>
-        <p data-testid="timeline-trip-title" className="min-w-0 truncate text-sm text-stone-400">
-          {trip.title}
-        </p>
-        <button
-          type="button"
-          data-testid="timeline-add-day"
-          onClick={addDayToSheet}
-          disabled={!sheet}
-          className="ml-auto rounded-full bg-stone-800 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-stone-900 disabled:bg-stone-200 disabled:text-stone-400"
-        >
-          ＋ 일자 추가
-        </button>
-      </header>
-
-      <div className="flex items-center gap-1.5">
-        <div className="min-w-0 flex-1">
-          <SheetTabs
-            sheets={sheets}
-            activeSheetId={sheet?.id}
-            onSelect={setActiveSheet}
-            onCreate={() => setDialog({ kind: 'sheet-create' })}
-            onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
-            onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
-            onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
-          />
+    <section
+      data-testid="view-timeline"
+      aria-labelledby="view-timeline-title"
+      // One flex column, top to bottom, filling whatever the app shell hands
+      // it. The grid takes what the fixed rows above leave over — no
+      // `calc(100dvh - 21rem)` guesses, and no white band under it (§4.4-2).
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <header className="flex shrink-0 items-center gap-3 px-4 pb-4 pt-6">
+        <div className="min-w-0">
+          <h1 id="view-timeline-title" className="text-display text-ink">
+            일정
+          </h1>
+          <p
+            data-testid="timeline-trip-title"
+            className="mt-1 min-w-0 truncate text-label text-ink-muted"
+          >
+            {trip.title}
+          </p>
         </div>
-        {todayId ? (
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {isDesktop ? null : <SyncStatusChip variant="dot" />}
           <button
             type="button"
-            data-testid="today-chip"
-            data-day-id={todayId}
-            data-active={days[safePage]?.id === todayId ? 'true' : 'false'}
-            onClick={() => jumpToToday(todayId, minuteNow)}
-            className={[
-              'mb-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors',
-              days[safePage]?.id === todayId
-                ? 'bg-rose-500 text-white'
-                : 'bg-rose-100 text-rose-600 hover:bg-rose-200',
-            ].join(' ')}
+            data-testid="timeline-add-day"
+            onClick={addDayToSheet}
+            disabled={!sheet}
+            className={SECONDARY_BUTTON_CLASS}
           >
-            오늘
+            <Icon name="plus" size={16} />
+            일자 추가
           </button>
-        ) : null}
-        <SpendChip
-          totals={sheetTotals}
-          currency={trip.currency}
-          testId="sheet-spend"
-          className="mb-2 mr-4"
+        </div>
+      </header>
+
+      {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
+          top bar instead, so only one of the two ever mounts. */}
+      {isDesktop ? null : <BackupNudge variant="banner" className="mx-4 mb-4" />}
+
+      {/* Row 1 is sheets and nothing else; the 오늘 and 지출 chips moved down
+          into the pager, which is where the day they describe lives. */}
+      <div className="shrink-0 pb-2">
+        <SheetTabs
+          sheets={sheets}
+          activeSheetId={sheet?.id}
+          onSelect={setActiveSheet}
+          onCreate={() => setDialog({ kind: 'sheet-create' })}
+          onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
+          onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
+          onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
+          // The sheet's own total belongs on the sheet's own row; the pager
+          // below is about one day and has no room to spare.
+          trailing={
+            isDesktop ? undefined : (
+              <SpendChip totals={sheetTotals} currency={trip.currency} testId="sheet-spend" />
+            )
+          }
         />
       </div>
+
+      {isDesktop ? (
+        <div className="flex shrink-0 items-center gap-2 px-4 pb-2">
+          {todayId ? (
+            <button
+              type="button"
+              data-testid="today-chip"
+              data-day-id={todayId}
+              data-active={currentDay?.id === todayId ? 'true' : 'false'}
+              onClick={() => jumpToToday(todayId, minuteNow)}
+              className={currentDay?.id === todayId ? CHIP_NOW : CHIP_BUTTON}
+            >
+              오늘
+            </button>
+          ) : null}
+          <SpendChip totals={sheetTotals} currency={trip.currency} testId="sheet-spend" />
+        </div>
+      ) : null}
 
       {days.length === 0 ? (
         <div
           data-testid="timeline-empty"
-          className="mx-4 mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-stone-200 bg-white/60 px-6 py-14 text-center"
+          className="mx-4 mt-6 flex flex-col items-center gap-3 rounded-lg bg-surface px-6 py-12 text-center shadow-raise"
         >
-          <span aria-hidden="true" className="text-4xl">
-            🗓️
-          </span>
-          <p className="text-base font-semibold text-stone-700">첫 일자를 추가해보세요</p>
-          <p className="max-w-xs text-sm leading-relaxed text-stone-400">
+          <Icon name="calendar" size={24} className="text-ink-faint" />
+          <p className="text-title text-ink">첫 일자를 추가해보세요</p>
+          <p className="mx-auto max-w-[22rem] text-label font-normal text-ink-muted">
             일자를 만들면 00시부터 24시까지의 시간표가 열리고, 보드의 카드를 끌어다 놓을 수
             있어요.
           </p>
-          <button
-            type="button"
-            data-testid="timeline-add-day-empty"
-            onClick={addDayToSheet}
-            disabled={!sheet}
-            className="mt-2 rounded-full bg-stone-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-stone-900 disabled:bg-stone-200 disabled:text-stone-400"
-          >
-            ＋ 일자 추가
-          </button>
+          {/* Two honest ways forward, plus a way to throw the shell away when
+              the trip already has a real sheet next to this one (M9 §4.4-5). */}
+          <div className="mt-2 flex w-full max-w-[22rem] flex-col gap-2">
+            <button
+              type="button"
+              data-testid="timeline-add-day-empty"
+              onClick={addDayToSheet}
+              disabled={!sheet}
+              className={PRIMARY_BUTTON_CLASS}
+            >
+              <Icon name="plus" size={16} />
+              일자 추가
+            </button>
+            <button
+              type="button"
+              data-testid="timeline-empty-flight"
+              onClick={() => setDialog({ kind: 'sheet-create' })}
+              className={SECONDARY_BUTTON_CLASS}
+            >
+              항공편으로 만들기
+            </button>
+            {sheets.length > 1 && sheet ? (
+              <button
+                type="button"
+                data-testid="timeline-empty-delete"
+                onClick={() => setDialog({ kind: 'sheet-delete', sheet })}
+                className={GHOST_BUTTON_CLASS}
+              >
+                이 빈 시트 삭제
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : (
         <>
+          {/* Mobile row 2: the pager *is* the day header. Title, date, money,
+              오늘, and the ⋯ menu all live here, so the sticky header inside
+              the column can fold away to `sr-only` (M9 §4.4-2 / §4.4-4). */}
           {!isDesktop ? (
             <div
               data-testid="day-pager"
-              className="mx-4 mb-2 flex items-center justify-between rounded-xl bg-white px-2 py-1.5 shadow-sm"
+              className="mx-4 mb-2 flex h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface px-1 shadow-raise"
             >
               <button
                 type="button"
@@ -438,35 +506,87 @@ export default function TimelineView() {
                 aria-label="이전 일자"
                 disabled={safePage === 0}
                 onClick={() => setPageIndex((index) => Math.max(index - 1, 0))}
-                className="rounded-lg px-3 py-1.5 text-lg leading-none text-stone-500 disabled:text-stone-200"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-muted transition-colors duration-[140ms] ease-quick hover:bg-sunken disabled:text-ink-faint/50 disabled:hover:bg-transparent"
               >
-                ‹
+                <Icon name="chevron-left" size={20} />
               </button>
-              <span className="flex min-w-0 items-center gap-1.5">
+
+              <span className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden">
                 <span
                   data-testid="day-pager-label"
-                  className="truncate text-sm font-semibold text-stone-700"
+                  className="truncate text-label font-semibold text-ink"
                 >
-                  {days[safePage] ? dayTitle(days[safePage], safePage) : ''}
+                  {currentDay ? dayTitle(currentDay, safePage) : ''}
                 </span>
-                {days[safePage] ? (
-                  <SpendChip
-                    totals={spendByDay[days[safePage].id] ?? emptySpend()}
-                    currency={trip.currency}
-                    testId="day-spend"
-                    dayId={days[safePage].id}
-                  />
+                {currentDay ? (
+                  <span className="truncate text-micro font-normal text-ink-muted">
+                    {daySubtitle(currentDay, safePage)}
+                  </span>
                 ) : null}
               </span>
+
+              {currentDay ? (
+                <SpendChip
+                  totals={spendByDay[currentDay.id] ?? emptySpend()}
+                  currency={trip.currency}
+                  testId="day-spend"
+                  dayId={currentDay.id}
+                />
+              ) : null}
+
+              {todayId ? (
+                <button
+                  type="button"
+                  data-testid="today-chip"
+                  data-day-id={todayId}
+                  data-active={currentDay?.id === todayId ? 'true' : 'false'}
+                  onClick={() => jumpToToday(todayId, minuteNow)}
+                  className={currentDay?.id === todayId ? CHIP_NOW : CHIP_BUTTON}
+                >
+                  오늘
+                </button>
+              ) : null}
+
+              {currentDay ? (
+                <div ref={dayMenuRef} className="relative shrink-0">
+                  <button
+                    type="button"
+                    data-testid="day-menu"
+                    aria-label={`${dayTitle(currentDay, safePage)} 메뉴`}
+                    aria-expanded={dayMenuOpen}
+                    onClick={() => setDayMenuOpen((open) => !open)}
+                    className="grid h-8 w-8 place-items-center rounded-full text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink"
+                  >
+                    <Icon name="more" size={16} />
+                  </button>
+                  {dayMenuOpen ? (
+                    <div data-testid="day-menu-panel" className={`${POPOVER_CLASS} right-0 top-full`}>
+                      <button
+                        type="button"
+                        data-testid="day-delete"
+                        onClick={() => {
+                          setDayMenuOpen(false);
+                          setDialog({ kind: 'day-delete', day: currentDay, index: safePage });
+                        }}
+                        className={POPOVER_ROW_DANGER_CLASS}
+                      >
+                        <Icon name="trash" size={16} />
+                        삭제
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
               <button
                 type="button"
                 data-testid="day-pager-next"
                 aria-label="다음 일자"
                 disabled={safePage >= days.length - 1}
                 onClick={() => setPageIndex((index) => Math.min(index + 1, days.length - 1))}
-                className="rounded-lg px-3 py-1.5 text-lg leading-none text-stone-500 disabled:text-stone-200"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-muted transition-colors duration-[140ms] ease-quick hover:bg-sunken disabled:text-ink-faint/50 disabled:hover:bg-transparent"
               >
-                ›
+                <Icon name="chevron-right" size={20} />
               </button>
             </div>
           ) : null}
@@ -484,7 +604,7 @@ export default function TimelineView() {
           ) : null}
 
           <PlanDndContext trip={trip} columns={columns}>
-            <div className="flex items-start border-y border-stone-200 bg-white">
+            <div className="flex min-h-0 flex-1 items-stretch border-y border-line bg-surface">
               {/* Mounted on desktop only: the rail and the tray draw the same
                   cards, and one dnd id may exist exactly once per context. */}
               {isDesktop ? (
@@ -495,25 +615,30 @@ export default function TimelineView() {
                   scheduledCounts={scheduledCounts}
                   scheduleBreakdowns={scheduleBreakdowns}
                   onOpenCard={(card) => setDialog({ kind: 'schedule', card })}
-                  height={gridHeight}
+                  showHint={nothingPlaced && unscheduledCards.length > 0}
                 />
               ) : null}
 
               <div
                 ref={scrollerRef}
                 data-testid="timeline-scroller"
+                // No `h-full`: as a stretched flex child the scroller already
+                // has the row's exact height, and a percentage would not.
                 className="relative min-w-0 flex-1 overflow-auto"
-                style={{ height: gridHeight }}
               >
                 <div className={isDesktop ? 'flex min-w-max' : 'flex w-full'}>
                   <div
-                    className="sticky left-0 z-30 shrink-0 bg-white/95 backdrop-blur"
+                    className="sticky left-0 z-30 shrink-0 bg-surface/95 backdrop-blur"
                     style={{ width: AXIS_PX }}
                   >
-                    <div
-                      className="sticky top-0 z-30 border-b border-stone-200 bg-white"
-                      style={{ height: HEADER_PX }}
-                    />
+                    {/* Matches the day header's height on desktop; below `lg`
+                        the header is `sr-only` and this spacer goes with it. */}
+                    {isDesktop ? (
+                      <div
+                        className="sticky top-0 z-30 border-b border-line bg-surface"
+                        style={{ height: HEADER_PX }}
+                      />
+                    ) : null}
                     <TimeAxis />
                   </div>
 

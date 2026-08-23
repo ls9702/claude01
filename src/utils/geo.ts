@@ -41,6 +41,27 @@ export const formatLatLng = (lat: number, lng: number): string =>
 /** The address written onto a pin the user placed by hand. */
 export const pinAddress = (lat: number, lng: number): string => formatLatLng(lat, lng);
 
+/** `"37.5665, 126.9780"` — a hand-dropped pin's address, commas and all. */
+const LATLNG_RE = /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/;
+
+/**
+ * Shortens an address **for display only** — the stored value never changes.
+ *
+ * Nominatim hands back the whole administrative chain ("시부야 스크램블 교차로,
+ * 2초메, 시부야구, 도쿄도, 일본"), which is far more than a 4mm-tall board chip
+ * can say. Only the head of that chain is the place's name, so that is what the
+ * chip shows and the `title` keeps the rest.
+ *
+ * A coordinate pair is checked **first** and returned untouched: it contains a
+ * comma too, and "첫 쉼표 앞" would turn a pin's label into a bare latitude.
+ */
+export const shortPlace = (address: string): string => {
+  const value = address.trim();
+  if (LATLNG_RE.test(value)) return value;
+  const head = value.split(',')[0]?.trim();
+  return head && head.length > 0 ? head : value;
+};
+
 /** Coerces Nominatim's stringified numbers; `null` for anything unusable. */
 const toNumber = (value: unknown): number | null => {
   const parsed = typeof value === 'number' ? value : Number(value);

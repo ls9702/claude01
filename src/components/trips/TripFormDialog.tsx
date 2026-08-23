@@ -2,11 +2,12 @@ import { useState } from 'react';
 import type { Trip } from '../../types/models';
 import { CURRENCIES } from '../../utils/money';
 import Sheet from '../common/Sheet';
+import Icon from '../common/Icon';
 import {
-  GHOST_BUTTON_CLASS,
   INPUT_CLASS,
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
 } from '../common/formStyles';
 
 export interface TripFormValues {
@@ -57,7 +58,7 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
       testId="trip-form"
       footer={
         <div className="flex gap-2">
-          <button type="button" onClick={onClose} className={`flex-1 ${GHOST_BUTTON_CLASS}`}>
+          <button type="button" onClick={onClose} className={`flex-1 ${SECONDARY_BUTTON_CLASS}`}>
             취소
           </button>
           <button
@@ -77,7 +78,7 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
           event.preventDefault();
           submit();
         }}
-        className="space-y-4"
+        className="space-y-6"
       >
         <div>
           <label className={LABEL_CLASS} htmlFor="trip-title">
@@ -111,26 +112,29 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
               </option>
             ))}
           </select>
-          <p className="mt-1.5 text-xs text-stone-400">카드 예산을 이 통화로 표시해요.</p>
+          <p className="mt-2 text-micro font-normal text-ink-faint">
+            카드 예산을 이 통화로 표시해요.
+          </p>
         </div>
 
-        <div className="rounded-xl border border-stone-200">
+        <div className="rounded-md border border-line">
           <button
             type="button"
             data-testid="trip-local-toggle"
             aria-expanded={localOpen}
             data-open={localOpen ? 'true' : 'false'}
             onClick={() => setLocalOpen((open) => !open)}
-            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+            className="flex h-11 w-full items-center justify-between gap-2 px-3 text-left"
           >
-            <span className="text-xs font-semibold text-stone-600">현지 통화 (선택)</span>
-            <span className="text-xs text-stone-400">
-              {pairIsSet ? `${localCurrency} · ${usableRate}` : '없음'} {localOpen ? '▴' : '▾'}
+            <span className="text-label font-semibold text-ink">현지 통화 (선택)</span>
+            <span className="flex items-center gap-1 text-label font-normal text-ink-muted">
+              {pairIsSet ? `${localCurrency} · ${usableRate}` : '없음'}
+              <Icon name={localOpen ? 'chevron-up' : 'chevron-down'} size={16} />
             </span>
           </button>
 
           {localOpen ? (
-            <div className="space-y-2 border-t border-stone-100 px-3 pb-3 pt-2">
+            <div className="space-y-2 border-t border-line px-3 pb-3 pt-2">
               <select
                 data-testid="trip-local-currency-select"
                 aria-label="현지 통화"
@@ -156,7 +160,10 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
                 className={`${INPUT_CLASS} mt-0`}
               />
 
-              <p data-testid="trip-local-example" className="text-xs leading-relaxed text-stone-400">
+              <p
+                data-testid="trip-local-example"
+                className="text-micro font-normal text-ink-faint"
+              >
                 1 {localCurrency || 'JPY'} = {usableRate ?? 9.3} {currency}
                 <br />
                 지출을 현지 금액으로 적으면 이 환율로 환산해서 저장해요. 이미 적어둔 지출은

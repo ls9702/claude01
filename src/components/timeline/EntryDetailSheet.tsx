@@ -10,11 +10,13 @@ import {
 } from '../../utils/time';
 import CardLedger, { type LocalMoney } from '../common/CardLedger';
 import Sheet from '../common/Sheet';
+import Icon from '../common/Icon';
 import {
   DANGER_TEXT_BUTTON_CLASS,
-  INPUT_CLASS,
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+  TEXTAREA_CLASS,
 } from '../common/formStyles';
 
 interface StepperProps {
@@ -29,19 +31,19 @@ function Stepper({ label, value, testId, onStep }: StepperProps) {
   return (
     <div>
       <span className={LABEL_CLASS}>{label}</span>
-      <div className="mt-1.5 flex items-center gap-2">
+      <div className="mt-2 flex items-center gap-2">
         <button
           type="button"
           data-testid={`${testId}-minus`}
           aria-label={`${label} 15분 줄이기`}
           onClick={() => onStep(-SNAP_MIN)}
-          className="h-10 w-11 rounded-xl bg-stone-100 text-lg font-semibold text-stone-600 hover:bg-stone-200"
+          className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
         >
-          −
+          <Icon name="minus" size={16} />
         </button>
         <output
           data-testid={`${testId}-value`}
-          className="flex-1 rounded-xl bg-stone-50 py-2.5 text-center text-sm font-semibold tabular-nums text-stone-800"
+          className="h-11 flex-1 rounded-md bg-sunken py-3 text-center text-body font-semibold tabular-nums text-ink lg:h-9 lg:py-2"
         >
           {value}
         </output>
@@ -50,9 +52,9 @@ function Stepper({ label, value, testId, onStep }: StepperProps) {
           data-testid={`${testId}-plus`}
           aria-label={`${label} 15분 늘리기`}
           onClick={() => onStep(SNAP_MIN)}
-          className="h-10 w-11 rounded-xl bg-stone-100 text-lg font-semibold text-stone-600 hover:bg-stone-200"
+          className={`${SECONDARY_BUTTON_CLASS} w-11 shrink-0 px-0`}
         >
-          ＋
+          <Icon name="plus" size={16} />
         </button>
       </div>
     </div>
@@ -115,7 +117,7 @@ export default function EntryDetailSheet({
       onClose={onClose}
       testId="entry-sheet"
       footer={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-2">
           <button
             type="button"
             data-testid="entry-delete"
@@ -128,24 +130,24 @@ export default function EntryDetailSheet({
             type="button"
             data-testid="entry-save"
             onClick={save}
-            className={`ml-auto flex-1 ${PRIMARY_BUTTON_CLASS}`}
+            className={`flex-1 ${PRIMARY_BUTTON_CLASS}`}
           >
             저장
           </button>
         </div>
       }
     >
-      <div className="space-y-4">
-        <p className="text-xs text-stone-400">
+      <div className="space-y-6">
+        <p className="text-label font-normal text-ink-muted">
           {dayTitle} ·{' '}
-          <span data-testid="entry-range" className="font-semibold tabular-nums text-stone-600">
+          <span data-testid="entry-range" className="font-semibold tabular-nums text-ink">
             {formatTimeRange(entry.startMin, entry.durationMin)}
           </span>{' '}
           · {formatDuration(entry.durationMin)}
         </p>
 
         {card?.memo ? (
-          <p className="rounded-xl bg-stone-50 px-3 py-2.5 text-xs leading-relaxed text-stone-500">
+          <p className="rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-muted">
             {card.memo}
           </p>
         ) : null}
@@ -175,7 +177,7 @@ export default function EntryDetailSheet({
             rows={3}
             onChange={(event) => setNote(event.target.value)}
             placeholder="이 시간에 기억해 둘 것"
-            className={`${INPUT_CLASS} resize-none`}
+            className={TEXTAREA_CLASS}
           />
         </div>
 
@@ -196,9 +198,10 @@ export default function EntryDetailSheet({
             type="button"
             data-testid="entry-open-board"
             onClick={onOpenBoard}
-            className="w-full rounded-xl bg-stone-100 px-4 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-200"
+            className={`${SECONDARY_BUTTON_CLASS} w-full`}
           >
-            🗂️ 보드에서 열기
+            <Icon name="board" size={16} />
+            보드에서 열기
           </button>
         ) : null}
       </div>

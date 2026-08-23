@@ -4,7 +4,9 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, TimelineEntry } from '../../types/models';
 import { PX_PER_MIN, type LaneBox } from '../../timeline/layout';
 import { colorClasses } from '../../utils/colors';
+import { FLIGHT_CARD_PREFIX } from '../../utils/flights';
 import { MIN_ENTRY_MIN, formatTimeRange, minToY, snapMin, yToMin } from '../../utils/time';
+import { EmojiIcon } from '../common/Icon';
 
 interface EntrySurfaceProps {
   title: string;
@@ -22,16 +24,20 @@ interface EntrySurfaceProps {
  */
 export function EntrySurface({ title, icon, color, timeRange, short }: EntrySurfaceProps) {
   const colors = colorClasses(color);
+  // The card title already carries ✈️ for a flight; the column's icon beside it
+  // would be the second aeroplane on one line (M9 §4.4-1).
+  const showIcon = !title.trimStart().startsWith(FLIGHT_CARD_PREFIX);
+
   return (
     <div
-      className={`h-full w-full overflow-hidden rounded-lg border border-white/60 border-l-4 px-1.5 py-1 ${colors.accent} ${colors.header}`}
+      className={`h-full w-full overflow-hidden rounded-md border-l-[3px] px-2 py-1 ring-1 ring-line ${colors.accent} ${colors.surface}`}
     >
-      <p className="flex items-center gap-1 truncate text-[11px] font-semibold leading-tight">
-        <span aria-hidden="true">{icon}</span>
+      <p className="flex items-center gap-1 truncate text-micro text-ink">
+        {showIcon ? <EmojiIcon emoji={icon} className="bg-surface/70" /> : null}
         <span className="truncate">{title}</span>
       </p>
       {short ? null : (
-        <p className="truncate text-[10px] leading-tight tabular-nums opacity-70">{timeRange}</p>
+        <p className="truncate text-micro font-normal tabular-nums text-ink-muted">{timeRange}</p>
       )}
     </div>
   );
@@ -49,12 +55,12 @@ interface EntryGhostProps {
 export function EntryGhost({ card, color, entry, width }: EntryGhostProps) {
   return (
     <div
-      className="rotate-1 opacity-90 shadow-lg"
+      className="rotate-[0.75deg] opacity-90 shadow-float"
       style={{ width, height: Math.max(minToY(entry.durationMin, PX_PER_MIN), 24) }}
     >
       <EntrySurface
         title={card.title}
-        icon="🗓"
+        icon="📌"
         color={color}
         timeRange={formatTimeRange(entry.startMin, entry.durationMin)}
       />
@@ -147,7 +153,7 @@ export default function EntryBlock({ entry, card, color, icon, lane, onOpen }: E
         touchAction: 'none',
       }}
       className={[
-        'cursor-grab select-none p-px outline-none focus-visible:ring-2 focus-visible:ring-stone-400',
+        'group cursor-grab select-none p-px outline-none focus-visible:ring-2 focus-visible:ring-line-strong',
         isDragging ? 'opacity-40' : '',
       ].join(' ')}
     >
@@ -166,8 +172,15 @@ export default function EntryBlock({ entry, card, color, icon, lane, onOpen }: E
         onPointerDown={startResize}
         onClick={(event) => event.stopPropagation()}
         style={{ touchAction: 'none' }}
-        className="absolute inset-x-1 bottom-0 h-2.5 cursor-ns-resize rounded-b-lg after:absolute after:inset-x-[35%] after:bottom-[3px] after:h-[2px] after:rounded-full after:bg-stone-500/40"
-      />
+        // The bar only appears on hover/focus: parked permanently it reads as a
+        // scrollbar sitting inside the block (M9 §4.4-7).
+        className="absolute inset-x-1 bottom-0 grid h-3 cursor-ns-resize place-items-end justify-center rounded-b-md pb-px"
+      >
+        <span
+          aria-hidden="true"
+          className="h-1 w-6 rounded-full bg-line-strong opacity-0 transition-opacity duration-[140ms] ease-quick group-hover:opacity-100 group-focus-within:opacity-100"
+        />
+      </div>
     </div>
   );
 }
