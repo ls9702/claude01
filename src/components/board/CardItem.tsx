@@ -1,5 +1,7 @@
+import { useEffect, useRef, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { DND_CARD } from '../../dnd/boardDnd';
+import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { Card } from '../../types/models';
 import { colorClasses } from '../../utils/colors';
 import { formatBudget } from '../../utils/money';
@@ -15,9 +17,14 @@ interface CardSurfaceProps {
   lifted?: boolean;
   /**
    * How many timeline entries this card has, across every sheet. `0` hides the
-   * badge. Per-sheet detail arrives with M2b's multi-sheet UI.
+   * badge — and stays the badge's `data-count`, whatever the breakdown says.
    */
   scheduledCount?: number;
+  /**
+   * Per-sheet split of {@link scheduledCount}. When present the badge becomes a
+   * button that opens a read-only "일정 1: 2회" popover.
+   */
+  scheduleBreakdown?: readonly SheetScheduleCount[];
 }
 
 /**
@@ -30,8 +37,22 @@ export function CardSurface({
   color,
   lifted = false,
   scheduledCount = 0,
+  scheduleBreakdown,
 }: CardSurfaceProps) {
   const colors = colorClasses(color);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const badgeRef = useRef<HTMLDivElement | null>(null);
+  const hasBreakdown = (scheduleBreakdown?.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (!popoverOpen) return;
+    const onDown = (event: PointerEvent) => {
+      if (!badgeRef.current?.contains(event.target as Node)) setPopoverOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [popoverOpen]);
+
   const chips: { key: string; icon: string; text: string; title?: string }[] = [];
 
   if (typeof card.defaultDurationMin === 'number' && card.defaultDurationMin > 0) {
@@ -52,7 +73,7 @@ export function CardSurface({
   return (
     <article
       className={[
-        'rounded-xl border border-stone-200/70 border-l-4 bg-white px-3 py-2.5',
+        'relative rounded-xl border border-stone-200/70 border-l-4 bg-white px-3 py-2.5',
         colors.accent,
         lifted ? 'rotate-1 shadow-lg' : 'shadow-sm',
       ].join(' ')}
@@ -62,14 +83,46 @@ export function CardSurface({
           {card.title}
         </h3>
         {scheduledCount > 0 ? (
-          <span
-            data-testid="card-schedule-badge"
-            data-count={scheduledCount}
-            title={`시간표에 ${scheduledCount}번 배치됨`}
-            className="shrink-0 rounded-full bg-stone-800 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white"
-          >
-            🗓 {scheduledCount}
-          </span>
+          <div ref={badgeRef} className="relative shrink-0">
+            <button
+              type="button"
+              data-testid="card-schedule-badge"
+              data-count={scheduledCount}
+              aria-expanded={hasBreakdown ? popoverOpen : undefined}
+              disabled={!hasBreakdown}
+              title={`시간표에 ${scheduledCount}번 배치됨`}
+              // The badge lives inside a draggable card: neither the drag nor
+              // the card's own open-on-click may fire when it is tapped.
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (hasBreakdown) setPopoverOpen((open) => !open);
+              }}
+              className="rounded-full bg-stone-800 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white"
+            >
+              🗓 {scheduledCount}
+            </button>
+
+            {popoverOpen && hasBreakdown ? (
+              <div
+                data-testid="card-schedule-popover"
+                className="absolute right-0 top-full z-40 mt-1 w-36 overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
+              >
+                {scheduleBreakdown?.map((row) => (
+                  <p
+                    key={row.sheetId}
+                    data-testid="card-schedule-popover-row"
+                    data-sheet-id={row.sheetId}
+                    data-count={row.count}
+                    className="flex items-baseline gap-1 px-2.5 py-1 text-[11px] text-stone-600"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{row.sheetName}</span>
+                    <span className="font-semibold tabular-nums">{row.count}회</span>
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
         ) : null}
         {card.url ? (
           <a
@@ -116,6 +169,8 @@ interface CardItemProps {
   color: string;
   /** Timeline entries for this card; drives the 🗓 badge. */
   scheduledCount?: number;
+  /** Per-sheet split behind the badge's popover. */
+  scheduleBreakdown?: readonly SheetScheduleCount[];
   onOpen: (card: Card) => void;
 }
 
@@ -130,6 +185,7 @@ export default function CardItem({
   currency,
   color,
   scheduledCount = 0,
+  scheduleBreakdown,
   onOpen,
 }: CardItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -162,6 +218,7 @@ export default function CardItem({
         currency={currency}
         color={color}
         scheduledCount={scheduledCount}
+        scheduleBreakdown={scheduleBreakdown}
       />
     </div>
   );

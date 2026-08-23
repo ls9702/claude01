@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useUndoStore } from '../../stores/undoStore';
+import { useUiStore } from '../../stores/uiStore';
 import { FIRST_SHEET_NAME, useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, Day, Id, Sheet as SheetModel } from '../../types/models';
 import {
@@ -48,7 +49,14 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
     [trip?.sheetOrder, workspace.sheets],
   );
 
-  const [sheetId, setSheetId] = useState<Id | undefined>(sheets[0]?.id);
+  // Open on whatever sheet the 일정 tab is showing — a card scheduled from the
+  // board would otherwise silently land on the trip's first sheet.
+  const currentSheetId = useUiStore((s) => s.activeSheetId);
+  const [sheetId, setSheetId] = useState<Id | undefined>(
+    currentSheetId && sheets.some((entry) => entry.id === currentSheetId)
+      ? currentSheetId
+      : sheets[0]?.id,
+  );
   const activeSheet: SheetModel | undefined = sheetId ? workspace.sheets[sheetId] : sheets[0];
 
   const days = useMemo<Day[]>(

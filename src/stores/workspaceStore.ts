@@ -5,6 +5,7 @@ import {
   type BoardColumn,
   type Card,
   type Day,
+  type FlightLeg,
   type GeoPoint,
   type Id,
   type Millis,
@@ -14,9 +15,21 @@ import {
   type Trip,
   type Workspace,
 } from '../types/models';
+import {
+  FLIGHT_CARD_PREFIX,
+  dayLabelAt,
+  flightCardTitle,
+  legDurationMin,
+  parseHm,
+  planSheetDays,
+  type LegKind,
+  type SheetFlightOpts,
+} from '../utils/flights';
 import { newId } from '../utils/ids';
 import { clampEntry, snapMin } from '../utils/time';
 import { idbStorage } from './persistMiddleware';
+
+export type { SheetFlightOpts } from '../utils/flights';
 
 /* ------------------------------------------------------------------ *
  * Mutation payload types (the public write API of the workspace)
@@ -58,6 +71,9 @@ export const DEFAULT_ENTRY_MIN = 60;
 
 /** Name of the sheet auto-created on a trip's first visit to the 일정 tab. */
 export const FIRST_SHEET_NAME = '일정 1';
+
+/** Board category the 항공편 마법사 files its generated cards under. */
+export const FLIGHT_COLUMN_NAME = '이동수단';
 
 /** Everything needed to create a card; only `title` is required. */
 export interface NewCardData {
@@ -158,6 +174,160 @@ function removeDay(draft: Draft, dayId: Id, now: Millis): void {
 }
 
 /* ------------------------------------------------------------------ *
+ * 항공편 마법사 helpers (M2b)
+ *
+ * The wizard owns two cards per sheet, and `models.ts` is frozen — there is no
+ * `outboundCardId` to hold onto. So the link is the **card title prefix**
+ * (`✈️`) plus "this card has an entry in this sheet", and an edit is a
+ * *delete-and-recreate*: `updateSheetFlights` wipes the sheet's flight entries
+ * (and any flight card left with no entries anywhere), then lays the new legs
+ * down from scratch. Cheap, and it cannot drift out of sync.
+ * ------------------------------------------------------------------ */
+
+/** The trip's 이동수단 column, falling back to its first surviving column. */
+function flightColumnId(draft: Draft, trip: Trip): Id | null {
+  const columns = trip.columnOrder
+    .map((columnId) => draft.columns[columnId])
+    .filter((column): column is BoardColumn => Boolean(column));
+  const named = columns.find((column) => column.name.trim() === FLIGHT_COLUMN_NAME);
+  return named?.id ?? columns[0]?.id ?? null;
+}
+
+/** Creates a day record. The caller owns the sheet's `dayOrder`. */
+function newDay(draft: Draft, sheet: Sheet, data: NewDayData, now: Millis): Id {
+  const dayId = newId();
+  draft.days[dayId] = {
+    id: dayId,
+    tripId: sheet.tripId,
+    sheetId: sheet.id,
+    date: data.date,
+    label: data.label,
+    createdAt: now,
+    updatedAt: now,
+  };
+  return dayId;
+}
+
+/** Appends an entry without the public guards — both ends are ours already. */
+function newEntry(
+  draft: Draft,
+  tripId: Id,
+  cardId: Id,
+  dayId: Id,
+  startMin: number,
+  durationMin: number,
+  now: Millis,
+): Id {
+  const span = clampEntry(snapMin(startMin), durationMin);
+  const entryId = newId();
+  draft.entries[entryId] = {
+    id: entryId,
+    tripId,
+    cardId,
+    dayId,
+    startMin: span.startMin,
+    durationMin: span.durationMin,
+    createdAt: now,
+    updatedAt: now,
+  };
+  return entryId;
+}
+
+/**
+ * Drops the sheet's wizard-made flight entries, and every flight card they
+ * leave behind with nothing scheduled anywhere. Everything gets a tombstone.
+ */
+function clearFlightPlacements(draft: Draft, sheetId: Id, now: Millis): void {
+  const dayIds = new Set(
+    Object.values(draft.days)
+      .filter((day) => day.sheetId === sheetId)
+      .map((day) => day.id),
+  );
+
+  const orphanCandidates = new Set<Id>();
+  for (const entry of Object.values(draft.entries)) {
+    if (!dayIds.has(entry.dayId)) continue;
+    const card = draft.cards[entry.cardId];
+    if (!card?.title.startsWith(FLIGHT_CARD_PREFIX)) continue;
+    delete draft.entries[entry.id];
+    bury(draft, 'entry', entry.id, now);
+    orphanCandidates.add(entry.cardId);
+  }
+
+  for (const cardId of orphanCandidates) {
+    // A flight card the user also placed on another sheet stays put.
+    if (Object.values(draft.entries).some((entry) => entry.cardId === cardId)) continue;
+    const card = draft.cards[cardId];
+    if (!card) continue;
+    delete draft.cards[cardId];
+    bury(draft, 'card', cardId, now);
+    const column = draft.columns[card.columnId];
+    if (column) {
+      draft.columns[card.columnId] = {
+        ...column,
+        cardOrder: column.cardOrder.filter((id) => id !== cardId),
+        updatedAt: now,
+      };
+    }
+  }
+}
+
+/**
+ * Creates one ✈️ card per leg the sheet carries and schedules it on the day
+ * matching the leg's date (first/last day as a fallback), starting at `depTime`
+ * and lasting as long as the leg is in the air. A leg with nowhere to land —
+ * a dateless sheet with no days — is skipped, card and all.
+ */
+function syncFlightPlacements(draft: Draft, sheetId: Id, now: Millis): void {
+  const sheet = draft.sheets[sheetId];
+  if (!sheet) return;
+  const trip = draft.trips[sheet.tripId];
+  if (!trip) return;
+  const columnId = flightColumnId(draft, trip);
+  if (!columnId) return;
+
+  const dayByDate = new Map<string, Id>();
+  for (const dayId of sheet.dayOrder) {
+    const date = draft.days[dayId]?.date;
+    if (date && !dayByDate.has(date)) dayByDate.set(date, dayId);
+  }
+
+  const legs: [FlightLeg | undefined, LegKind][] = [
+    [sheet.outboundFlight, 'outbound'],
+    [sheet.inboundFlight, 'inbound'],
+  ];
+
+  for (const [leg, kind] of legs) {
+    if (!leg) continue;
+    const fallback = kind === 'outbound' ? sheet.dayOrder[0] : sheet.dayOrder.at(-1);
+    const dayId = dayByDate.get(leg.date) ?? fallback;
+    if (!dayId) continue;
+
+    const column = draft.columns[columnId];
+    if (!column) continue;
+
+    const durationMin = legDurationMin(leg);
+    const cardId = newId();
+    draft.cards[cardId] = {
+      id: cardId,
+      tripId: trip.id,
+      columnId,
+      title: flightCardTitle(leg, kind),
+      defaultDurationMin: durationMin,
+      createdAt: now,
+      updatedAt: now,
+    };
+    draft.columns[columnId] = {
+      ...column,
+      cardOrder: [...column.cardOrder, cardId],
+      updatedAt: now,
+    };
+
+    newEntry(draft, trip.id, cardId, dayId, parseHm(leg.depTime) ?? 0, durationMin, now);
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Store
  * ------------------------------------------------------------------ */
 
@@ -222,6 +392,45 @@ export interface WorkspaceState {
   updateSheet: (id: Id, patch: SheetPatch) => void;
   /** Deletes a sheet plus every day and entry inside it (+ tombstones). */
   deleteSheet: (id: Id) => void;
+
+  /* --- 시트 마법사 — M2b -------------------------------------------- */
+
+  /**
+   * Creates a sheet with its days already laid out, plus one ✈️ card + entry
+   * per flight leg.
+   *
+   * The day range comes from {@link planSheetDays}: `outbound.date` through the
+   * inbound leg's arrival date (its `date`, +1 when `arrNextDay`), or
+   * `dayCount` days from the departure when there is no return leg, or
+   * `dayCount` **dateless** days when there are no flights at all. Every day
+   * gets a `N일차` label; dated days also carry their `date`.
+   *
+   * The generated cards go into the trip's `이동수단` column (its first column
+   * if there is none) and are titled `✈️ ICN→KIX OZ112`, falling back to
+   * `✈️ 출발편` / `✈️ 귀국편`. Each entry starts at the leg's `depTime` and
+   * lasts as long as the leg is in the air; a red-eye is clamped to midnight
+   * by {@link clampEntry} rather than spilling into the next day.
+   *
+   * Returns the new sheet's id, or `null` for an unknown trip.
+   */
+  createSheetFromFlights: (
+    tripId: Id,
+    name: string,
+    opts?: SheetFlightOpts,
+  ) => { sheetId: Id } | null;
+
+  /**
+   * Re-plans an existing sheet's flights and day range.
+   *
+   * Days are re-dated **in place**, so an existing day keeps its entries and
+   * simply shifts by the delta between the old and the new start date. A
+   * shorter range removes the days that fall off the end — their entries are
+   * deleted (and tombstoned), which returns those cards to 미배치; a longer one
+   * appends fresh days. Flight cards/entries are recreated from scratch (see
+   * the 항공편 마법사 helpers above). Passing neither leg clears the flights
+   * and leaves the days untouched. No-op for an unknown sheet.
+   */
+  updateSheetFlights: (sheetId: Id, opts: SheetFlightOpts) => void;
 
   /** Appends a day to the sheet's `dayOrder`. Returns its id, or `null`. */
   addDay: (sheetId: Id, opts?: NewDayData) => Id | null;
@@ -547,6 +756,92 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 updatedAt: now,
               };
             }
+            return true;
+          });
+        },
+
+        createSheetFromFlights: (tripId, name, opts = {}) =>
+          run((draft, now) => {
+            const trip = draft.trips[tripId];
+            if (!trip) return null;
+
+            const plan = planSheetDays(opts);
+            const sheetId = newId();
+            const sheet: Sheet = {
+              id: sheetId,
+              tripId,
+              name: name.trim() || '새 일정',
+              dayOrder: [],
+              outboundFlight: opts.outbound,
+              inboundFlight: opts.inbound,
+              createdAt: now,
+              updatedAt: now,
+            };
+            draft.sheets[sheetId] = sheet;
+
+            sheet.dayOrder = Array.from({ length: plan.count }, (_, index) =>
+              newDay(draft, sheet, { date: plan.dates?.[index], label: dayLabelAt(index) }, now),
+            );
+
+            draft.trips[tripId] = {
+              ...trip,
+              sheetOrder: [...trip.sheetOrder, sheetId],
+              updatedAt: now,
+            };
+
+            syncFlightPlacements(draft, sheetId, now);
+            return { sheetId };
+          }),
+
+        updateSheetFlights: (sheetId, opts) => {
+          run((draft, now) => {
+            const sheet = draft.sheets[sheetId];
+            if (!sheet) return null;
+
+            clearFlightPlacements(draft, sheetId, now);
+
+            const plan = planSheetDays(opts);
+            const existing = sheet.dayOrder.filter((dayId) => draft.days[dayId]);
+            let dayOrder = existing;
+
+            if (plan.count > 0) {
+              // Surviving days keep their entries and take the new date at the
+              // same position — that *is* the shift by (newStart − oldStart).
+              dayOrder = existing.slice(0, plan.count);
+              dayOrder.forEach((dayId, index) => {
+                touch<Day>(
+                  draft.days,
+                  dayId,
+                  {
+                    date: plan.dates?.[index],
+                    label: draft.days[dayId]?.label ?? dayLabelAt(index),
+                  },
+                  now,
+                );
+              });
+              // Days past the end of the new range go, entries and all.
+              for (const dayId of existing.slice(plan.count)) removeDay(draft, dayId, now);
+              for (let index = dayOrder.length; index < plan.count; index += 1) {
+                dayOrder.push(
+                  newDay(
+                    draft,
+                    sheet,
+                    { date: plan.dates?.[index], label: dayLabelAt(index) },
+                    now,
+                  ),
+                );
+              }
+            }
+
+            draft.sheets[sheetId] = {
+              ...sheet,
+              dayOrder,
+              outboundFlight: opts.outbound,
+              inboundFlight: opts.inbound,
+              updatedAt: now,
+            };
+
+            syncFlightPlacements(draft, sheetId, now);
             return true;
           });
         },

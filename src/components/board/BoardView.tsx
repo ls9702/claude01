@@ -13,7 +13,8 @@ import {
 import { resolveBoardDrop, snapshotBoard } from '../../dnd/boardDnd';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import type { BoardColumn, Card, Id } from '../../types/models';
+import { summarizeSchedule } from '../../timeline/scheduleSummary';
+import type { BoardColumn, Card } from '../../types/models';
 import ConfirmDialog from '../common/ConfirmDialog';
 import ScheduleSheet from '../timeline/ScheduleSheet';
 import AddColumnPanel from './AddColumnPanel';
@@ -120,14 +121,11 @@ export default function BoardView() {
     return map;
   }, [columns, workspace.cards]);
 
-  /** cardId → timeline entries, for the 🗓 badge on each card. */
-  const scheduledCounts = useMemo(() => {
-    const counts: Record<Id, number> = {};
-    for (const entry of Object.values(workspace.entries)) {
-      counts[entry.cardId] = (counts[entry.cardId] ?? 0) + 1;
-    }
-    return counts;
-  }, [workspace.entries]);
+  /** cardId → timeline entries (total + per sheet), for the 🗓 badge. */
+  const { counts: scheduledCounts, bySheet: scheduleBreakdowns } = useMemo(
+    () => summarizeSchedule(workspace, trip?.id),
+    [workspace, trip?.id],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -197,6 +195,7 @@ export default function BoardView() {
               cards={cardsByColumn[column.id] ?? []}
               currency={trip.currency}
               scheduledCounts={scheduledCounts}
+              scheduleBreakdowns={scheduleBreakdowns}
               onAddCard={(target) => setDialog({ kind: 'card-create', column: target })}
               onOpenCard={(card) => setDialog({ kind: 'card-edit', card })}
               onEditColumn={(target) => setDialog({ kind: 'column-edit', column: target })}

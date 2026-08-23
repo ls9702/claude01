@@ -1,3 +1,4 @@
+import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { BoardColumn, Card, Id } from '../../types/models';
 import BoardColumnView from '../board/BoardColumnView';
 
@@ -6,6 +7,8 @@ interface BoardRailProps {
   cardsByColumn: Record<Id, Card[]>;
   currency: string;
   scheduledCounts: Record<Id, number>;
+  /** cardId → per-sheet split behind the badge's popover. */
+  scheduleBreakdowns?: Record<Id, SheetScheduleCount[]>;
   onOpenCard: (card: Card) => void;
   /** Matches the grid's height so the rail scrolls on its own. */
   height: string;
@@ -24,6 +27,7 @@ export default function BoardRail({
   cardsByColumn,
   currency,
   scheduledCounts,
+  scheduleBreakdowns,
   onOpenCard,
   height,
 }: BoardRailProps) {
@@ -45,6 +49,7 @@ export default function BoardRail({
             cards={cardsByColumn[column.id] ?? []}
             currency={currency}
             scheduledCounts={scheduledCounts}
+            scheduleBreakdowns={scheduleBreakdowns}
             onOpenCard={onOpenCard}
             compact
           />

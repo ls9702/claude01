@@ -4,20 +4,36 @@ import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { useUndoStore } from '../../stores/undoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { FIRST_SHEET_NAME, useWorkspaceStore } from '../../stores/workspaceStore';
-import type { BoardColumn, Card, Day, Id, TimelineEntry } from '../../types/models';
+import type {
+  BoardColumn,
+  Card,
+  Day,
+  Id,
+  Sheet as SheetModel,
+  TimelineEntry,
+} from '../../types/models';
 import { AXIS_PX, HEADER_PX, INITIAL_SCROLL_MIN, PX_PER_MIN } from '../../timeline/layout';
+import { summarizeSchedule } from '../../timeline/scheduleSummary';
 import { minToY } from '../../utils/time';
 import ConfirmDialog from '../common/ConfirmDialog';
 import BoardRail from './BoardRail';
 import DayColumn, { dayTitle } from './DayColumn';
 import EntryDetailSheet from './EntryDetailSheet';
 import ScheduleSheet from './ScheduleSheet';
+import SheetRenameDialog from './SheetRenameDialog';
+import SheetTabs from './SheetTabs';
+import SheetWizard from './SheetWizard';
 import TimeAxis from './TimeAxis';
+import UnscheduledTray from './UnscheduledTray';
 
 type Dialog =
   | { kind: 'entry'; entry: TimelineEntry }
   | { kind: 'day-delete'; day: Day; index: number }
   | { kind: 'schedule'; card: Card }
+  | { kind: 'sheet-create' }
+  | { kind: 'sheet-edit'; sheet: SheetModel }
+  | { kind: 'sheet-rename'; sheet: SheetModel }
+  | { kind: 'sheet-delete'; sheet: SheetModel }
   | null;
 
 /** Shown when no trip is active — mirrors the board's picker. */
@@ -86,6 +102,7 @@ function TripPrompt() {
 export default function TimelineView() {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const addSheet = useWorkspaceStore((s) => s.addSheet);
+  const deleteSheet = useWorkspaceStore((s) => s.deleteSheet);
   const addDay = useWorkspaceStore((s) => s.addDay);
   const deleteDay = useWorkspaceStore((s) => s.deleteDay);
   const deleteEntry = useWorkspaceStore((s) => s.deleteEntry);
@@ -115,6 +132,14 @@ export default function TimelineView() {
     seededTripRef.current = trip.id;
     addSheet(trip.id, FIRST_SHEET_NAME);
   }, [trip, addSheet]);
+
+  const sheets = useMemo<SheetModel[]>(
+    () =>
+      (trip?.sheetOrder ?? [])
+        .map((id) => workspace.sheets[id])
+        .filter((entry): entry is SheetModel => Boolean(entry)),
+    [trip?.sheetOrder, workspace.sheets],
+  );
 
   const sheetId =
     activeSheetId && trip?.sheetOrder.includes(activeSheetId)
@@ -153,18 +178,37 @@ export default function TimelineView() {
     return map;
   }, [columns, workspace.cards]);
 
-  /** dayId → its entries, and cardId → how many entries it has anywhere. */
-  const { entriesByDay, scheduledCounts } = useMemo(() => {
+  /** dayId → its entries, sorted by start time. */
+  const entriesByDay = useMemo(() => {
     const byDay: Record<Id, TimelineEntry[]> = {};
-    const counts: Record<Id, number> = {};
     for (const entry of Object.values(workspace.entries)) {
       if (trip && entry.tripId !== trip.id) continue;
       (byDay[entry.dayId] ??= []).push(entry);
-      counts[entry.cardId] = (counts[entry.cardId] ?? 0) + 1;
     }
     for (const list of Object.values(byDay)) list.sort((a, b) => a.startMin - b.startMin);
-    return { entriesByDay: byDay, scheduledCounts: counts };
+    return byDay;
   }, [workspace.entries, trip]);
+
+  /** cardId → total entries (badge) and their per-sheet split (popover). */
+  const { counts: scheduledCounts, bySheet: scheduleBreakdowns } = useMemo(
+    () => summarizeSchedule(workspace, trip?.id),
+    [workspace, trip?.id],
+  );
+
+  /**
+   * 미배치 = no entry on the **active** sheet. A card placed on another sheet
+   * is still up for grabs here, which is the whole point of several sheets.
+   */
+  const unscheduledCards = useMemo<Card[]>(() => {
+    const placed = new Set<Id>();
+    const dayIds = new Set(days.map((day) => day.id));
+    for (const entry of Object.values(workspace.entries)) {
+      if (dayIds.has(entry.dayId)) placed.add(entry.cardId);
+    }
+    return columns.flatMap((column) =>
+      (cardsByColumn[column.id] ?? []).filter((card) => !placed.has(card.id)),
+    );
+  }, [columns, cardsByColumn, days, workspace.entries]);
 
   // The pager index must survive a day being deleted.
   const safePage = days.length === 0 ? 0 : Math.min(pageIndex, days.length - 1);
@@ -182,7 +226,8 @@ export default function TimelineView() {
 
   if (!trip) return <TripPrompt />;
 
-  const gridHeight = isDesktop ? 'calc(100dvh - 12rem)' : 'calc(100dvh - 16rem)';
+  // Mobile leaves room for the collapsed 미배치 tray under the grid.
+  const gridHeight = isDesktop ? 'calc(100dvh - 15rem)' : 'calc(100dvh - 21rem)';
   const visibleDays = isDesktop ? days : days.slice(safePage, safePage + 1);
   const dialogEntry = dialog?.kind === 'entry' ? workspace.entries[dialog.entry.id] : undefined;
 
@@ -213,14 +258,6 @@ export default function TimelineView() {
         <p data-testid="timeline-trip-title" className="min-w-0 truncate text-sm text-stone-400">
           {trip.title}
         </p>
-        {sheet ? (
-          <span
-            data-testid="timeline-sheet-name"
-            className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-500"
-          >
-            {sheet.name}
-          </span>
-        ) : null}
         <button
           type="button"
           data-testid="timeline-add-day"
@@ -231,6 +268,16 @@ export default function TimelineView() {
           ＋ 일자 추가
         </button>
       </header>
+
+      <SheetTabs
+        sheets={sheets}
+        activeSheetId={sheet?.id}
+        onSelect={setActiveSheet}
+        onCreate={() => setDialog({ kind: 'sheet-create' })}
+        onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
+        onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
+        onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
+      />
 
       {days.length === 0 ? (
         <div
@@ -293,14 +340,19 @@ export default function TimelineView() {
 
           <PlanDndContext trip={trip} columns={columns}>
             <div className="flex items-start border-y border-stone-200 bg-white">
-              <BoardRail
-                columns={columns}
-                cardsByColumn={cardsByColumn}
-                currency={trip.currency}
-                scheduledCounts={scheduledCounts}
-                onOpenCard={(card) => setDialog({ kind: 'schedule', card })}
-                height={gridHeight}
-              />
+              {/* Mounted on desktop only: the rail and the tray draw the same
+                  cards, and one dnd id may exist exactly once per context. */}
+              {isDesktop ? (
+                <BoardRail
+                  columns={columns}
+                  cardsByColumn={cardsByColumn}
+                  currency={trip.currency}
+                  scheduledCounts={scheduledCounts}
+                  scheduleBreakdowns={scheduleBreakdowns}
+                  onOpenCard={(card) => setDialog({ kind: 'schedule', card })}
+                  height={gridHeight}
+                />
+              ) : null}
 
               <div
                 ref={scrollerRef}
@@ -341,6 +393,15 @@ export default function TimelineView() {
                 </div>
               </div>
             </div>
+
+            {!isDesktop ? (
+              <UnscheduledTray
+                cards={unscheduledCards}
+                columns={columns}
+                currency={trip.currency}
+                onOpenCard={(card) => setDialog({ kind: 'schedule', card })}
+              />
+            ) : null}
           </PlanDndContext>
         </>
       )}
@@ -381,6 +442,50 @@ export default function TimelineView() {
 
       {dialog?.kind === 'schedule' ? (
         <ScheduleSheet card={dialog.card} onClose={() => setDialog(null)} />
+      ) : null}
+
+      {dialog?.kind === 'sheet-create' ? (
+        <SheetWizard
+          tripId={trip.id}
+          suggestedName={`일정 ${sheets.length + 1}`}
+          onClose={() => setDialog(null)}
+          onDone={setActiveSheet}
+        />
+      ) : null}
+
+      {dialog?.kind === 'sheet-edit' ? (
+        <SheetWizard
+          tripId={trip.id}
+          sheet={dialog.sheet}
+          onClose={() => setDialog(null)}
+          onDone={setActiveSheet}
+        />
+      ) : null}
+
+      {dialog?.kind === 'sheet-rename' ? (
+        <SheetRenameDialog sheet={dialog.sheet} onClose={() => setDialog(null)} />
+      ) : null}
+
+      {dialog?.kind === 'sheet-delete' ? (
+        <ConfirmDialog
+          title={`'${dialog.sheet.name}' 시트를 삭제할까요?`}
+          description={(() => {
+            const dayCount = dialog.sheet.dayOrder.length;
+            const entryCount = dialog.sheet.dayOrder.reduce(
+              (total, dayId) => total + (entriesByDay[dayId]?.length ?? 0),
+              0,
+            );
+            return dayCount === 0
+              ? '아직 일자가 없는 시트예요.'
+              : `일자 ${dayCount}개와 배치한 일정 ${entryCount}개가 함께 사라져요. 카드 자체는 보드에 남아요.`;
+          })()}
+          onConfirm={() => {
+            deleteSheet(dialog.sheet.id);
+            setDialog(null);
+          }}
+          onCancel={() => setDialog(null)}
+          testId="sheet-delete-confirm"
+        />
       ) : null}
     </section>
   );

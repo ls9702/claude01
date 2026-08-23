@@ -1,6 +1,7 @@
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { DND_COLUMN } from '../../dnd/boardDnd';
+import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { BoardColumn, Card, Id } from '../../types/models';
 import { colorClasses } from '../../utils/colors';
 import CardItem from './CardItem';
@@ -12,6 +13,8 @@ interface BoardColumnViewProps {
   currency: string;
   /** cardId → how many timeline entries it has, for the 🗓 badge. */
   scheduledCounts?: Record<Id, number>;
+  /** cardId → per-sheet split behind the badge's popover. */
+  scheduleBreakdowns?: Record<Id, SheetScheduleCount[]>;
   onOpenCard: (card: Card) => void;
   /** Omitted in the timeline rail — the rail does not create cards. */
   onAddCard?: (column: BoardColumn) => void;
@@ -35,6 +38,7 @@ export default function BoardColumnView({
   cards,
   currency,
   scheduledCounts,
+  scheduleBreakdowns,
   onAddCard,
   onOpenCard,
   onEditColumn,
@@ -103,6 +107,7 @@ export default function BoardColumnView({
               currency={currency}
               color={column.color}
               scheduledCount={scheduledCounts?.[card.id] ?? 0}
+              scheduleBreakdown={scheduleBreakdowns?.[card.id]}
               onOpen={onOpenCard}
             />
           ))}
