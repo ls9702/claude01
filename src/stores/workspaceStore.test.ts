@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyWorkspace, type Id } from '../types/models';
-import { SEED_COLUMNS, useWorkspaceStore } from './workspaceStore';
+import { MAX_PHOTOS_PER_CARD, SEED_COLUMNS, useWorkspaceStore } from './workspaceStore';
 
 // The store persists through IndexedDB, which does not exist under vitest's
 // node environment. Swap in an in-memory `StateStorage` so `persist` is
@@ -990,6 +990,114 @@ describe('addComment / removeComment (M6)', () => {
     store().addExpense(cardId, 1_500);
     store().addComment(cardId, '메모');
 
+    store().deleteCard(cardId);
+    expect(ws().cards[cardId]).toBeUndefined();
+  });
+});
+
+describe('addPhoto / removePhoto (M10)', () => {
+  const cardSetup = (): Id => {
+    const tripId = store().addTrip('오사카');
+    return store().addCard(tripId, columnIds(tripId)[4], { title: '츠텐카쿠' })!;
+  };
+
+  /** The caller owns the id — the blob is written under it *before* this. */
+  const meta = (id: string, over: Partial<{ w: number; h: number; bytes: number }> = {}) => ({
+    id,
+    w: 1_600,
+    h: 1_200,
+    bytes: 240_000,
+    ...over,
+  });
+
+  it('appends photos oldest first and stamps them', () => {
+    const cardId = cardSetup();
+    expect(store().addPhoto(cardId, meta('p1'))).toBe('p1');
+    expect(store().addPhoto(cardId, meta('p2', { w: 900, h: 1_600 }))).toBe('p2');
+
+    const photos = ws().cards[cardId].photos!;
+    expect(photos.map((item) => item.id)).toEqual(['p1', 'p2']);
+    expect(photos[0]).toMatchObject({ w: 1_600, h: 1_200, bytes: 240_000 });
+    expect(photos[1]).toMatchObject({ w: 900, h: 1_600 });
+    expect(photos[0].createdAt).toBeGreaterThan(0);
+    expect(store().dirty).toBe(true);
+  });
+
+  it('bumps the card stamp — the card is what changed', () => {
+    const cardId = cardSetup();
+    const before = ws().cards[cardId].updatedAt;
+    store().addPhoto(cardId, meta('p1'));
+    const after = ws().cards[cardId];
+    expect(after.updatedAt).toBeGreaterThanOrEqual(before);
+    expect(after.updatedAt).toBeGreaterThanOrEqual(after.photos![0].createdAt);
+    // Nothing else on the card moved.
+    expect(after).toMatchObject({ title: '츠텐카쿠' });
+  });
+
+  it('refuses an unknown card or dimensions that cannot be drawn', () => {
+    const cardId = cardSetup();
+    expect(store().addPhoto('nope', meta('p1'))).toBeNull();
+    expect(store().addPhoto(cardId, meta('p1', { w: 0 }))).toBeNull();
+    expect(store().addPhoto(cardId, meta('p1', { h: -3 }))).toBeNull();
+    expect(store().addPhoto(cardId, meta('p1', { w: Number.NaN }))).toBeNull();
+    expect(ws().cards[cardId].photos).toBeUndefined();
+  });
+
+  it('records a garbled size as 0 rather than NaN', () => {
+    const cardId = cardSetup();
+    store().addPhoto(cardId, meta('p1', { bytes: Number.NaN }));
+    expect(ws().cards[cardId].photos![0].bytes).toBe(0);
+  });
+
+  it('stops at the cap and says so by returning null', () => {
+    const cardId = cardSetup();
+    for (let index = 0; index < MAX_PHOTOS_PER_CARD; index += 1) {
+      expect(store().addPhoto(cardId, meta(`p${index}`))).toBe(`p${index}`);
+    }
+    expect(ws().cards[cardId].photos).toHaveLength(MAX_PHOTOS_PER_CARD);
+
+    const before = ws();
+    expect(store().addPhoto(cardId, meta('one-too-many'))).toBeNull();
+    // A refused mutation leaves the store completely untouched.
+    expect(ws()).toBe(before);
+  });
+
+  it('removes one photo and clears the field once the strip empties', () => {
+    const cardId = cardSetup();
+    store().addPhoto(cardId, meta('p1'));
+    store().addPhoto(cardId, meta('p2'));
+
+    store().removePhoto(cardId, 'p1');
+    expect(ws().cards[cardId].photos!.map((item) => item.id)).toEqual(['p2']);
+
+    store().removePhoto(cardId, 'p2');
+    // Back to exactly the shape a pre-M10 card has.
+    expect(ws().cards[cardId].photos).toBeUndefined();
+  });
+
+  it('is a no-op for an unknown card or photo', () => {
+    const cardId = cardSetup();
+    store().addPhoto(cardId, meta('p1'));
+    const before = ws();
+    store().removePhoto(cardId, 'nope');
+    store().removePhoto('nope', 'p1');
+    expect(ws()).toBe(before);
+  });
+
+  it('keeps 사진 apart from 지출 and 코멘트 on the same card', () => {
+    const cardId = cardSetup();
+    store().addExpense(cardId, 1_500, '입장료');
+    store().addComment(cardId, '현금만 받아요');
+    store().addPhoto(cardId, meta('p1'));
+
+    expect(ws().cards[cardId].expenses).toHaveLength(1);
+    expect(ws().cards[cardId].comments).toHaveLength(1);
+    expect(ws().cards[cardId].photos).toHaveLength(1);
+  });
+
+  it('cascade-deletes with the card', () => {
+    const cardId = cardSetup();
+    store().addPhoto(cardId, meta('p1'));
     store().deleteCard(cardId);
     expect(ws().cards[cardId]).toBeUndefined();
   });

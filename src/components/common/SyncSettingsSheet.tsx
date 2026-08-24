@@ -1,14 +1,16 @@
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { SYNC_STATUS_LABELS, useSyncStore } from '../../stores/syncStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { fetchMeta } from '../../sync/api';
 import { daysBetween, formatLastBackup, loadBackupState } from '../../sync/backup';
 import {
   exportJson,
+  exportJsonWithPhotos,
   findTombstoneConflicts,
   importJson,
   readBackupFile,
 } from '../../sync/exportImport';
+import { formatBytes, photoUsage } from '../../utils/photos';
 import { clearSettings, loadSettings, normalizeBaseUrl, saveSettings } from '../../sync/settings';
 import { restartSync, syncNow } from '../../sync/syncEngine';
 import ConfirmDialog from './ConfirmDialog';
@@ -64,6 +66,39 @@ const errorText = (err: unknown): string =>
  * because the GitHub Pages build has no server to point at and the empty state
  * should not read like something is broken.
  */
+/**
+ * The browser's own storage estimate, once it answers (M10).
+ *
+ * `navigator.storage.estimate()` does not exist in every WebView and rejects in
+ * a few, so the row it feeds is rendered only when a number actually arrives.
+ */
+function useStorageEstimate(): { usage: number; quota: number } | null {
+  const [estimate, setEstimate] = useState<{ usage: number; quota: number } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    try {
+      void navigator.storage
+        ?.estimate?.()
+        .then((result) => {
+          if (!live) return;
+          const { usage, quota } = result;
+          if (typeof usage === 'number' && typeof quota === 'number' && quota > 0) {
+            setEstimate({ usage, quota });
+          }
+        })
+        .catch(() => {});
+    } catch {
+      /* not available here */
+    }
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  return estimate;
+}
+
 export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) {
   const stored = loadSettings();
   const [baseUrl, setBaseUrl] = useState(stored.baseUrl);
@@ -75,6 +110,9 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   /** A picked backup waiting on the 복원 / 건너뛰기 question (B11). */
   const [restoreAsk, setRestoreAsk] = useState<{ file: File; count: number } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const usage = photoUsage(useWorkspaceStore((s) => s.workspace));
+  const estimate = useStorageEstimate();
 
   const status = useSyncStore((s) => s.status);
   const lastSyncedAt = useSyncStore((s) => s.lastSyncedAt);
@@ -146,6 +184,14 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
       setNotice({ tone: 'bad', text: errorText(err) });
     }
   };
+
+  /** 사진 포함 내보내기 — reads every referenced blob, so it awaits (M10). */
+  const handleExportPhotos = () =>
+    guard(async () => {
+      const written = await exportJsonWithPhotos();
+      setBackupRevision((value) => value + 1);
+      return { tone: 'ok', text: `백업 파일을 내려받았어요 (사진 ${written}장)` };
+    });
 
   /** The merge itself, once the 복원 question (if any) has been answered. */
   const runImport = (file: File, restore: boolean): Promise<void> =>
@@ -330,6 +376,18 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
                 {formatLastBackup(backupState.lastBackupAt)}
               </span>
             </Fact>
+            <Fact term="사진 용량">
+              <span data-testid="photo-usage" data-bytes={usage.bytes} data-count={usage.count}>
+                {formatBytes(usage.bytes)} · {usage.count}장
+              </span>
+            </Fact>
+            {estimate ? (
+              <Fact term="저장 공간">
+                <span data-testid="storage-estimate" data-usage={estimate.usage}>
+                  {formatBytes(estimate.usage)} / {formatBytes(estimate.quota)}
+                </span>
+              </Fact>
+            ) : null}
           </dl>
           <div className="mt-4 flex gap-2">
             <button
@@ -350,6 +408,16 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
               가져오기
             </button>
           </div>
+          <button
+            type="button"
+            data-testid="sync-export-photos"
+            onClick={handleExportPhotos}
+            disabled={busy}
+            className={`${SECONDARY_BUTTON_CLASS} mt-2 w-full`}
+          >
+            <Icon name="camera" size={16} />
+            사진 포함 내보내기
+          </button>
           <input
             ref={fileInput}
             data-testid="sync-import-input"
@@ -360,6 +428,9 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
           />
           <p className="mt-3 text-micro font-normal text-ink-faint">
             가져오기는 덮어쓰지 않고 지금 데이터와 합쳐요. NAS 없이도 로컬 저장으로 동작해요.
+          </p>
+          <p className="mt-2 text-micro font-normal text-ink-faint">
+            내보내기에는 사진이 포함되지 않아요. 사진까지 옮기려면 「사진 포함 내보내기」를 쓰세요.
           </p>
         </div>
       </div>

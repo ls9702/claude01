@@ -47,7 +47,9 @@ export default function ConfirmDialog({
       aria-modal="true"
       aria-label={title}
       data-testid={testId}
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      // Above every other layer (시트 z-50, 지도 모달/라이트박스 z-60): a
+      // question is always the topmost thing on screen while it is being asked.
+      className="fixed inset-0 z-70 flex items-center justify-center p-6"
     >
       <button
         type="button"

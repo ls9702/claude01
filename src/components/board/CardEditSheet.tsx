@@ -7,6 +7,7 @@ import { normalizeUrl } from '../../utils/url';
 import PinPicker from '../map/PinPicker';
 import PlaceSearch from '../map/PlaceSearch';
 import CardLedger, { numberOrUndefined, type LocalMoney } from '../common/CardLedger';
+import CardPhotoStrip from '../common/CardPhotoStrip';
 import Icon from '../common/Icon';
 import Sheet from '../common/Sheet';
 import {
@@ -356,6 +357,16 @@ export default function CardEditSheet({
         <button type="submit" className="hidden" aria-hidden="true" tabIndex={-1} />
       </form>
 
+      {/* 기록 — what the card actually turned into. Photos lead it: they are
+          the one part of the block that is worth looking at rather than
+          reading, and the ledger below is unchanged either way. Only in edit
+          mode; a card that does not exist yet has nowhere to hang bytes. */}
+      {card ? (
+        <div className="mt-6 border-t border-line pt-6">
+          <CardPhotoStrip cardId={card.id} />
+        </div>
+      ) : null}
+
       {card ? (
         <CardLedger
           card={card}
@@ -368,7 +379,7 @@ export default function CardEditSheet({
           data-testid="card-ledger-hint"
           className="mt-6 border-t border-line pt-6 text-label font-normal text-ink-faint"
         >
-          지출과 코멘트는 저장 후 기록할 수 있어요.
+          사진·지출·코멘트는 저장 후 기록할 수 있어요.
         </p>
       )}
 

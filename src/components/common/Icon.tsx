@@ -35,6 +35,7 @@ export type IconName =
   | 'alert'
   | 'arrow-up-down'
   | 'comment'
+  | 'camera'
   | 'route'
   | 'drag';
 
@@ -67,6 +68,8 @@ const PATHS: Record<IconName, string> = {
   alert: 'M12 3 2 20h20L12 3ZM12 10v4M12 17h.01',
   'arrow-up-down': 'M8 4v16M8 4 5 7M8 4l3 3M16 20V4M16 20l3-3M16 20l-3-3',
   comment: 'M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 4V6a1 1 0 0 1 1-1Z',
+  camera:
+    'M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1ZM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z',
   route: 'M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 9v3a4 4 0 0 1-4 4h-4a4 4 0 0 0-4 3',
   drag: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
 };

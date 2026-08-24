@@ -29,6 +29,7 @@
  *     editing another card.
  */
 
+import { schedulePhotoGc } from './photoGc';
 import { useUndoStore, UNDO_DESTRUCTIVE_MS } from './undoStore';
 import { useWorkspaceStore } from './workspaceStore';
 
@@ -70,6 +71,12 @@ export function deleteWithUndo(
   const snapshot = useWorkspaceStore.getState().workspace;
 
   if (doDelete() === false) return false;
+
+  // A deleted 여행/카테고리/카드 may have taken photos out of reach. The sweep
+  // is only *booked* here — it runs after a grace period longer than this very
+  // toast, and re-checks the references before deleting anything, so tapping
+  // 실행 취소 puts the photos back with the card (M10).
+  schedulePhotoGc();
 
   useUndoStore
     .getState()

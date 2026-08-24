@@ -6,6 +6,7 @@ import {
   type Card,
   type CardComment,
   type CardExpense,
+  type CardPhoto,
   type Day,
   type FlightLeg,
   type GeoPoint,
@@ -72,6 +73,15 @@ export type EntryPatch = Partial<Pick<TimelineEntry, 'note'>>;
 
 /** Fallback length of a dropped card that carries no `defaultDurationMin`. */
 export const DEFAULT_ENTRY_MIN = 60;
+
+/**
+ * How many photos one card may hold (M10).
+ *
+ * Not a storage limit — the blobs are capped at ~500KB each, so a full card is
+ * about 6MB — but a *legibility* one: a strip of thumbnails stops being a strip
+ * somewhere past a dozen, and a card is an idea, not an album.
+ */
+export const MAX_PHOTOS_PER_CARD = 12;
 
 /** Name of the sheet auto-created on a trip's first visit to the 일정 tab. */
 export const FIRST_SHEET_NAME = '일정 1';
@@ -413,6 +423,31 @@ export interface WorkspaceState {
   addComment: (cardId: Id, text: string) => Id | null;
   /** Drops one comment. No-op when the card or the comment is unknown. */
   removeComment: (cardId: Id, commentId: Id) => void;
+
+  /* --- 사진 — M10 ------------------------------------------------------ */
+
+  /**
+   * Records a photo that has **already been written** to the blob store.
+   *
+   * The caller owns the id precisely because of that ordering: the bytes go in
+   * first, under an id it generated, and only a successful write earns a place
+   * in the workspace. Metadata therefore never points at pixels that are not
+   * there (the reverse — a blob with no metadata — is harmless and is what the
+   * GC sweeps up).
+   *
+   * Returns the id it was given, or `null` when the card is unknown, the
+   * dimensions are not positive finite numbers, or the card is already holding
+   * {@link MAX_PHOTOS_PER_CARD}.
+   */
+  addPhoto: (cardId: Id, meta: { id: Id; w: number; h: number; bytes: number }) => Id | null;
+  /**
+   * Drops one photo's metadata. No-op when the card or the photo is unknown.
+   *
+   * Deliberately does **not** delete the blob: a card delete is undoable for
+   * 10초 and would hand these ids straight back. `photoGc` sweeps the bytes
+   * later, once nothing has referenced them for a grace period.
+   */
+  removePhoto: (cardId: Id, photoId: Id) => void;
 
   /* --- 일정 (timeline) — M2a ------------------------------------------ */
 
@@ -802,6 +837,43 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               draft.cards,
               cardId,
               { comments: kept.length > 0 ? kept : undefined },
+              now,
+            );
+          });
+        },
+
+        /* --- 사진 (M10) ------------------------------------------------ */
+
+        addPhoto: (cardId, meta) =>
+          run((draft, now) => {
+            const card = draft.cards[cardId];
+            if (!card) return null;
+            const positive = (value: number): boolean => Number.isFinite(value) && value > 0;
+            if (!positive(meta.w) || !positive(meta.h)) return null;
+            const current = card.photos ?? [];
+            if (current.length >= MAX_PHOTOS_PER_CARD) return null;
+
+            const photo: CardPhoto = {
+              id: meta.id,
+              w: Math.round(meta.w),
+              h: Math.round(meta.h),
+              bytes: Number.isFinite(meta.bytes) ? Math.max(0, Math.round(meta.bytes)) : 0,
+              createdAt: now,
+            };
+            touch<Card>(draft.cards, cardId, { photos: [...current, photo] }, now);
+            return meta.id;
+          }),
+
+        removePhoto: (cardId, photoId) => {
+          run((draft, now) => {
+            const card = draft.cards[cardId];
+            const kept = (card?.photos ?? []).filter((item) => item.id !== photoId);
+            if (!card || kept.length === (card.photos?.length ?? 0)) return null;
+            // Emptied goes back to `undefined` — the shape a pre-M10 card has.
+            return touch<Card>(
+              draft.cards,
+              cardId,
+              { photos: kept.length > 0 ? kept : undefined },
               now,
             );
           });

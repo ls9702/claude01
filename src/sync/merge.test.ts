@@ -604,6 +604,48 @@ const cases: Case[] = [
       expect(m.cards.k2.comments).toHaveLength(1);
     },
   },
+  {
+    // M10: 사진도 카드에 얹혀 카드 통째 LWW를 탄다. 병합 규칙을 새로 만들지
+    // 않은 이유이자, 그래서 확인해 둬야 하는 것 — 사진 없는 예전 카드는 그대로
+    // 살아남고, 사진이 붙은 카드는 메타데이터가 한 장도 상하지 않고 건너간다.
+    name: 'M10 사진 메타데이터가 카드 LWW로 왕복한다',
+    local: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1', 'k2'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1), { updatedAt: T(5) }),
+        card('k2', 't1', 'c1', T(2), {
+          updatedAt: T(60),
+          photos: [
+            { id: 'ph1', w: 1_600, h: 1_200, bytes: 240_000, createdAt: T(50) },
+            { id: 'ph2', w: 900, h: 1_600, bytes: 180_000, createdAt: T(60) },
+          ],
+        }),
+      ],
+    }),
+    remote: ws({
+      trips: [trip('t1', T(1), { columnOrder: ['c1'] })],
+      columns: [column('c1', 't1', T(1), { cardOrder: ['k1', 'k2'] })],
+      cards: [
+        card('k1', 't1', 'c1', T(1), { updatedAt: T(5) }),
+        // The server's copy predates both photos — the newer card wins whole.
+        card('k2', 't1', 'c1', T(2), { updatedAt: T(2) }),
+      ],
+    }),
+    now: NOW,
+    check: (m) => {
+      expect(m.schemaVersion).toBe(1);
+      expect(m.cards.k1.photos).toBeUndefined();
+      expect(m.cards.k2.photos?.map((item) => item.id)).toEqual(['ph1', 'ph2']);
+      expect(m.cards.k2.photos?.[0]).toEqual({
+        id: 'ph1',
+        w: 1_600,
+        h: 1_200,
+        bytes: 240_000,
+        createdAt: T(50),
+      });
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------ *

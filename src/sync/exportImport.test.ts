@@ -3,9 +3,12 @@ import { emptyWorkspace, type Workspace } from '../types/models';
 import {
   backupDateStamp,
   backupFileName,
+  backupPhotoFileName,
   deserializeBackup,
   findTombstoneConflicts,
+  readBackupPhotos,
   serializeBackup,
+  serializeBackupWithPhotos,
   withoutTombstones,
   type BackupFile,
 } from './exportImport';
@@ -300,5 +303,92 @@ describe('복원 병합', () => {
   it('되살릴 게 없으면 워크스페이스를 그대로 돌려준다', () => {
     const local = populated();
     expect(withoutTombstones(local, [])).toBe(local);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 사진 포함 백업 (M10)
+ * ------------------------------------------------------------------ */
+
+/** `populated()` with two photos on its one card. */
+function withPhotos(): Workspace {
+  const ws = populated();
+  ws.cards.k1 = {
+    ...ws.cards.k1,
+    photos: [
+      { id: 'ph1', w: 1_600, h: 1_200, bytes: 240_000, createdAt: 1_400 },
+      { id: 'ph2', w: 900, h: 1_600, bytes: 180_000, createdAt: 1_500 },
+    ],
+  };
+  return ws;
+}
+
+describe('사진 포함 백업 (M10)', () => {
+  const photos = { ph1: 'AAECAw==', ph2: 'BAUGBw==' };
+
+  it('파일 이름으로 사진 포함본을 구분한다', () => {
+    expect(backupPhotoFileName(AT)).toBe(
+      `trip-board-backup-${backupDateStamp(AT)}-photos.json`,
+    );
+    expect(backupPhotoFileName(AT)).not.toBe(backupFileName(AT));
+  });
+
+  it('워크스페이스와 사진을 한 봉투에 담아 그대로 되읽는다', () => {
+    const workspace = withPhotos();
+    const text = serializeBackupWithPhotos(workspace, photos, AT);
+    const parsed = JSON.parse(text) as BackupFile;
+
+    expect(parsed.exportedAt).toBe(AT);
+    expect(deserializeBackup(text)).toEqual(workspace);
+    expect(readBackupPhotos(parsed)).toEqual(photos);
+    // 사진 메타데이터는 워크스페이스 쪽에 그대로 남아 있다.
+    expect(deserializeBackup(text).cards.k1.photos).toHaveLength(2);
+  });
+
+  it('사진이 없는 예전 백업도 그대로 읽힌다', () => {
+    const text = serializeBackup(populated(), AT);
+    expect(deserializeBackup(text)).toEqual(populated());
+    expect(readBackupPhotos(JSON.parse(text))).toBeUndefined();
+  });
+
+  it('사진 칸이 비었거나 망가진 파일은 없는 셈 친다', () => {
+    expect(readBackupPhotos(null)).toBeUndefined();
+    expect(readBackupPhotos({})).toBeUndefined();
+    expect(readBackupPhotos({ photos: {} })).toBeUndefined();
+    expect(readBackupPhotos({ photos: [] })).toBeUndefined();
+    expect(readBackupPhotos({ photos: 'nope' })).toBeUndefined();
+    // 문자열이 아닌 값은 통째로 버린다 — 손으로 고친 파일이 객체를 밀어넣지
+    // 못하게.
+    expect(readBackupPhotos({ photos: { ph1: { evil: true }, ph2: 'BAUGBw==' } })).toEqual({
+      ph2: 'BAUGBw==',
+    });
+  });
+
+  it('병합이 버린 카드의 사진은 되살릴 대상이 아니다', () => {
+    // 백업에는 사진이 둘 다 있지만, 로컬 톰스톤이 카드를 삼킨 뒤라면 병합
+    // 결과에는 어떤 사진 id도 남지 않는다 — 복원 루프가 도는 기준이 그것이다.
+    const backup = withPhotos();
+    const local = emptyWorkspace();
+    local.tombstones.push({ id: 'k1', entity: 'card', deletedAt: Date.now() });
+
+    const merged = merge(local, backup);
+    expect(merged.cards.k1).toBeUndefined();
+
+    const referenced = new Set(
+      Object.values(merged.cards).flatMap((card) => (card.photos ?? []).map((p) => p.id)),
+    );
+    expect(referenced.size).toBe(0);
+    expect(Object.keys(readBackupPhotos({ photos })!).filter((id) => referenced.has(id))).toEqual(
+      [],
+    );
+  });
+
+  it('사진이 살아남으면 그 id만 복원 대상이 된다', () => {
+    const merged = merge(emptyWorkspace(), withPhotos());
+    const referenced = new Set(
+      Object.values(merged.cards).flatMap((card) => (card.photos ?? []).map((p) => p.id)),
+    );
+    const restorable = Object.keys(photos).filter((id) => referenced.has(id));
+    expect(restorable).toEqual(['ph1', 'ph2']);
   });
 });

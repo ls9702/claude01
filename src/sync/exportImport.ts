@@ -14,16 +14,31 @@
  * functions so the round trip can be unit-tested without a browser.
  */
 
+import { getPhotoBlob, putPhotoBlob } from '../stores/photoBlobs';
+import { schedulePhotoGc } from '../stores/photoGc';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import type { Id, Millis, Tombstone, Workspace } from '../types/models';
+import { base64ToBuf, bufToBase64 } from '../utils/base64';
 import { markBackedUp } from './backup';
 import { merge } from './merge';
+
+/** `photoId → base64 JPEG`, the optional second half of a backup file (M10). */
+export type BackupPhotos = Record<Id, string>;
 
 /** Shape of the `.json` file written by {@link exportJson}. */
 export interface BackupFile {
   /** When the export ran. Informational — merge uses the entity stamps. */
   exportedAt: Millis;
   workspace: Workspace;
+  /**
+   * Photo bytes, base64 in the same JSON (M10). Absent from an ordinary
+   * 내보내기 — a workspace is tens of kilobytes and a photo album is tens of
+   * megabytes, and one of those is a file you can email yourself.
+   *
+   * Old readers ignore the key (`deserializeBackup` only ever looks at
+   * `workspace`), so a 사진 포함 file still restores everywhere.
+   */
+  photos?: BackupPhotos;
 }
 
 /** What an import actually brought in, for the confirmation message. */
@@ -44,10 +59,46 @@ export function backupDateStamp(now: Millis = Date.now()): string {
 export const backupFileName = (now: Millis = Date.now()): string =>
   `trip-board-backup-${backupDateStamp(now)}.json`;
 
+/** `trip-board-backup-YYYYMMDD-photos.json` — the 사진 포함 variant (M10). */
+export const backupPhotoFileName = (now: Millis = Date.now()): string =>
+  `trip-board-backup-${backupDateStamp(now)}-photos.json`;
+
 /** Pure half of the export: workspace → file contents. */
 export function serializeBackup(workspace: Workspace, now: Millis = Date.now()): string {
   const payload: BackupFile = { exportedAt: now, workspace };
   return JSON.stringify(payload, null, 2);
+}
+
+/**
+ * Pure half of the 사진 포함 export.
+ *
+ * Not pretty-printed like {@link serializeBackup}: two extra spaces per line of
+ * base64 is real weight once photos are in, and nobody reads this half by hand.
+ */
+export function serializeBackupWithPhotos(
+  workspace: Workspace,
+  photos: BackupPhotos,
+  now: Millis = Date.now(),
+): string {
+  const payload: BackupFile = { exportedAt: now, workspace, photos };
+  return JSON.stringify(payload);
+}
+
+/**
+ * Pure half of the import's photo half: the `photos` map of a parsed file, or
+ * `undefined` for an ordinary backup (and for anything that is not a map of
+ * strings — a hand-edited file must not be able to smuggle objects in here).
+ */
+export function readBackupPhotos(parsed: unknown): BackupPhotos | undefined {
+  if (typeof parsed !== 'object' || parsed === null) return undefined;
+  const raw = (parsed as { photos?: unknown }).photos;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+
+  const photos: BackupPhotos = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string' && value.length > 0) photos[id] = value;
+  }
+  return Object.keys(photos).length > 0 ? photos : undefined;
 }
 
 /**
@@ -93,14 +144,13 @@ export function deserializeBackup(text: string): Workspace {
  * Uses an object URL + a synthetic `<a download>` click, which is the only
  * approach that works in a WKWebView-backed iOS PWA as well as on desktop.
  */
-export function exportJson(now: Millis = Date.now()): void {
-  const text = serializeBackup(useWorkspaceStore.getState().workspace, now);
+function download(text: string, filename: string, now: Millis): void {
   const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
 
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = backupFileName(now);
+  anchor.download = filename;
   anchor.rel = 'noopener';
   document.body.append(anchor);
   anchor.click();
@@ -113,6 +163,48 @@ export function exportJson(now: Millis = Date.now()): void {
   // get — there is no completion event for a download — so stamp it here and
   // let the 백업 넛지 stand down.
   markBackedUp(now);
+}
+
+export function exportJson(now: Millis = Date.now()): void {
+  const workspace = useWorkspaceStore.getState().workspace;
+  download(serializeBackup(workspace, now), backupFileName(now), now);
+}
+
+/**
+ * Downloads the workspace **with its photos** base64'd into the same file
+ * (M10).
+ *
+ * One file rather than a zip on purpose: the app has no zip library, the
+ * import path is already "pick a .json", and a single file is the thing people
+ * actually manage to move between a phone and a laptop. The cost is base64's
+ * 33% — a 12-photo trip is ~8MB — which is why this is a *separate button* and
+ * not what 내보내기 does.
+ *
+ * Only photos the workspace still refers to are written; an orphan blob the GC
+ * has not swept yet is not something to carry to another device.
+ */
+export async function exportJsonWithPhotos(now: Millis = Date.now()): Promise<number> {
+  const workspace = useWorkspaceStore.getState().workspace;
+  const photos: BackupPhotos = {};
+
+  for (const id of referencedIds(workspace)) {
+    const buf = await getPhotoBlob(id);
+    // A missing blob is skipped rather than fatal: the file is still a valid
+    // backup of everything else, and one lost photo must not cost the trip.
+    if (buf) photos[id] = bufToBase64(buf);
+  }
+
+  download(serializeBackupWithPhotos(workspace, photos, now), backupPhotoFileName(now), now);
+  return Object.keys(photos).length;
+}
+
+/** Every photo id the workspace mentions, oldest card first. */
+function referencedIds(workspace: Workspace): Id[] {
+  const ids = new Set<Id>();
+  for (const card of Object.values(workspace.cards)) {
+    for (const photo of card.photos ?? []) ids.add(photo.id);
+  }
+  return [...ids];
 }
 
 /** Reads a picked file into a workspace, so the UI can look before it merges. */
@@ -186,7 +278,12 @@ export async function importJson(
   file: File,
   opts: ImportOptions = {},
 ): Promise<ImportSummary> {
-  const imported = await readBackupFile(file);
+  const text = await file.text();
+  const imported = deserializeBackup(text);
+  // Parsed a second time only to reach the optional `photos` half, and only
+  // because `deserializeBackup` is the frozen, well-tested door for the rest.
+  const photos = readBackupPhotos(JSON.parse(text) as unknown);
+
   const store = useWorkspaceStore.getState();
   const local = opts.restore
     ? withoutTombstones(store.workspace, findTombstoneConflicts(store.workspace, imported))
@@ -194,9 +291,39 @@ export async function importJson(
   const merged = merge(local, imported);
   store.replaceWorkspace(merged);
 
+  if (photos) await restorePhotos(photos, merged);
+  // A merge can also *drop* cards (a tombstone outliving them), so every import
+  // is a moment when blobs may have become unreachable — let the sweeper look
+  // once the grace period has passed.
+  schedulePhotoGc();
+
   return {
     trips: Object.keys(merged.trips).length,
     cards: Object.keys(merged.cards).length,
     entries: Object.keys(merged.entries).length,
   };
+}
+
+/**
+ * Writes the file's photo bytes back into the blob store (M10).
+ *
+ * Filtered by the **merged** workspace, not by the file: a card the merge threw
+ * away (a tombstone outlived it) must not leave its photos behind as garbage,
+ * and a photo whose id is already here is simply re-written — same id, same
+ * bytes, so an import run twice is still a no-op.
+ *
+ * A failed write is swallowed on purpose. The workspace has already been
+ * replaced by then; turning "one photo would not fit" into a thrown import
+ * would tell the user their trip did not come back, which is false.
+ */
+async function restorePhotos(photos: BackupPhotos, merged: Workspace): Promise<void> {
+  const wanted = new Set(referencedIds(merged));
+  for (const [id, base64] of Object.entries(photos)) {
+    if (!wanted.has(id)) continue;
+    try {
+      await putPhotoBlob(id, base64ToBuf(base64));
+    } catch (err) {
+      console.warn('[importJson] photo restore failed', id, err);
+    }
+  }
 }

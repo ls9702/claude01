@@ -104,6 +104,12 @@ export function CardSurface({
       title: card.location.address,
     });
   }
+  // Last on purpose (M10): 사진 is the one chip that says nothing about the
+  // *decision* to go, so it folds into ＋N first when a card is busy.
+  const photoCount = card.photos?.length ?? 0;
+  if (photoCount > 0) {
+    chips.push({ key: 'photos', icon: 'camera', text: `${photoCount}장` });
+  }
 
   const shown = terse ? chips.slice(0, 1) : chips.slice(0, MAX_CHIPS);
   // A tray card only has to be identifiable; it does not owe a chip count.

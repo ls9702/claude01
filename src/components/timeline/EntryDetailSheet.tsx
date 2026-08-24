@@ -9,6 +9,7 @@ import {
   formatTimeRange,
 } from '../../utils/time';
 import CardLedger, { type LocalMoney } from '../common/CardLedger';
+import CardPhotoStrip from '../common/CardPhotoStrip';
 import Sheet from '../common/Sheet';
 import Icon from '../common/Icon';
 import {
@@ -182,9 +183,16 @@ export default function EntryDetailSheet({
           />
         </div>
 
-        {/* The card owns its money and its thread, so this is the *same*
-            ledger the board shows — not a copy of it. Recording a receipt from
-            the day you are standing in is the whole point of 오늘 모드. */}
+        {/* The card owns its money, its thread and its photos, so these are
+            the *same* ones the board shows — not a copy. Recording a receipt,
+            or a shot of what you are looking at, from the day you are standing
+            in is the whole point of 오늘 모드. */}
+        {card ? (
+          <div className="border-t border-line pt-6">
+            <CardPhotoStrip cardId={card.id} />
+          </div>
+        ) : null}
+
         {card ? (
           <CardLedger
             card={card}

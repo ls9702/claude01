@@ -113,6 +113,30 @@ export interface CardComment {
   at: Millis;
 }
 
+/**
+ * One photo attached to a card (M10) — **metadata only**.
+ *
+ * The JPEG bytes deliberately live outside the workspace, in their own
+ * idb-keyval store keyed by {@link CardPhoto.id} (see `stores/photoBlobs.ts`).
+ * The workspace is re-serialized whole on every mutation, so a few megabytes of
+ * pixels in here would be re-written every time a title is typed — and would
+ * ride every sync push and every backup file.
+ *
+ * `w`/`h` are the stored (already downscaled) dimensions and `bytes` the
+ * compressed size, so the UI can lay a thumbnail out and 설정 can total the
+ * usage without touching IndexedDB.
+ */
+export interface CardPhoto {
+  id: Id;
+  /** Stored width in px. */
+  w: number;
+  /** Stored height in px. */
+  h: number;
+  /** Compressed JPEG size in bytes. */
+  bytes: number;
+  createdAt: Millis;
+}
+
 /** A brainstorm card: an idea that can be dragged onto the timeline. */
 export interface Card {
   id: Id;
@@ -134,6 +158,13 @@ export interface Card {
   expenses?: CardExpense[];
   /** Comment thread on this card (M6), oldest first. Same LWW caveat. */
   comments?: CardComment[];
+  /**
+   * Photos attached to this card (M10), oldest first — metadata only, the
+   * bytes live in their own IndexedDB store. Optional and additive: a card
+   * saved before M10 has no field and `schemaVersion` stays 1. Same LWW caveat
+   * as {@link Card.expenses} — sync merges the card whole.
+   */
+  photos?: CardPhoto[];
   createdAt: Millis;
   updatedAt: Millis;
 }
