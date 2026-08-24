@@ -17,7 +17,7 @@
  */
 
 import type { BoardColumn, Id, TimelineEntry, Workspace } from '../types/models';
-import { windowedDayEntries } from './dayWindow';
+import { windowedDayEntries, type DayAxis } from './dayWindow';
 
 /** Icon that marks a board column as the trip's 이동수단 category. */
 export const TRANSPORT_ICON = '🚗';
@@ -167,7 +167,7 @@ export function dayRoute(workspace: Workspace, dayId: Id): DayRoute {
   const entries = Object.values(workspace.entries)
     .filter((entry) => entry.dayId === dayId)
     .sort(byStart);
-  return routeOfEntries(workspace, day.tripId, entries);
+  return routeOfEntries(workspace, day.tripId, entries, false);
 }
 
 /**
@@ -179,30 +179,45 @@ export function dayRoute(workspace: Workspace, dayId: Id): DayRoute {
  *
  * The ordering is the window's, not the clock's: `23:40 → 00:20` is two stops
  * in that order, which `byStart` alone would have reversed.
+ *
+ * It is also the flavour that **merges** a card the window shows twice in a
+ * row — see `mergeSameCard` in {@link routeOfEntries}.
  */
 export function dayRouteWindowed(
   workspace: Workspace,
   dayId: Id,
-  dayOrder: readonly Id[],
+  dayOrder: DayAxis,
 ): DayRoute {
   const day = workspace.days[dayId];
   if (!day) return emptyRoute();
 
   const entries = windowedDayEntries(workspace, dayId, dayOrder).map((row) => row.entry);
-  return routeOfEntries(workspace, day.tripId, entries);
+  return routeOfEntries(workspace, day.tripId, entries, true);
 }
 
 /**
  * The stop/leg walk itself, over an **already ordered** entry list.
  *
  * Shared by {@link dayRoute} and {@link dayRouteWindowed} so the two can never
- * drift apart: the only thing that separates them is which entries they get and
- * in what order.
+ * drift apart: the only thing that separates them is which entries they get, in
+ * what order, and `mergeSameCard`.
+ *
+ * `mergeSameCard` folds two **consecutive** stops of the *same card* into one.
+ * The 심야 항공편 is stored as a tail (23:45–24:00) and a head (00:00–06:15) of
+ * one card, and the 05시 window puts both in the same column — as two pins on
+ * the same airport, numbered 1 and 2, with a 0km leg between them. That is one
+ * departure, and the map has to say `1`. The survivor is the **first** piece:
+ * its `startMin` is where the journey began, and it is the row `timeline/gap.ts`
+ * maps the stop back onto.
+ *
+ * The calendar route never merges: two placements of one card on one day
+ * (호텔 → 관광 → 호텔) are two real visits there, and `dayGaps` measures both.
  */
 function routeOfEntries(
   workspace: Workspace,
   tripId: Id,
   entries: readonly TimelineEntry[],
+  mergeSameCard: boolean,
 ): DayRoute {
   if (entries.length === 0) return emptyRoute();
 
@@ -216,6 +231,10 @@ function routeOfEntries(
     const location = workspace.cards[entry.cardId]?.location;
     if (!location) return;
     if (!Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return;
+    // The same place, still: keep the first piece and let the second vanish.
+    if (mergeSameCard && stops.length > 0 && stops[stops.length - 1].cardId === entry.cardId) {
+      return;
+    }
     stops.push({
       cardId: entry.cardId,
       lat: location.lat,

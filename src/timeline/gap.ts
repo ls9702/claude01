@@ -13,7 +13,7 @@
  */
 
 import type { Id, TimelineEntry, Workspace } from '../types/models';
-import { windowedDayEntries } from './dayWindow';
+import { windowedDayEntries, type DayAxis } from './dayWindow';
 import {
   byStart,
   dayRoute,
@@ -70,7 +70,7 @@ export function dayGaps(workspace: Workspace, dayId: Id): DayGap[] {
 export function dayGapsWindowed(
   workspace: Workspace,
   dayId: Id,
-  dayOrder: readonly Id[],
+  dayOrder: DayAxis,
 ): DayGap[] {
   const rows = windowedDayEntries(workspace, dayId, dayOrder);
   const offsets = new Map<Id, number>(
@@ -124,6 +124,15 @@ function gapsOf(
     const from = entryOfStop.get(leg.from);
     const to = entryOfStop.get(leg.to);
     if (!from || !to) continue;
+    /**
+     * Same card, twice in a row → no hop at all.
+     *
+     * The distance is 0km and the minute count is whatever the two placements
+     * happen to leave between them, so the chip would read 「직선 0m」 — or, for
+     * the 심야편 split into a tail and a head, 「직선 0m · 시간이 부족해요」 about
+     * standing still in an airport. There is no journey here to state.
+     */
+    if (from.cardId === to.cardId) continue;
 
     const distanceKm = haversineKm(leg.from, leg.to);
     const gapMin = positionOf(to) - (positionOf(from) + from.durationMin);

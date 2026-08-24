@@ -17,14 +17,14 @@ import type {
 import { AXIS_PX, HEADER_PX, INITIAL_SCROLL_MIN, PX_PER_MIN } from '../../timeline/layout';
 import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
 import {
-  clockToOffset,
   effectiveDayId,
   windowedEntriesByDay,
+  type DayRef,
   type WindowedEntry,
 } from '../../timeline/dayWindow';
 import { dayGapsWindowed, type DayGap } from '../../timeline/gap';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
-import { currentAndNextWindowed, nowMin, todayDayId, todayWindowIso } from '../../timeline/today';
+import { currentAndNextWindowed, nowMin, todayFocus } from '../../timeline/today';
 import {
   daySpendWindowed,
   emptySpend,
@@ -166,12 +166,6 @@ export default function TimelineView() {
 
   /** 오늘 모드's clock: one `Date` per minute, paused while the tab is hidden. */
   const now = useNowTick();
-  /**
-   * The **window** day (M16-B), not the calendar one: at 새벽 2시 the day the
-   * user is living in is still yesterday's, and that is the column 오늘 has to
-   * point at.
-   */
-  const today = todayWindowIso(now);
   const minuteNow = nowMin(now);
 
   const trip = activeTripId ? workspace.trips[activeTripId] : undefined;
@@ -229,8 +223,17 @@ export default function TimelineView() {
     return map;
   }, [columns, workspace.cards]);
 
-  /** The active sheet's day ids — the axis every window mapping turns on. */
-  const dayOrder = useMemo<Id[]>(() => sheet?.dayOrder ?? [], [sheet?.dayOrder]);
+  /**
+   * The active sheet's days — the axis every window mapping turns on.
+   *
+   * Ids **with their dates** (B1): whether a 새벽 일정 folds back into the row
+   * above it is a calendar question, and `[5월 1일, 5월 3일]` is a sheet whose
+   * two rows are not neighbouring nights.
+   */
+  const dayOrder = useMemo<DayRef[]>(
+    () => (sheet?.dayOrder ?? []).map((id) => ({ id, date: workspace.days[id]?.date })),
+    [sheet?.dayOrder, workspace.days],
+  );
 
   /**
    * dayId → the entries **stored on** that calendar day, sorted by start time.
@@ -307,26 +310,25 @@ export default function TimelineView() {
   }, [days, workspace, dayOrder]);
 
   /**
-   * 오늘 모드 (M7b): the day of the **active sheet** whose date is today, if any.
-   * Everything today-flavoured — the chip, the now line, the 지금/다음 bar —
-   * hangs off this one id being non-null.
+   * 오늘 모드 (M7b): which column the user is living in, and where its now line
+   * goes (M16-B / B6). Everything today-flavoured — the chip, the now line, the
+   * 지금/다음 bar — hangs off this one object being non-null.
    */
-  const todayId = useMemo(
-    () => todayDayId(workspace, sheet?.id, today),
-    [workspace, sheet?.id, today],
-  );
+  const focus = useMemo(() => todayFocus(workspace, sheet?.id, now), [workspace, sheet?.id, now]);
+  const todayId = focus?.dayId ?? null;
 
   const nowNext = useMemo(
     () =>
-      todayId
+      focus
         ? currentAndNextWindowed(
-            (windowedByDay[todayId] ?? []).map((row) => row.entry),
+            (windowedByDay[focus.dayId] ?? []).map((row) => row.entry),
             workspace.cards,
             dayOrder,
             minuteNow,
+            focus.nowRawOffsetMin,
           )
         : {},
-    [todayId, windowedByDay, workspace.cards, dayOrder, minuteNow],
+    [focus, windowedByDay, workspace.cards, dayOrder, minuteNow],
   );
 
   /**
@@ -403,14 +405,15 @@ export default function TimelineView() {
   /**
    * Selects today's day and parks the grid an hour before the current minute.
    *
-   * `minute` is the wall clock; the scroller wants a window offset, and at
-   * 새벽 2시 those two are 1140 minutes apart.
+   * `offsetMin` is a **window** offset, not a wall clock: at 새벽 2시 those two
+   * are 1140 minutes apart, and in the 첫날 새벽 the honest place to park is the
+   * top of the column (B6).
    */
   const jumpToToday = useCallback(
-    (dayId: Id, minute: number) => {
+    (dayId: Id, offsetMin: number) => {
       const index = days.findIndex((day) => day.id === dayId);
       if (index >= 0) setPageIndex(index);
-      scrollToOffset(clockToOffset(minute) - 60);
+      scrollToOffset(offsetMin - 60);
       revealDay(dayId);
     },
     [days, scrollToOffset, revealDay],
@@ -429,9 +432,9 @@ export default function TimelineView() {
     if (positionedRef.current === key) return;
     positionedRef.current = key;
 
-    if (todayId) jumpToToday(todayId, minuteNow);
+    if (focus) jumpToToday(focus.dayId, focus.nowOffsetMin);
     else scrollToOffset(INITIAL_SCROLL_MIN);
-  }, [trip?.id, sheet, days.length, todayId, minuteNow, jumpToToday, scrollToOffset]);
+  }, [trip?.id, sheet, days.length, focus, jumpToToday, scrollToOffset]);
 
   if (!trip) return <TripPrompt />;
 
@@ -566,7 +569,7 @@ export default function TimelineView() {
             data-testid="today-chip"
             data-day-id={todayId}
             data-active={currentDay?.id === todayId ? 'true' : 'false'}
-            onClick={() => jumpToToday(todayId, minuteNow)}
+            onClick={() => jumpToToday(todayId, focus?.nowOffsetMin ?? 0)}
             className={currentDay?.id === todayId ? CHIP_NOW : CHIP_BUTTON}
           >
             오늘
@@ -690,7 +693,7 @@ export default function TimelineView() {
                   data-testid="today-chip"
                   data-day-id={todayId}
                   data-active={currentDay?.id === todayId ? 'true' : 'false'}
-                  onClick={() => jumpToToday(todayId, minuteNow)}
+                  onClick={() => jumpToToday(todayId, focus?.nowOffsetMin ?? 0)}
                   className={currentDay?.id === todayId ? CHIP_NOW : CHIP_BUTTON}
                 >
                   오늘
@@ -806,6 +809,9 @@ export default function TimelineView() {
                         currency={trip.currency}
                         fullWidth={!isDesktop}
                         nowMin={day.id === todayId ? minuteNow : undefined}
+                        // The line's pixel, when it is not simply the clock's:
+                        // 첫날 새벽 pins it to the top edge (B6).
+                        nowOffsetMin={day.id === todayId ? focus?.nowOffsetMin : undefined}
                         gaps={gapsByDay[day.id]}
                         onOpenEntry={(entry) => setDialog({ kind: 'entry', entry })}
                         onDeleteDay={(target) =>
@@ -871,11 +877,37 @@ export default function TimelineView() {
       {dialog?.kind === 'day-delete' ? (
         <ConfirmDialog
           title={`'${dayTitle(dialog.day, dialog.index)}'을(를) 삭제할까요?`}
-          description={
-            (entriesByDay[dialog.day.id]?.length ?? 0) > 0
-              ? `이 날에 배치한 일정 ${entriesByDay[dialog.day.id]?.length}개도 함께 사라져요.`
-              : '아직 배치한 일정이 없는 날이에요.'
-          }
+          /**
+           * Two counts, and they are allowed to differ (B7).
+           *
+           * Deleting a day row deletes the entries **stored on** it — the
+           * calendar count. The header badge over the column counts what the
+           * column *draws*, which includes the next day's 새벽 hours. Saying
+           * only the first number next to a badge showing the second reads as
+           * an off-by-N; saying only the second would be a lie about what is
+           * about to be deleted. So: the true number, then the difference,
+           * named.
+           */
+          description={(() => {
+            const stored = entriesByDay[dialog.day.id]?.length ?? 0;
+            const borrowed = (windowedByDay[dialog.day.id] ?? []).filter(
+              (row) => row.entry.dayId !== dialog.day.id,
+            ).length;
+            return (
+              <>
+                <span className="block">
+                  {stored > 0
+                    ? `이 날에 배치한 일정 ${stored}개도 함께 사라져요.`
+                    : '아직 배치한 일정이 없는 날이에요.'}
+                </span>
+                {borrowed > 0 ? (
+                  <span data-testid="day-delete-dawn-note" data-count={borrowed} className="mt-1 block">
+                    {`이 칸에 보이는 새벽 일정 ${borrowed}개는 다음 일자 소속이라 남아요.`}
+                  </span>
+                ) : null}
+              </>
+            );
+          })()}
           onConfirm={() => {
             deleteWithUndo('day', dayTitle(dialog.day, dialog.index), () =>
               deleteDay(dialog.day.id),

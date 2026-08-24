@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyWorkspace, type GeoPoint, type Id, type Workspace } from '../types/models';
 import { dayGaps, dayGapsWindowed } from './gap';
-import { dayRouteWindowed } from './route';
+import { dayRoute, dayRouteWindowed } from './route';
 
 const AT = 1_760_000_000_000;
 
@@ -285,5 +285,69 @@ describe('dayGapsWindowed / dayRouteWindowed', () => {
     placeOnD2(ws, 'e1', 'k-dawn', 60); // 2일차 01:00
     expect(dayRouteWindowed(ws, 'd2', ORDER).stops).toHaveLength(0);
     expect(dayRouteWindowed(ws, 'd1', ORDER).stops).toHaveLength(1);
+  });
+
+  /* ---------------------------------------------------------------- *
+   * B3 — 같은 카드 두 조각은 이동이 아니다
+   * ---------------------------------------------------------------- */
+
+  it('심야편의 꼬리와 머리 사이에는 갭 칩이 없다', () => {
+    const ws = withSecondDay(scaffold());
+    addCard(ws, 'k-flight', 'c-see', NAMBA);
+    place(ws, 'e-tail', 'k-flight', 1425, 15); // 1일차 23:45–24:00
+    placeOnD2(ws, 'e-head', 'k-flight', 0, 375); // 2일차 00:00–06:15
+
+    // 창 안에서는 나란히 붙어 있지만, 같은 카드다 — 「직선 0m」는 이동이 아니다.
+    expect(dayGapsWindowed(ws, 'd1', ORDER)).toEqual([]);
+  });
+
+  it('달력 기준으로도 같은 카드가 잇달으면 갭을 만들지 않는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'hotel', 'c-see', NAMBA);
+    place(ws, 'e1', 'hotel', 540, 60); // 09:00–10:00
+    place(ws, 'e2', 'hotel', 600, 60); // 10:00–11:00, 같은 카드
+
+    expect(dayGaps(ws, 'd1')).toEqual([]);
+  });
+
+  it('그 사이에 다른 장소가 끼면 갭은 두 개 그대로다', () => {
+    const ws = scaffold();
+    addCard(ws, 'hotel', 'c-see', NAMBA);
+    addCard(ws, 'umeda', 'c-see', UMEDA);
+    place(ws, 'e1', 'hotel', 540); // 09:00
+    place(ws, 'e2', 'umeda', 660); // 11:00
+    place(ws, 'e3', 'hotel', 1_200); // 20:00
+
+    expect(dayGaps(ws, 'd1').map((gap) => gap.afterEntryId)).toEqual(['e1', 'e2']);
+  });
+
+  it('창 안에서 같은 카드가 잇달으면 정거장 하나로 합쳐진다 (지도 번호 1-1)', () => {
+    const ws = withSecondDay(scaffold());
+    addCard(ws, 'k-flight', 'c-see', NAMBA);
+    addCard(ws, 'k-hotel', 'c-see', UMEDA);
+    place(ws, 'e-tail', 'k-flight', 1425, 15);
+    placeOnD2(ws, 'e-head', 'k-flight', 0, 375);
+
+    const route = dayRouteWindowed(ws, 'd1', ORDER);
+    expect(route.stops.map((stop) => stop.cardId)).toEqual(['k-flight']);
+    // 남은 것은 **첫 조각**의 자리다 — 여정이 시작된 시각.
+    expect(route.stops[0].startMin).toBe(1425);
+    expect(route.stops[0].order).toBe(1);
+    expect(route.legs).toHaveLength(0);
+
+    // 뒤에 진짜 다음 장소가 오면 번호는 1, 2 — 1, 2, 3이 아니다.
+    place(ws, 'e-hotel', 'k-hotel', 1000);
+    placeOnD2(ws, 'e-hotel2', 'k-hotel', 200); // 2일차 03:20 — 같은 창의 끝
+    const next = dayRouteWindowed(ws, 'd1', ORDER);
+    expect(next.stops.map((stop) => stop.order)).toEqual([1, 2, 3]);
+    expect(next.stops.map((stop) => stop.cardId)).toEqual(['k-hotel', 'k-flight', 'k-hotel']);
+  });
+
+  it('달력 경로는 합치지 않는다 — 호텔에 두 번 들르는 하루는 두 번이다', () => {
+    const ws = scaffold();
+    addCard(ws, 'hotel', 'c-see', NAMBA);
+    place(ws, 'e1', 'hotel', 540);
+    place(ws, 'e2', 'hotel', 600);
+    expect(dayRoute(ws, 'd1').stops).toHaveLength(2);
   });
 });

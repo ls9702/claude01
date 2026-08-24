@@ -184,6 +184,94 @@ test('시간표 시트에서 1일차 02시를 고르면 2일차 새벽에 저장
   await expect(page.getByTestId('entry-range')).toHaveText('02:00–03:00');
 });
 
+test('마지막 일자에서 05시 이전을 고르면 누르기 전에 막고 이유를 말한다', async ({ page }) => {
+  await createTrip(page, '오사카 마지막 시트');
+  await addCard(page, 2, '심야 라멘');
+
+  await page.getByTestId('tab-timeline').click();
+  await page.getByTestId('timeline-add-day-empty').click();
+  await expect(page.getByTestId('timeline-day')).toHaveCount(1);
+
+  await page.getByTestId('tab-board').click();
+  await page.getByTestId('board-card').filter({ hasText: '심야 라멘' }).click();
+  await page.getByTestId('card-schedule').click();
+  await expect(page.getByTestId('schedule-sheet')).toBeVisible();
+
+  // 10:00 — 하나뿐인 일자에 멀쩡히 들어가는 시각.
+  await expect(page.getByTestId('schedule-submit')).toBeEnabled();
+  await expect(page.getByTestId('schedule-out-of-range')).toHaveCount(0);
+
+  // 02:00까지 내리면 「1일차 02시」= 2일차 새벽인데, 2일차가 없다.
+  for (let i = 0; i < 32; i += 1) await page.getByTestId('schedule-start-minus').click();
+  await expect(page.getByTestId('schedule-start-value')).toHaveText('02:00');
+  await expect(page.getByTestId('schedule-out-of-range')).toHaveText(
+    '마지막 일자라 새벽(05시 이전)으로 넘길 수 없어요',
+  );
+  await expect(page.getByTestId('schedule-submit')).toBeDisabled();
+
+  // 시트는 열린 채다 — 고르던 값을 잃지 않고 05:00으로 되돌리면 다시 열린다.
+  await expect(page.getByTestId('schedule-sheet')).toBeVisible();
+  for (let i = 0; i < 12; i += 1) await page.getByTestId('schedule-start-plus').click();
+  await expect(page.getByTestId('schedule-start-value')).toHaveText('05:00');
+  await expect(page.getByTestId('schedule-out-of-range')).toHaveCount(0);
+  await expect(page.getByTestId('schedule-submit')).toBeEnabled();
+});
+
+test('앞 일자가 사라진 새벽 일정은 제자리에 고정되고 끌리지 않는다', async ({ page }) => {
+  await createTrip(page, '오사카 새벽 고정');
+  await addCard(page, 2, '심야 라멘');
+
+  await page.getByTestId('tab-timeline').click();
+  await page.getByTestId('timeline-add-day-empty').click();
+  await page.getByTestId('timeline-add-day').click();
+  await expect(page.getByTestId('timeline-day')).toHaveCount(2);
+
+  // 「1일차 02시」 → 달력으로는 2일차 02:00, 그림은 1일차 칸 아래쪽.
+  await page.getByTestId('tab-board').click();
+  await page.getByTestId('board-card').filter({ hasText: '심야 라멘' }).click();
+  await page.getByTestId('card-schedule').click();
+  await page.getByTestId('schedule-day-option').nth(0).click();
+  for (let i = 0; i < 32; i += 1) await page.getByTestId('schedule-start-minus').click();
+  await page.getByTestId('schedule-submit').click();
+  await page.getByTestId('tab-timeline').click();
+
+  // 1일차를 지우기 전에: 그 칸이 보여주는 개수와 지워질 개수가 다르다고 말한다 (B7).
+  await page.getByTestId('timeline-day').first().getByTestId('day-menu').click();
+  await page.getByTestId('day-menu-panel').getByTestId('day-delete').click();
+  await expect(page.getByTestId('day-delete-dawn-note')).toHaveText(
+    '이 칸에 보이는 새벽 일정 1개는 다음 일자 소속이라 남아요.',
+  );
+  await expect(page.getByTestId('day-delete-dawn-note')).toHaveAttribute('data-count', '1');
+  await page.getByTestId('confirm-accept').click();
+
+  // 이제 앞 일자가 없다 — 일정은 사라지지 않고 제 칸 꼭대기에 새벽으로 고정된다.
+  await expect(page.getByTestId('timeline-day')).toHaveCount(1);
+  const entry = page.getByTestId('timeline-entry');
+  await expect(entry).toHaveCount(1);
+  await expect(entry).toHaveAttribute('data-dawn', 'true');
+  await expect(entry).toHaveAttribute('data-start-min', '120');
+  await expect(entry).toHaveAttribute('data-offset-min', '0');
+  await expect(entry.getByTestId('entry-dawn-badge')).toHaveCount(1);
+  // 제목은 살아 있다 — 새벽 표시는 점 하나로 줄어든다 (B10).
+  await expect(entry).toContainText('심야 라멘');
+
+  // 고정된 블록은 끌리지 않는다 (B4): 잡아 끌어도 시각이 그대로다.
+  await expect(entry).toHaveAttribute('data-draggable', 'false');
+  const box = await entry.boundingBox();
+  if (!box) throw new Error('새벽 블록의 위치를 찾지 못했어요');
+  await dragMouse(
+    page,
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+    { x: box.x + box.width / 2, y: box.y + 200 },
+  );
+  await expect(page.getByTestId('timeline-entry')).toHaveCount(1);
+  await expect(page.getByTestId('timeline-entry')).toHaveAttribute('data-start-min', '120');
+  await expect(page.getByTestId('timeline-entry')).toHaveAttribute('data-offset-min', '0');
+
+  // 길이 조절 손잡이도 없다 — 그려진 높이가 길이가 아니기 때문이다.
+  await expect(entry.getByTestId('entry-resize')).toHaveCount(0);
+});
+
 test('요약 바가 시트 전체와 카테고리별 지출을 말하고, 지출을 적으면 따라 움직인다', async ({
   page,
 }) => {
@@ -333,5 +421,30 @@ test.describe('모바일 요약 바', () => {
     await expect(page.getByTestId('day-pager-label')).toHaveText('1일차');
     await expect(dayFigure).toContainText('1일차');
     await expect(dayFigure).not.toHaveAttribute('data-day-id', String(shownDayId));
+  });
+
+  test('좁은 화면에서 잘리는 쪽은 시트 절반이고, 오늘 숫자는 끝까지 보인다', async ({ page }) => {
+    await createTrip(page, '오사카 좁은 화면');
+    await addCard(page, 2, '이치란', '15000');
+
+    await page.getByTestId('tab-timeline').click();
+    await page.getByTestId('timeline-add-day-empty').click();
+    await expect(page.getByTestId('spend-summary')).toBeVisible();
+
+    // 320 / 360 / 390 — 실제로 쓰는 폭 셋 모두에서 (B5).
+    for (const width of [320, 360, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const bar = await page.getByTestId('spend-summary').boundingBox();
+      const day = await page.getByTestId('spend-summary-day').boundingBox();
+      if (!bar || !day) throw new Error(`${width}px에서 요약 바를 찾지 못했어요`);
+
+      // 일자 칸이 실제로 자리를 차지하고 있고 — 0폭으로 짜부라지지 않았고,
+      expect(day.width).toBeGreaterThan(40);
+      // 바 오른쪽 밖으로 밀려나지도 않았다.
+      expect(day.x).toBeGreaterThanOrEqual(bar.x - 1);
+      expect(day.x + day.width).toBeLessThanOrEqual(bar.x + bar.width + 1);
+      // 그리고 여전히 한 줄이다.
+      expect(Math.round(bar.height)).toBeLessThanOrEqual(41);
+    }
   });
 });

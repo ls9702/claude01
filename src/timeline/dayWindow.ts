@@ -35,12 +35,19 @@
  *
  * ## The three edges
  *
- * 1. **First day's 새벽** (`startMin < 300`, no previous day in `dayOrder`).
- *    There is no window to fall back into — 여행 시작 전날은 이 시트에 없다. The
- *    entry stays on its own day, pinned to the top in a thin 새벽 zone
+ * 1. **First day's 새벽** (`startMin < 300`, no *adjacent* previous day). There
+ *    is no window to fall back into — 여행 시작 전날은 이 시트에 없다. The entry
+ *    stays on its own day, pinned to the top in a thin 새벽 zone
  *    ({@link VisualPlacement.dawn}), because the alternative is an entry that
  *    exists in the store and nowhere on screen. It keeps its real clock label
- *    and stays tappable/draggable.
+ *    and stays tappable.
+ *
+ *    "Adjacent" is a **calendar** word, not a list one: `dayOrder` is a
+ *    sequence of rows the user typed, and 5월 1일 followed by 5월 3일 is a
+ *    perfectly ordinary sheet (주말만 짜둔 계획). 5월 3일 02:00 is the night of
+ *    5월 2일 — a date this sheet does not contain — so folding it into the
+ *    5월 1일 column would draw it 이틀 앞에. Only a previous row that really is
+ *    the day before adopts a 새벽 entry; see {@link calendarAdjacent}.
  * 2. **Crossing 05:00** (`startMin < 300` and `startMin + durationMin > 300`).
  *    `04:00 + 120분` starts in the previous window and ends after that window
  *    has closed. The block is drawn to the window's bottom edge and stopped
@@ -53,6 +60,7 @@
  */
 
 import type { Id, TimelineEntry, Workspace } from '../types/models';
+import { diffDaysIso, isIsoDate } from '../utils/flights';
 import { DAY_MIN, DAY_START_MIN } from '../utils/time';
 
 export { DAY_START_MIN };
@@ -69,6 +77,62 @@ export const WINDOW_MIN = DAY_MIN;
  */
 export const DAWN_PIN_MIN = 30;
 
+/**
+ * One day of the sheet as the window arithmetic needs it: its id, and its
+ * calendar date when the sheet has one.
+ *
+ * A bare `Id` is a day whose date is *unknown to this caller* — which the
+ * adjacency test reads as "dateless", the right answer for a 일수 sheet and the
+ * unchanged M16 behaviour for everyone else.
+ */
+export interface DayRef {
+  id: Id;
+  /** `YYYY-MM-DD`. Absent on a 일수(날짜 없는) sheet. */
+  date?: string;
+}
+
+/** The sheet's days in order — bare ids, or ids carrying their dates. */
+export type DayAxis = readonly (Id | DayRef)[];
+
+const refId = (item: Id | DayRef): Id => (typeof item === 'string' ? item : item.id);
+
+const refDate = (item: Id | DayRef): string | undefined =>
+  typeof item === 'string' ? undefined : item.date;
+
+/**
+ * Fills a bare `dayOrder` in with the dates the workspace already knows.
+ *
+ * Every window function that is handed a `Workspace` calls this, so a caller
+ * passing plain ids still gets calendar-correct adjacency (B1); a caller with
+ * no workspace — {@link windowedEntriesByDay} — has to build the axis itself.
+ */
+export function datedAxis(
+  dayOrder: DayAxis,
+  days: Record<Id, { date?: string } | undefined>,
+): DayRef[] {
+  return dayOrder.map((item) => {
+    const id = refId(item);
+    return { id, date: refDate(item) ?? days[id]?.date };
+  });
+}
+
+/**
+ * Is `own` the calendar day right after `previous`?
+ *
+ * - both dated → exactly one day apart, by the same arithmetic the 항공편
+ *   마법사 uses ({@link diffDaysIso});
+ * - both dateless → yes: a 일수 sheet's rows *are* consecutive days, that is
+ *   what「N일차」means;
+ * - one of each, or two days more than a night apart → no. A 새벽 entry has no
+ *   previous window to fall into and stays pinned on its own day.
+ */
+export function calendarAdjacent(previous: Id | DayRef, own: Id | DayRef): boolean {
+  const from = refDate(previous);
+  const to = refDate(own);
+  if (isIsoDate(from) && isIsoDate(to)) return diffDaysIso(from, to) === 1;
+  return from === undefined && to === undefined;
+}
+
 /** Where one entry is drawn, and which column's totals it belongs to. */
 export interface VisualPlacement {
   /** The day column that draws it — its own, or the previous one. */
@@ -76,6 +140,11 @@ export interface VisualPlacement {
   /**
    * Minutes from the top of that column, clamped to `0 … 1440`. This is the
    * number that becomes a `top:` pixel.
+   *
+   * Pulled up off {@link VisualPlacement.rawOffsetMin} when a block would
+   * otherwise be drawn thinner than {@link DAWN_PIN_MIN} against the window's
+   * bottom edge — see {@link visualPlacement}. The offset that means a *time*
+   * is `rawOffsetMin`; this one means a pixel.
    */
   offsetMin: number;
   /**
@@ -108,8 +177,9 @@ export interface PlaceableEntry {
  * `(dayId, startMin)` → `(renderDayId, offsetMin)`.
  *
  * - `startMin >= 300` → own day, `offset = startMin - 300`;
- * - `startMin < 300` with a previous day → that day, `offset = startMin + 1140`;
- * - `startMin < 300` with no previous day → own day, pinned (`dawn`).
+ * - `startMin < 300` with the **day before** in front of it → that day,
+ *   `offset = startMin + 1140`;
+ * - `startMin < 300` with no such day → own day, pinned (`dawn`).
  *
  * A `dayId` that is not in `dayOrder` at all (another sheet, a deleted row)
  * has no previous day by definition and takes the third branch, so the caller
@@ -117,7 +187,7 @@ export interface PlaceableEntry {
  */
 export function visualPlacement(
   entry: PlaceableEntry,
-  dayOrder: readonly Id[],
+  dayOrder: DayAxis,
 ): VisualPlacement {
   const startMin = finite(entry.startMin);
   const durationMin = Math.max(finite(entry.durationMin ?? 0), 0);
@@ -139,19 +209,28 @@ export function visualPlacement(
   // Pre-dawn. `+ WINDOW_MIN` is the "yesterday, late" shift: 01:00 of day N is
   // minute 1500 of day N-1's window, i.e. offset 1200.
   const rawOffsetMin = startMin + WINDOW_MIN - DAY_START_MIN;
-  const index = dayOrder.indexOf(entry.dayId);
+  const index = dayOrder.findIndex((item) => refId(item) === entry.dayId);
   const previous = index > 0 ? dayOrder[index - 1] : undefined;
 
-  if (previous) {
+  if (previous && calendarAdjacent(previous, dayOrder[index])) {
+    // Edge 2: an entry that runs through 05:00 stops at the window's edge.
     const room = WINDOW_MIN - rawOffsetMin;
-    const drawMin = Math.min(durationMin, room);
+    const fits = Math.min(durationMin, room);
+    /**
+     * 04:59 + 15분 has one minute of room and would be drawn one minute tall —
+     * a 1px sliver nobody can read or tap. The block keeps a
+     * {@link DAWN_PIN_MIN} floor and is pulled *up* to make space for it, so it
+     * still ends exactly on the window's bottom edge instead of hanging over
+     * into the column below. Same trade as the 새벽 pin: the height is a handle,
+     * the label is the truth, and `clipped` still says so.
+     */
+    const drawMin = Math.max(fits, DAWN_PIN_MIN);
     return {
-      renderDayId: previous,
-      offsetMin: rawOffsetMin,
+      renderDayId: refId(previous),
+      offsetMin: Math.min(rawOffsetMin, WINDOW_MIN - DAWN_PIN_MIN),
       rawOffsetMin,
-      // Edge 2: an entry that runs through 05:00 stops at the window's edge.
       drawMin,
-      clipped: drawMin < durationMin,
+      clipped: fits < durationMin,
       dawn: false,
     };
   }
@@ -171,7 +250,7 @@ export function visualPlacement(
 }
 
 /** Which column an entry's money / route / gap belongs to. Shorthand. */
-export const effectiveDayId = (entry: PlaceableEntry, dayOrder: readonly Id[]): Id =>
+export const effectiveDayId = (entry: PlaceableEntry, dayOrder: DayAxis): Id =>
   visualPlacement(entry, dayOrder).renderDayId;
 
 /** What a drop resolved to, in the coordinates the store speaks. */
@@ -197,17 +276,17 @@ export interface DropTarget {
 export function dropTarget(
   visualDayId: Id,
   yMin: number,
-  dayOrder: readonly Id[],
+  dayOrder: DayAxis,
 ): DropTarget | null {
   const y = Math.min(Math.max(finite(yMin), 0), WINDOW_MIN);
   const clock = y + DAY_START_MIN;
 
   if (clock < DAY_MIN) return { dayId: visualDayId, startMin: clock };
 
-  const index = dayOrder.indexOf(visualDayId);
+  const index = dayOrder.findIndex((item) => refId(item) === visualDayId);
   const next = index >= 0 ? dayOrder[index + 1] : undefined;
   if (!next) return null;
-  return { dayId: next, startMin: clock - DAY_MIN };
+  return { dayId: refId(next), startMin: clock - DAY_MIN };
 }
 
 /** Sort key for a windowed column: visual order, then creation, then id. */
@@ -236,11 +315,14 @@ export interface WindowedEntry {
 export function windowedDayEntries(
   workspace: Workspace,
   dayId: Id,
-  dayOrder: readonly Id[],
+  dayOrder: DayAxis,
 ): WindowedEntry[] {
+  // The workspace knows every day's date, so a caller handing over bare ids
+  // still gets the calendar-adjacency rule (B1) for free.
+  const axis = datedAxis(dayOrder, workspace.days);
   const rows: WindowedEntry[] = [];
   for (const entry of Object.values(workspace.entries)) {
-    const placement = visualPlacement(entry, dayOrder);
+    const placement = visualPlacement(entry, axis);
     if (placement.renderDayId === dayId) rows.push({ entry, placement });
   }
   return rows.sort(byOffset);
@@ -255,7 +337,7 @@ export function windowedDayEntries(
  */
 export function windowedEntriesByDay(
   entries: Iterable<TimelineEntry>,
-  dayOrder: readonly Id[],
+  dayOrder: DayAxis,
 ): Record<Id, WindowedEntry[]> {
   const byDay: Record<Id, WindowedEntry[]> = {};
   for (const entry of entries) {

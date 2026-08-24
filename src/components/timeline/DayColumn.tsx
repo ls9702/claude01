@@ -48,9 +48,28 @@ interface DayColumnProps {
    * *is* today gets one — on any other column the line would be a lie.
    */
   nowMin?: number;
+  /**
+   * Where that line is **drawn**, when it is not simply `clockToOffset(nowMin)`.
+   *
+   * The one case is the 새벽 before the sheet's first day (B6): 04:00 is 19
+   * hours down this column by the clock, and one hour *above* its top edge by
+   * the calendar. The caller has already resolved which — see
+   * {@link import('../../timeline/today').todayFocus}.
+   */
+  nowOffsetMin?: number;
   /** Straight-line gaps between consecutive located stops (M7b). */
   gaps?: readonly DayGap[];
 }
+
+/**
+ * Highest a 이동 갭 chip may be parked, in window minutes.
+ *
+ * The chip is `h-6` and centred on its minute (`-translate-y-1/2`), so half of
+ * it — 12px — hangs above `top`; two more pixels keep it off the hairline. That
+ * many minutes down, and the whole chip is inside the column instead of over
+ * the day header above it.
+ */
+const GAP_CHIP_MIN_MIN = Math.ceil(14 / PX_PER_MIN);
 
 /**
  * One day of the sheet: a sticky header plus the 05:00 → 05:00 grid (M16-B).
@@ -73,6 +92,7 @@ export default function DayColumn({
   onDeleteDay,
   fullWidth = false,
   nowMin,
+  nowOffsetMin,
   gaps,
 }: DayColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -114,7 +134,11 @@ export default function DayColumn({
   const rowById = new Map(entries.map((row) => [row.entry.id, row]));
   const showNow = nowMin !== undefined && Number.isFinite(nowMin);
   /** The red line lives in window space too — 02:00 is near the bottom. */
-  const nowOffset = showNow ? clockToOffset(nowMin as number) : 0;
+  const nowOffset = !showNow
+    ? 0
+    : Number.isFinite(nowOffsetMin)
+      ? (nowOffsetMin as number)
+      : clockToOffset(nowMin as number);
 
   return (
     <section
@@ -256,7 +280,16 @@ export default function DayColumn({
           // past the 24:00 line still hangs its chip where the block ends.
           const endMin = after.placement.rawOffsetMin + after.entry.durationMin;
           const spaced = gap.gapMin > 0;
-          const topMin = spaced ? endMin + gap.gapMin / 2 : endMin;
+          /**
+           * …but never above the column's own top edge (B9).
+           *
+           * A first-day 새벽 stop has a **negative** `rawOffsetMin` — 02:00 is
+           * 3시간 전이다 — so its chip's honest midpoint is off the top of the
+           * grid, where it is either invisible or hidden under the sticky day
+           * header. The block itself is pinned to offset 0 by the same rule
+           * ({@link VisualPlacement.dawn}); the chip follows it down.
+           */
+          const topMin = Math.max(spaced ? endMin + gap.gapMin / 2 : endMin, GAP_CHIP_MIN_MIN);
           const distance = formatDistanceKm(gap.distanceKm);
           if (!distance) return null;
 

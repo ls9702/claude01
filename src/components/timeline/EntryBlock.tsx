@@ -41,7 +41,12 @@ export function EntrySurface({
   const colors = colorClasses(color);
   // The card title already carries ✈️ for a flight; the column's icon beside it
   // would be the second aeroplane on one line (M9 §4.4-1).
-  const showIcon = !title.trimStart().startsWith(FLIGHT_CARD_PREFIX);
+  //
+  // A 새벽 block never carries it either (B10): it is 30분 tall and may be a
+  // third of a column wide, and in that space the emoji disc, the 새벽 badge and
+  // the title cannot all be had. The title is the one the user is looking for —
+  // the badge shrinks to a dot and the disc goes, so at least 「이치…」 survives.
+  const showIcon = !dawn && !title.trimStart().startsWith(FLIGHT_CARD_PREFIX);
 
   return (
     <div
@@ -51,13 +56,18 @@ export function EntrySurface({
         {dawn ? (
           <span
             data-testid="entry-dawn-badge"
-            className="shrink-0 rounded-full bg-sunken px-1 text-micro leading-none text-ink-muted"
-          >
-            새벽
-          </span>
+            // An empty span is not announced; `role="img"` gives the label
+            // something to be the name of.
+            role="img"
+            aria-label="새벽"
+            title="새벽"
+            // Neutral, not the category colour: the accent bar on the left
+            // already says which category this is, and this dot says 새벽.
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-faint"
+          />
         ) : null}
         {showIcon ? <EmojiIcon emoji={icon} className="bg-surface/70" /> : null}
-        <span className="truncate">{title}</span>
+        <span className="min-w-0 truncate">{title}</span>
       </p>
       {short ? null : (
         <p className="truncate text-micro font-normal tabular-nums text-ink-muted">{timeRange}</p>
@@ -131,9 +141,22 @@ export default function EntryBlock({
 }: EntryBlockProps) {
   const resizeEntry = useWorkspaceStore((s) => s.resizeEntry);
 
+  /**
+   * A 새벽-pinned block is **not** draggable (B4).
+   *
+   * Its top edge is a pin, not a time: the block sits at offset 0 while the
+   * entry is really at 02:00, so every pixel of a drag would be measured from
+   * a position it never had — pick it up at its top edge and the drop resolves
+   * to 05:00, three hours from where the finger started. The same reason the
+   * resize handle is hidden here. Time is edited in the detail sheet, which a
+   * tap still opens.
+   */
+  const pinned = placement.dawn;
+
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: entryDraggableId(entry.id),
     data: { type: DND_ENTRY, entryId: entry.id, dayId: entry.dayId },
+    disabled: pinned,
   });
 
   const height = minToY(placement.drawMin, PX_PER_MIN);
@@ -183,9 +206,10 @@ export default function EntryBlock({
     <div
       ref={setNodeRef}
       {...attributes}
-      {...listeners}
+      {...(pinned ? {} : listeners)}
       onClick={() => onOpen(entry)}
       data-testid="timeline-entry"
+      data-draggable={pinned ? 'false' : 'true'}
       data-entry-id={entry.id}
       data-day-id={entry.dayId}
       data-card-id={entry.cardId}
@@ -207,7 +231,9 @@ export default function EntryBlock({
         touchAction: isDragging ? 'none' : 'manipulation',
       }}
       className={[
-        'group cursor-grab select-none p-px outline-none focus-visible:ring-2 focus-visible:ring-line-strong',
+        'group select-none p-px outline-none focus-visible:ring-2 focus-visible:ring-line-strong',
+        // Nothing to grab when the block cannot move — a 새벽 pin opens.
+        pinned ? 'cursor-pointer' : 'cursor-grab',
         isDragging ? 'opacity-40' : '',
       ].join(' ')}
     >

@@ -14,7 +14,7 @@
 
 import type { Card, Id, TimelineEntry, Workspace } from '../types/models';
 import { isIsoDate } from '../utils/flights';
-import { DAY_START_MIN, clockToOffset, visualPlacement } from './dayWindow';
+import { DAY_START_MIN, clockToOffset, visualPlacement, type DayAxis } from './dayWindow';
 import { byStart } from './route';
 
 const two = (value: number): string => String(value).padStart(2, '0');
@@ -73,6 +73,67 @@ export function todayDayId(
   return null;
 }
 
+/** Which column 오늘 모드 points at, and where the now line goes inside it. */
+export interface TodayFocus {
+  /** The day of the active sheet the user is living in. */
+  dayId: Id;
+  /**
+   * Where the red line is **drawn**, `0 … 1440` from the top of that column.
+   */
+  nowOffsetMin: number;
+  /**
+   * The same minute **unclamped** — negative in the {@link TodayFocus.dawn}
+   * case. 지금/다음 uses this one, exactly as it uses
+   * {@link import('./dayWindow').VisualPlacement.rawOffsetMin}: at 04:00 of the
+   * first day nothing has started yet, and the first 다음 is that morning's
+   * 09:00, not last night's anything.
+   */
+  nowRawOffsetMin: number;
+  /**
+   * True when the clock is in the 새벽 *before* the sheet's first window opens.
+   * The same edge as a first-day 새벽 entry, and handled the same way: pinned to
+   * the top of the column rather than drawn 19 hours down the wrong one.
+   */
+  dawn: boolean;
+}
+
+/**
+ * 오늘 모드's one answer: which column, and where the line goes (M16-B, B6).
+ *
+ * Two passes, because 새벽 and 첫날 can be true at once:
+ *
+ * 1. the **window** day ({@link todayWindowIso}) — 새벽 2시는 어제 칸이다;
+ * 2. failing that, the **calendar** day. This is the trip's 첫날 새벽: at
+ *    5월 1일 04:00 of a sheet that starts on 5월 1일, the window the clock is
+ *    inside is 4월 30일 — a date the sheet does not have, which used to turn
+ *    오늘 모드 off on the very morning the traveller is standing in the trip.
+ *    The column is 5월 1일 and the line sits at its top edge.
+ *
+ * `null` when the sheet holds neither date, which is a plan for another week.
+ */
+export function todayFocus(
+  workspace: Workspace,
+  sheetId: Id | undefined,
+  now: Date,
+): TodayFocus | null {
+  const windowDayId = todayDayId(workspace, sheetId, todayWindowIso(now));
+  const minute = nowMin(now);
+  if (windowDayId) {
+    const offset = clockToOffset(minute);
+    return { dayId: windowDayId, nowOffsetMin: offset, nowRawOffsetMin: offset, dawn: false };
+  }
+
+  const calendarDayId = todayDayId(workspace, sheetId, todayIso(now));
+  if (!calendarDayId) return null;
+  return {
+    dayId: calendarDayId,
+    nowOffsetMin: 0,
+    // Really is before the window opens — 04:00 is 60분 전이다.
+    nowRawOffsetMin: minute - DAY_START_MIN,
+    dawn: true,
+  };
+}
+
 /** What the 「지금 / 다음」 bar shows. Every field is absent when it has no answer. */
 export interface NowNext {
   /** The entry the clock is inside right now. */
@@ -127,14 +188,21 @@ export function currentAndNext(
  *
  * `entries` are the entries whose **effective** day is the visual day on
  * screen; `nowClockMin` is the wall clock, unchanged.
+ *
+ * `nowOffsetMin` overrides the clock → offset step for the one case the clock
+ * cannot express: the 새벽 before the sheet's first day, where the honest offset
+ * is negative ({@link TodayFocus.nowRawOffsetMin}) rather than 19 hours down.
  */
 export function currentAndNextWindowed(
   entries: readonly TimelineEntry[],
   cards: Record<Id, Card>,
-  dayOrder: readonly Id[],
+  dayOrder: DayAxis,
   nowClockMin: number,
+  nowOffsetMin?: number,
 ): NowNext {
-  const now = clockToOffset(Number.isFinite(nowClockMin) ? nowClockMin : 0);
+  const now = Number.isFinite(nowOffsetMin)
+    ? (nowOffsetMin as number)
+    : clockToOffset(Number.isFinite(nowClockMin) ? nowClockMin : 0);
 
   const live = entries
     .filter((entry) => Boolean(cards[entry.cardId]))

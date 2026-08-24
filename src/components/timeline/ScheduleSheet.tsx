@@ -119,6 +119,16 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
     return dropTarget(selectedDayId, startMin + DAY_MIN - DAY_START_MIN, activeSheet?.dayOrder ?? []);
   };
 
+  /**
+   * 「마지막 일자 + 05시 이전」은 이 시트로 표현할 수 없다 — 미리 말한다 (+A).
+   *
+   * `placement()`가 `null`을 주는 바로 그 조합이다. 전에는 눌러야 알 수 있었고,
+   * 토스트 한 줄과 함께 시트가 닫히면서 고르던 시각·소요까지 같이 사라졌다.
+   * 이제 버튼이 잠기고 이유가 그 자리에 뜨므로, 일자만 바꾸면 그대로 이어서
+   * 배치할 수 있다.
+   */
+  const outOfRange = Boolean(selectedDayId) && placement() === null;
+
   const submit = () => {
     const target = placement();
     if (!target) {
@@ -141,7 +151,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
           type="button"
           data-testid="schedule-submit"
           onClick={submit}
-          disabled={!selectedDayId}
+          disabled={!selectedDayId || outOfRange}
           className={`w-full ${PRIMARY_BUTTON_CLASS}`}
         >
           이 시간에 추가
@@ -278,6 +288,16 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
         >
           {formatTimeRange(startMin, durationMin)}
         </p>
+
+        {outOfRange ? (
+          <p
+            data-testid="schedule-out-of-range"
+            role="status"
+            className="rounded-md bg-warn-wash px-3 py-2 text-center text-label font-normal text-warn-ink ring-1 ring-warn/40"
+          >
+            마지막 일자라 새벽(05시 이전)으로 넘길 수 없어요
+          </p>
+        ) : null}
       </div>
     </Sheet>
   );

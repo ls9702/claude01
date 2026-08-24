@@ -12,7 +12,7 @@
  */
 
 import type { Card, Id, Workspace } from '../types/models';
-import { visualPlacement } from '../timeline/dayWindow';
+import { datedAxis, visualPlacement, type DayAxis } from '../timeline/dayWindow';
 
 /** 예산 / 지출 pair, in the trip's currency. */
 export interface SpendTotals {
@@ -88,11 +88,12 @@ export function daySpend(workspace: Workspace, dayId: Id): SpendTotals {
 export function daySpendWindowed(
   workspace: Workspace,
   dayId: Id,
-  dayOrder: readonly Id[],
+  dayOrder: DayAxis,
 ): SpendTotals {
+  const axis = datedAxis(dayOrder, workspace.days);
   const cardIds = new Set<Id>();
   for (const entry of Object.values(workspace.entries)) {
-    if (visualPlacement(entry, dayOrder).renderDayId === dayId) cardIds.add(entry.cardId);
+    if (visualPlacement(entry, axis).renderDayId === dayId) cardIds.add(entry.cardId);
   }
   return totalOf(workspace, cardIds);
 }

@@ -240,6 +240,10 @@ export function buildReviewPrompt(workspace: Workspace, sheetId: Id | undefined)
   const lines: string[] = [
     `여행: ${trip?.title.trim() || '(이름 없음)'}`,
     `일정표: ${sheet.name}`,
+    // The window rule, stated once (M16-B / B8). Without it the model reads a
+    // day that ends 「01:30 심야 라멘」 as a list sorted wrongly, and spends one
+    // of its six points telling the user to move a time that is already right.
+    '(하루는 05:00에 시작해 다음 날 05:00에 끝나요. 목록 끝의 05시 이전 시각은 다음 날 새벽이에요.)',
     '',
   ];
 

@@ -242,6 +242,15 @@ describe('buildReviewPrompt', () => {
     expect(prompt).toContain('3~6개');
   });
 
+  it('states the 05시 window rule in the header, so 새벽 일정 is not read as a mistake', () => {
+    const prompt = buildReviewPrompt(scaffold(), 's1');
+    expect(prompt).toContain(
+      '(하루는 05:00에 시작해 다음 날 05:00에 끝나요. 목록 끝의 05시 이전 시각은 다음 날 새벽이에요.)',
+    );
+    // 여행·일정표 이름 바로 아래, 첫 일자보다 위에 있어야 규칙으로 읽힌다.
+    expect(prompt.indexOf('하루는 05:00에')).toBeLessThan(prompt.indexOf('[1일차'));
+  });
+
   it('marks whether a card has a location', () => {
     const ws = scaffold();
     place(ws, 'e1', addCard(ws, 'c-see', 'k1', '난바', { location: NAMBA }), 540, 60);

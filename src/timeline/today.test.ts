@@ -5,9 +5,11 @@ import {
   currentAndNextWindowed,
   nowMin,
   todayDayId,
+  todayFocus,
   todayIso,
   todayWindowIso,
 } from './today';
+import { clockToOffset } from './dayWindow';
 
 const AT = 1_760_000_000_000;
 
@@ -219,6 +221,71 @@ describe('todayDayId — 02시', () => {
     expect(todayDayId(ws, 's1', todayWindowIso(at2am))).toBe('d1');
     // 같은 시각의 달력 날짜로 물으면 2일차가 나온다 — 그래서 창을 쓴다.
     expect(todayDayId(ws, 's1', todayIso(at2am))).toBe('d2');
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * B6 — 첫날 새벽에도 오늘 모드는 켜져 있다
+ * ------------------------------------------------------------------ */
+
+describe('todayFocus', () => {
+  it('한낮에는 그 날 칸을, 시계 그대로의 자리를 가리킨다', () => {
+    const ws = scaffold(['2026-05-01', '2026-05-02', '2026-05-03']);
+    const focus = todayFocus(ws, 's1', new Date(2026, 4, 2, 14, 0));
+    expect(focus).toEqual({
+      dayId: 'd2',
+      nowOffsetMin: clockToOffset(840),
+      nowRawOffsetMin: clockToOffset(840),
+      dawn: false,
+    });
+  });
+
+  it('둘째 날 새벽 2시는 첫날 칸의 아래쪽이다', () => {
+    const ws = scaffold(['2026-05-01', '2026-05-02', '2026-05-03']);
+    const focus = todayFocus(ws, 's1', new Date(2026, 4, 2, 2, 0));
+    expect(focus?.dayId).toBe('d1');
+    expect(focus?.dawn).toBe(false);
+    expect(focus?.nowOffsetMin).toBe(1260);
+  });
+
+  it('첫날 새벽 4시에도 오늘 모드가 켜지고, 선은 칸 꼭대기에 붙는다', () => {
+    const ws = scaffold(['2026-05-01', '2026-05-02', '2026-05-03']);
+    // 창으로 치면 4월 30일 — 이 시트에 없는 날짜다. 그래도 여행자는 5월 1일에
+    // 서 있다: 달력 오늘로 되짚어 1일차를 고른다.
+    const focus = todayFocus(ws, 's1', new Date(2026, 4, 1, 4, 0));
+    expect(focus?.dayId).toBe('d1');
+    expect(focus?.dawn).toBe(true);
+    // 그려지는 자리는 창의 맨 위 (첫날 새벽 블록과 같은 규칙),
+    expect(focus?.nowOffsetMin).toBe(0);
+    // 실제 시각은 창이 열리기 60분 전이다 — 지금/다음은 이 값을 쓴다.
+    expect(focus?.nowRawOffsetMin).toBe(-60);
+  });
+
+  it('첫날 새벽에는 아직 시작한 일정이 없고, 다음은 그날 아침이다', () => {
+    const ws = scaffold(['2026-05-01', '2026-05-02']);
+    const focus = todayFocus(ws, 's1', new Date(2026, 4, 1, 4, 0));
+    const morning = entry('e1', 'k1', 540); // 1일차 09:00
+    const result = currentAndNextWindowed(
+      [morning],
+      CARDS,
+      ['d1', 'd2'],
+      nowMin(new Date(2026, 4, 1, 4, 0)),
+      focus?.nowRawOffsetMin,
+    );
+    expect(result.current).toBeUndefined();
+    expect(result.next?.id).toBe('e1');
+    expect(result.gapMin).toBe(300); // 04:00 → 09:00
+  });
+
+  it('시트에 오늘도 어제도 없으면 오늘 모드는 없다', () => {
+    const ws = scaffold(['2026-06-01', '2026-06-02']);
+    expect(todayFocus(ws, 's1', new Date(2026, 4, 1, 4, 0))).toBeNull();
+    expect(todayFocus(ws, undefined, new Date(2026, 5, 1, 12, 0))).toBeNull();
+  });
+
+  it('날짜 없는 일수 시트에는 오늘이 없다', () => {
+    const ws = scaffold([undefined, undefined]);
+    expect(todayFocus(ws, 's1', new Date(2026, 4, 1, 4, 0))).toBeNull();
   });
 });
 

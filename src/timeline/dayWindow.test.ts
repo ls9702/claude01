@@ -6,6 +6,8 @@ import {
   DAWN_PIN_MIN,
   DAY_START_MIN,
   WINDOW_HOUR_OFFSETS,
+  WINDOW_MIN,
+  calendarAdjacent,
   clockToOffset,
   dropTarget,
   effectiveDayId,
@@ -14,6 +16,7 @@ import {
   windowHourLabel,
   windowedDayEntries,
   windowedEntriesByDay,
+  type DayRef,
 } from './dayWindow';
 
 const AT = 1_760_000_000_000;
@@ -31,8 +34,11 @@ describe('visualPlacement — 경계', () => {
   it('04:59는 전날 창의 거의 끝에 놓인다', () => {
     const placed = visualPlacement(at('d2', 299), ORDER);
     expect(placed.renderDayId).toBe('d1');
-    expect(placed.offsetMin).toBe(299 + DAY_MIN - DAY_START_MIN);
-    expect(placed.offsetMin).toBe(1439);
+    // 시각은 1439분째다 — 정렬·갭·지금/다음이 쓰는 값.
+    expect(placed.rawOffsetMin).toBe(299 + DAY_MIN - DAY_START_MIN);
+    expect(placed.rawOffsetMin).toBe(1439);
+    // 그림은 1분짜리 실선이 될 수 없어 30분 자리만큼 위로 당겨진다 (B2).
+    expect(placed.offsetMin).toBe(WINDOW_MIN - DAWN_PIN_MIN);
     expect(placed.dawn).toBe(false);
   });
 
@@ -90,6 +96,111 @@ describe('visualPlacement — 첫날 새벽 (앞 일자가 없을 때)', () => {
     const placed = visualPlacement(at('unknown', 60), ORDER);
     expect(placed.renderDayId).toBe('unknown');
     expect(placed.dawn).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * B1 — dayOrder의 이웃이 달력의 이웃은 아니다
+ * ------------------------------------------------------------------ */
+
+describe('visualPlacement — 앞 일자가 달력으로도 어제일 때만 데려간다', () => {
+  /** 하루 걸러 짜둔 시트: 5월 1일, 5월 3일. */
+  const GAPPED: DayRef[] = [
+    { id: 'd1', date: '2026-05-01' },
+    { id: 'd3', date: '2026-05-03' },
+  ];
+
+  it('5월 3일 02:00은 5월 1일 칸으로 넘어가지 않고 제자리에 고정된다', () => {
+    const placed = visualPlacement(at('d3', 120, 60), GAPPED);
+    // 5월 3일 02:00의 밤은 5월 2일이고, 그 날짜는 이 시트에 없다.
+    expect(placed.renderDayId).toBe('d3');
+    expect(placed.dawn).toBe(true);
+    expect(placed.offsetMin).toBe(0);
+    expect(placed.rawOffsetMin).toBe(120 - DAY_START_MIN);
+  });
+
+  it('하루 차이면 여느 때처럼 앞 칸의 밤이 된다', () => {
+    const order: DayRef[] = [
+      { id: 'd1', date: '2026-05-01' },
+      { id: 'd2', date: '2026-05-02' },
+    ];
+    const placed = visualPlacement(at('d2', 120, 60), order);
+    expect(placed.renderDayId).toBe('d1');
+    expect(placed.dawn).toBe(false);
+    expect(placed.offsetMin).toBe(120 + WINDOW_MIN - DAY_START_MIN);
+  });
+
+  it('날짜 없는 일수 시트는 두 줄이 곧 이어지는 하루다', () => {
+    const order: DayRef[] = [{ id: 'd1' }, { id: 'd2' }];
+    const placed = visualPlacement(at('d2', 120, 60), order);
+    expect(placed.renderDayId).toBe('d1');
+    expect(placed.dawn).toBe(false);
+  });
+
+  it('한쪽만 날짜가 있으면 이어져 있다고 말할 수 없다', () => {
+    const mixed: DayRef[] = [{ id: 'd1' }, { id: 'd2', date: '2026-05-02' }];
+    expect(visualPlacement(at('d2', 120), mixed).renderDayId).toBe('d2');
+    expect(visualPlacement(at('d2', 120), mixed).dawn).toBe(true);
+  });
+
+  it('calendarAdjacent가 그 규칙 하나를 그대로 말한다', () => {
+    const may1 = { id: 'a', date: '2026-05-01' };
+    expect(calendarAdjacent(may1, { id: 'b', date: '2026-05-02' })).toBe(true);
+    expect(calendarAdjacent(may1, { id: 'b', date: '2026-05-03' })).toBe(false);
+    expect(calendarAdjacent(may1, { id: 'b', date: '2026-05-01' })).toBe(false);
+    // 거꾸로 적힌 시트도 이웃이 아니다.
+    expect(calendarAdjacent({ id: 'a', date: '2026-05-03' }, may1)).toBe(false);
+    expect(calendarAdjacent('a', 'b')).toBe(true);
+    expect(calendarAdjacent('a', may1)).toBe(false);
+  });
+
+  it('창 소속도 같은 규칙을 따른다 — 5월 3일 새벽은 5월 3일 칸에 남는다', () => {
+    const ws = scaffold();
+    ws.sheets.s1.dayOrder = ['d1', 'd3'];
+    ws.days.d1.date = '2026-05-01';
+    ws.days.d3.date = '2026-05-03';
+    delete ws.days.d2;
+    addEntry(ws, 'e-dawn', 'd3', 120);
+
+    // 워크스페이스를 받는 함수는 날짜를 스스로 채워 넣는다 (datedAxis).
+    expect(windowedDayEntries(ws, 'd1', ['d1', 'd3'])).toHaveLength(0);
+    const rows = windowedDayEntries(ws, 'd3', ['d1', 'd3']);
+    expect(rows.map((row) => row.entry.id)).toEqual(['e-dawn']);
+    expect(rows[0].placement.dawn).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * B2 — 창 바닥에 걸린 블록도 손가락이 닿는다
+ * ------------------------------------------------------------------ */
+
+describe('visualPlacement — 창 바닥의 최소 높이', () => {
+  it('04:59 + 15분은 1분이 아니라 30분 높이로, 창 바닥에 맞춰 그려진다', () => {
+    const placed = visualPlacement(at('d2', 299, 15), ORDER);
+    expect(placed.renderDayId).toBe('d1');
+    expect(placed.drawMin).toBe(DAWN_PIN_MIN);
+    // 아래로 삐져나가지 않는다: 위로 당겨서 자리를 만든다.
+    expect(placed.offsetMin + placed.drawMin).toBe(WINDOW_MIN);
+    expect(placed.offsetMin).toBe(1410);
+    // 그래도 잘린 블록이다 — 15분 중 1분만이 이 창의 것이다.
+    expect(placed.clipped).toBe(true);
+    // 시각 자체는 손대지 않는다.
+    expect(placed.rawOffsetMin).toBe(1439);
+  });
+
+  it('04:50 + 30분도 마찬가지다', () => {
+    const placed = visualPlacement(at('d2', 290, 30), ORDER);
+    expect(placed.drawMin).toBe(DAWN_PIN_MIN);
+    expect(placed.offsetMin + placed.drawMin).toBe(WINDOW_MIN);
+    expect(placed.clipped).toBe(true);
+    expect(placed.rawOffsetMin).toBe(1430);
+  });
+
+  it('자리가 넉넉한 블록은 건드리지 않는다', () => {
+    const placed = visualPlacement(at('d2', 240, 120), ORDER);
+    expect(placed.offsetMin).toBe(1380);
+    expect(placed.drawMin).toBe(60);
+    expect(placed.clipped).toBe(true);
   });
 });
 
@@ -158,7 +269,9 @@ describe('dropTarget — 역방향', () => {
     for (const startMin of [0, 60, 299]) {
       const placed = visualPlacement(at('d2', startMin), ORDER);
       expect(placed.renderDayId).toBe('d1');
-      expect(dropTarget('d1', placed.offsetMin, ORDER)).toEqual({ dayId: 'd2', startMin });
+      // 역함수의 짝은 `rawOffsetMin`이다: `offsetMin`은 픽셀이고, 창 바닥에
+      // 걸린 블록은 최소 높이를 확보하려 위로 당겨져 있다 (B2).
+      expect(dropTarget('d1', placed.rawOffsetMin, ORDER)).toEqual({ dayId: 'd2', startMin });
     }
   });
 });
@@ -314,15 +427,21 @@ describe('심야 항공편 두 조각', () => {
     expect(tailPlaced.offsetMin + tailPlaced.drawMin).toBe(headPlaced.offsetMin);
   });
 
-  it('머리는 05:00에서 잘리고, 남은 05:00–06:15는 2일차 꼭대기에 남는다', () => {
+  it('머리는 1일차 창의 05:00에서 잘리고, 남은 75분은 어디에도 다시 그려지지 않는다', () => {
     const [, head] = legPlacements(RED_EYE);
     const headPlaced = visualPlacement({ dayId: 'd2', ...head }, ORDER);
     // 1일차 창은 1440에서 닫힌다: 00:00–05:00의 300분만 그려진다.
     expect(headPlaced.drawMin).toBe(300);
     expect(headPlaced.clipped).toBe(true);
     expect(headPlaced.offsetMin + headPlaced.drawMin).toBe(DAY_MIN);
-    // 나머지 75분(05:00–06:15)은 2일차 창의 0..75에 해당한다 — 사라지지 않는다.
+    // 남은 75분(05:00–06:15)은 **2일차 칸에 다시 나타나지 않는다**. 한 일정은
+    // 한 칸에만 그려지고, 이 조각의 소속은 1일차 창이다 (B11).
     expect(head.durationMin - headPlaced.drawMin).toBe(75);
+    expect(headPlaced.renderDayId).toBe('d1');
+    const ws = scaffold();
+    addEntry(ws, 'flight-head', 'd2', head.startMin, head.durationMin);
+    expect(windowedDayEntries(ws, 'd2', ORDER)).toHaveLength(0);
+    // 그 75분이 있다는 사실은 잘린 표시(clipped)와 상세 시트의 시각이 말한다.
   });
 
   it('두 조각 모두 어느 창엔가 반드시 그려진다 (사라지지 않는다)', () => {

@@ -92,19 +92,33 @@ export default function SpendSummaryBar({
       // nothing, and neither can slide away.
       className="sticky top-0 z-30 flex h-10 shrink-0 items-center gap-3 border-b border-line bg-surface px-4"
     >
+      {/* The half that gives way first (B5).
+          At 320px the row cannot hold both figures, and the one the traveller
+          is reading mid-trip is 오늘. So the sheet half is the shrinkable one —
+          `min-w-0` + `overflow-hidden`, label truncating before anything else —
+          and the day half below is `shrink-0`. Losing the tail of 「시트 전체
+          지출 …」 costs a number that is one tap away in 카테고리별; losing the
+          day figure costs the number the bar exists for. */}
       <span
         data-testid="spend-summary-sheet"
         data-spent={sheetTotals.spent}
         data-budget={sheetTotals.budget}
-        className="flex min-w-0 shrink-0 items-baseline gap-2"
+        className="flex min-w-0 items-baseline gap-2 overflow-hidden"
       >
         <Icon name="receipt" size={16} className="shrink-0 self-center text-ink-faint" />
-        <span className="text-micro text-ink-faint">시트 전체</span>
+        <span className="min-w-0 truncate text-micro text-ink-faint">시트 전체</span>
         <Fact label="지출" amount={sheetTotals.spent} currency={currency} strong />
-        <span aria-hidden="true" className="text-micro text-ink-faint">
+        {/* Below `sm` the row is out of space and something has to go. The
+            budget goes — the same call the day half already makes one line
+            down — because a 예산 sliced through the middle of its digits by
+            `overflow-hidden` reads as a *different number*, and 카테고리별 is
+            one tap away with both figures intact. */}
+        <span aria-hidden="true" className="hidden text-micro text-ink-faint sm:inline">
           ·
         </span>
-        <Fact label="예산" amount={sheetTotals.budget} currency={currency} />
+        <span className="hidden sm:inline">
+          <Fact label="예산" amount={sheetTotals.budget} currency={currency} />
+        </span>
       </span>
 
       {day ? (
@@ -115,9 +129,9 @@ export default function SpendSummaryBar({
             data-day-id={day.id}
             data-spent={day.totals.spent}
             data-budget={day.totals.budget}
-            className="flex min-w-0 items-baseline gap-2 overflow-hidden"
+            className="flex shrink-0 items-baseline gap-2"
           >
-            <span className="min-w-0 truncate text-micro text-ink-faint">{day.label}</span>
+            <span className="shrink-0 text-micro text-ink-faint">{day.label}</span>
             <Fact label="지출" amount={day.totals.spent} currency={currency} strong />
             <span aria-hidden="true" className="hidden text-micro text-ink-faint sm:inline">
               ·
