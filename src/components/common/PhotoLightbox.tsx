@@ -137,7 +137,7 @@ export default function PhotoLightbox({ cardId, startIndex, onClose }: PhotoLigh
       data-testid="photo-lightbox"
       data-index={safeIndex}
       // z-60: above the sheet it was opened from, level with the map modal.
-      className="fixed inset-0 z-60 flex flex-col bg-[#0b0b0c]/95"
+      className="fixed inset-0 z-60 flex flex-col bg-[#0b0b0c]/98"
       onPointerDown={(event) => {
         swipeStart.current = event.clientX;
       }}
