@@ -202,8 +202,13 @@ test('다른 기기가 설정을 마치면 서버의 여행을 받아온다', as
     await openTrip(b, '오사카');
     await expectCards(b, ['유니버설']);
 
-    // A pull that changes nothing must not manufacture a push.
-    expect(api.version()).toBe(1);
+    // A pull that changes nothing must not manufacture a push — and the one
+    // thing a fresh device *does* bring is real: its own 마지막 접속 stamp
+    // (M13) lives in the shared blob, so B's first sync writes exactly once
+    // and then settles there.
+    expect(api.version()).toBe(2);
+    await b.waitForTimeout(6_000);
+    expect(api.version()).toBe(2);
   } finally {
     await contextA.close();
     await contextB.close();
@@ -228,17 +233,21 @@ test('동시 편집이 409를 거쳐 양쪽 모두에서 합쳐진다', async ({
     await configureSync(b);
     await openTrip(b, '오사카');
     await expectCards(b, ['유니버설']);
-    expect(api.version()).toBe(1);
+    // B's arrival is itself a write: a fresh device stamps its own 마지막 접속
+    // into the shared blob (M13). A has to take that in before the choreography
+    // below, or A's push would lose a 409 race this test is not about.
+    expect(api.version()).toBe(2);
+    await syncNow(a);
 
     /* --- A pushes first, so B is guaranteed to be pushing from a stale
            baseVersion — that is the 409 this test is about ---------------- */
     await addCard(a, 1, '도톤보리');
-    await waitForVersion(2);
+    await waitForVersion(3);
     expect(api.conflicts()).toBe(0);
 
-    // B never pulled in between: its serverVersion is still 1.
+    // B never pulled in between: its serverVersion is still 2.
     await renameCard(b, '유니버설', '유니버설 스튜디오');
-    await waitForVersion(3);
+    await waitForVersion(4);
     expect(api.conflicts()).toBeGreaterThanOrEqual(1);
 
     /* --- convergence ---------------------------------------------------- */

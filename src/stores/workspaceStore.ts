@@ -27,6 +27,7 @@ import {
   type LegKind,
   type SheetFlightOpts,
 } from '../utils/flights';
+import { getActiveProfileId } from '../profile/profile';
 import { newId } from '../utils/ids';
 import { clampEntry, snapMin } from '../utils/time';
 import { idbStorage } from './persistMiddleware';
@@ -139,7 +140,20 @@ function draftOf(ws: Workspace): Draft {
     days: { ...ws.days },
     entries: { ...ws.entries },
     tombstones: [...ws.tombstones],
+    seenBy: ws.seenBy ? { ...ws.seenBy } : undefined,
   };
+}
+
+/**
+ * `{ by: 'song' }`, or nothing at all when no profile has been picked (M13).
+ *
+ * Spread into the literal rather than assigned, so a device that never chose a
+ * profile writes a comment with **no** `by` key — exactly the shape everything
+ * written before M13 has, which is the one shape the whole app already handles.
+ */
+function authorStamp(): { by: string } | Record<string, never> {
+  const id = getActiveProfileId();
+  return id ? { by: id } : {};
 }
 
 /**
@@ -377,6 +391,21 @@ export interface WorkspaceState {
   replaceWorkspace: (ws: Workspace) => void;
   setDirty: (dirty: boolean) => void;
 
+  /**
+   * Records that `profileId` has the app open right now (M13) — this is the
+   * "누가 봤는지" the other person reads in 설정.
+   *
+   * Unconditional: it stamps every time it is called, and makes the workspace
+   * dirty every time. **The caller owns the throttle** (see
+   * `profile.SEEN_THROTTLE_MS`) — a mutation that quietly decided not to
+   * mutate would be the surprising one, and the store has no business deciding
+   * how often "opening the app" is worth telling the other person about.
+   *
+   * No-op for a blank id. An unknown id is *not* rejected: this map is keyed by
+   * profile id, and the model layer does not know what those are.
+   */
+  markSeen: (profileId: string) => void;
+
   /** Creates a trip plus the five seeded columns. Returns the new trip id. */
   addTrip: (title: string, currency?: string) => Id;
   /** Renames / re-currencies a trip. No-op for an unknown id. */
@@ -561,6 +590,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         setDirty: (dirty) => set({ dirty }),
 
+        markSeen: (profileId) => {
+          run((draft, now) => {
+            const id = profileId.trim();
+            if (id === '') return null;
+            draft.seenBy = { ...(draft.seenBy ?? {}), [id]: now };
+            return true;
+          });
+        },
+
         addTrip: (title, currency = 'KRW') => {
           const id = run((draft, now) => {
             const tripId = newId();
@@ -702,12 +740,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             if (!column || column.tripId !== tripId) return null;
 
             const cardId = newId();
+            const author = getActiveProfileId();
             draft.cards[cardId] = {
               ...data,
               id: cardId,
               tripId,
               columnId,
               title: data.title.trim() || '새 카드',
+              // Stamped once, here, and never patched again (M13).
+              ...(author ? { createdBy: author } : {}),
               createdAt: now,
               updatedAt: now,
             };
@@ -787,6 +828,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               amount,
               label: label?.trim() || undefined,
               at: now,
+              ...authorStamp(),
             };
             touch<Card>(
               draft.cards,
@@ -821,7 +863,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             if (!card || body === '') return null;
 
             const commentId = newId();
-            const comment: CardComment = { id: commentId, text: body, at: now };
+            const comment: CardComment = {
+              id: commentId,
+              text: body,
+              at: now,
+              ...authorStamp(),
+            };
             touch<Card>(
               draft.cards,
               cardId,

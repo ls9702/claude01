@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { DND_CARD } from '../../dnd/boardDnd';
+import { isProfileId } from '../../profile/profile';
 import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { Card } from '../../types/models';
 import { colorClasses } from '../../utils/colors';
@@ -8,6 +9,7 @@ import { shortPlace } from '../../utils/geo';
 import { formatBudget } from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
+import Avatar from '../common/Avatar';
 import Icon, { type IconName } from '../common/Icon';
 import { CHIP_MONEY, CHIP_NEUTRAL, POPOVER_CLASS } from '../common/formStyles';
 
@@ -134,6 +136,15 @@ export function CardSurface({
         <h3 className="min-w-0 flex-1 break-words text-label font-semibold text-ink">
           {card.title}
         </h3>
+        {/* Who put this idea up (M13). First in the right-hand group and
+            18px across: it is a *label*, not a control, so it must not read
+            louder than the 일정 badge next to it — and it is skipped in the
+            tray, where a card only has to be identifiable enough to drag. */}
+        {isProfileId(card.createdBy) && !terse ? (
+          <span data-testid="card-author" data-profile={card.createdBy} className="mt-px shrink-0">
+            <Avatar id={card.createdBy} size="sm" />
+          </span>
+        ) : null}
         {scheduledCount > 0 ? (
           <div ref={badgeRef} className="relative shrink-0">
             <button

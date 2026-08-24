@@ -20,9 +20,14 @@ async function addCard(page: Page, columnIndex: number, title: string): Promise<
   await expect(page.getByTestId('card-form')).toHaveCount(0);
 }
 
-/** Card titles inside one column, in board order. */
+/**
+ * Card titles inside one column, in board order.
+ *
+ * The card's own `innerText` is not the title: it also carries the chips and,
+ * since M13, the author avatar's initials (`렌터카 예약\nS`). Reads the heading.
+ */
 async function cardTitles(column: Locator): Promise<string[]> {
-  return column.getByTestId('board-card').allInnerTexts();
+  return column.getByTestId('board-card').locator('h3').allInnerTexts();
 }
 
 /**

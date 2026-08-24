@@ -12,7 +12,9 @@ import {
   importJson,
   readBackupFile,
 } from '../../sync/exportImport';
+import { PROFILES, otherProfile, useProfileStore } from '../../profile/profile';
 import { formatBytes, photoUsage } from '../../utils/photos';
+import { formatStamp } from '../../utils/time';
 import {
   clearSettings,
   isConfigured,
@@ -21,11 +23,14 @@ import {
   saveSettings,
 } from '../../sync/settings';
 import { restartSync, syncNow } from '../../sync/syncEngine';
+import Avatar from './Avatar';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from './Icon';
+import ProfilePicker from './ProfilePicker';
 import Sheet from './Sheet';
 import { SYNC_DOT_CLASS } from './SyncStatusChip';
 import {
+  BTN_SIZE_SM,
   CHIP_NEUTRAL,
   DANGER_TEXT_BUTTON_CLASS,
   INPUT_CLASS,
@@ -33,6 +38,7 @@ import {
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
   SECTION_TITLE_CLASS,
+  withBtnSize,
 } from './formStyles';
 
 /** One read-only fact. No box, no background — it is not pressable (§4.8-1). */
@@ -41,6 +47,74 @@ function Fact({ term, children }: { term: string; children: React.ReactNode }) {
     <div className="flex items-baseline justify-between gap-3 border-b border-line py-2 text-label">
       <dt className="shrink-0 font-normal text-ink-muted">{term}</dt>
       <dd className="min-w-0 truncate font-semibold tabular-nums text-ink">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * 프로필 — who this device is, and when the other one was last on (M13).
+ *
+ * First section of the only settings screen there is, because it is the only
+ * one that changes what gets *written*: every card, comment and receipt from
+ * here on carries whichever name is showing here.
+ *
+ * The 전환 button opens the very same {@link ProfilePicker} the first run does,
+ * with a 취소 this time — switching later and choosing at the start are the
+ * same question, and should not be two different screens.
+ */
+function ProfileSection() {
+  const profileId = useProfileStore((s) => s.profileId);
+  const seenBy = useWorkspaceStore((s) => s.workspace.seenBy);
+  const [switching, setSwitching] = useState(false);
+
+  // Unreachable in the app (the shell gates on a profile) but not in a test
+  // that mounts the sheet on its own.
+  if (!profileId) return null;
+
+  const me = PROFILES[profileId];
+  const other = otherProfile(profileId);
+  const seen = seenBy?.[other.id];
+
+  return (
+    <div>
+      <h3 className={SECTION_TITLE_CLASS}>프로필</h3>
+      <div className="mt-2 flex items-center gap-3">
+        <Avatar id={me.id} size="md" />
+        <span
+          data-testid="profile-current"
+          data-profile={me.id}
+          className="min-w-0 flex-1 truncate text-body font-semibold text-ink"
+        >
+          {me.label}
+        </span>
+        <button
+          type="button"
+          data-testid="profile-switch"
+          onClick={() => setSwitching(true)}
+          className={withBtnSize(SECONDARY_BUTTON_CLASS, BTN_SIZE_SM)}
+        >
+          전환
+        </button>
+      </div>
+
+      {/* 누가 봤는지: the *other* person's stamp, because this device already
+          knows perfectly well when it was last used itself. */}
+      <p
+        data-testid="profile-seen"
+        data-profile={other.id}
+        data-at={typeof seen === 'number' ? seen : ''}
+        className="mt-2 text-micro font-normal text-ink-faint"
+      >
+        {other.label} ·{' '}
+        {typeof seen === 'number' ? `마지막 접속 ${formatStamp(seen)}` : '아직 접속 기록 없음'}
+      </p>
+
+      {switching ? (
+        <ProfilePicker
+          onCancel={() => setSwitching(false)}
+          onChosen={() => setSwitching(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -334,7 +408,9 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
       }
     >
       <div className="space-y-6">
-        <div className="flex items-center justify-between gap-3">
+        <ProfileSection />
+
+        <div className="flex items-center justify-between gap-3 border-t border-line pt-6">
           <span className={SECTION_TITLE_CLASS}>서버</span>
           <span data-testid="sync-status-text" className={CHIP_NEUTRAL}>
             <span

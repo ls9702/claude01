@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyWorkspace, type Id } from '../types/models';
+import { useProfileStore } from '../profile/profile';
 import { MAX_PHOTOS_PER_CARD, SEED_COLUMNS, useWorkspaceStore } from './workspaceStore';
 
 // The store persists through IndexedDB, which does not exist under vitest's
@@ -1121,5 +1122,113 @@ describe('addPhoto / removePhoto (M10)', () => {
     store().addPhoto(cardId, meta('p1'));
     store().deleteCard(cardId);
     expect(ws().cards[cardId]).toBeUndefined();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 프로필 스탬프 + 누가 봤는지 (M13)
+ * ------------------------------------------------------------------ */
+
+describe('작성자 스탬프 (M13)', () => {
+  /** A trip with one card, made by whoever the profile store currently says. */
+  const cardSetup = (): Id => {
+    const tripId = store().addTrip('오사카');
+    return store().addCard(tripId, columnIds(tripId)[4], { title: '츠텐카쿠' })!;
+  };
+
+  beforeEach(() => {
+    useProfileStore.setState({ profileId: null });
+  });
+
+  it('카드·코멘트·지출에 지금 프로필을 찍는다', () => {
+    useProfileStore.setState({ profileId: 'hoyabom' });
+    const cardId = cardSetup();
+    store().addComment(cardId, '줄 길대요');
+    store().addExpense(cardId, 900, '입장료');
+
+    expect(ws().cards[cardId].createdBy).toBe('hoyabom');
+    expect(ws().cards[cardId].comments![0].by).toBe('hoyabom');
+    expect(ws().cards[cardId].expenses![0].by).toBe('hoyabom');
+  });
+
+  it('전환 후에 쓴 것만 새 이름이 붙는다 — 이미 쓴 것은 그대로다', () => {
+    useProfileStore.setState({ profileId: 'hoyabom' });
+    const cardId = cardSetup();
+    store().addComment(cardId, '내가 먼저');
+
+    useProfileStore.setState({ profileId: 'song' });
+    store().addComment(cardId, '나도');
+    store().updateCard(cardId, { title: '츠텐카쿠 전망대' });
+
+    const card = ws().cards[cardId];
+    expect(card.comments!.map((c) => c.by)).toEqual(['hoyabom', 'song']);
+    // createdBy는 "누가 만들었나"이지 "누가 마지막에 만졌나"가 아니다.
+    expect(card.createdBy).toBe('hoyabom');
+  });
+
+  it('프로필이 없으면 필드 자체가 생기지 않는다 (M13 이전과 같은 모양)', () => {
+    const cardId = cardSetup();
+    store().addComment(cardId, '익명');
+    store().addExpense(cardId, 900);
+
+    const card = ws().cards[cardId];
+    expect(card.createdBy).toBeUndefined();
+    expect('createdBy' in card).toBe(false);
+    expect('by' in card.comments![0]).toBe(false);
+    expect('by' in card.expenses![0]).toBe(false);
+  });
+});
+
+describe('markSeen (M13)', () => {
+  it('프로필별 마지막 접속 시각을 남기고 dirty로 만든다', () => {
+    const before = Date.now();
+    store().markSeen('song');
+
+    const at = ws().seenBy!.song;
+    expect(at).toBeGreaterThanOrEqual(before);
+    expect(store().dirty).toBe(true);
+  });
+
+  it('두 사람의 기록이 서로를 덮지 않는다', () => {
+    store().markSeen('song');
+    const songAt = ws().seenBy!.song;
+    store().markSeen('hoyabom');
+
+    expect(ws().seenBy!.song).toBe(songAt);
+    expect(ws().seenBy!.hoyabom).toBeGreaterThanOrEqual(songAt);
+  });
+
+  it('같은 프로필을 다시 찍으면 최신 시각으로 덮어쓴다', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000);
+      store().markSeen('song');
+      expect(ws().seenBy!.song).toBe(1_000_000);
+
+      vi.setSystemTime(1_060_000);
+      store().markSeen('song');
+      expect(ws().seenBy!.song).toBe(1_060_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('빈 id는 아무 것도 하지 않는다 — 워크스페이스도 그대로다', () => {
+    const before = ws();
+    store().markSeen('');
+    store().markSeen('   ');
+    expect(ws()).toBe(before);
+    expect(ws().seenBy).toBeUndefined();
+  });
+
+  it('기존 기록이 있는 워크스페이스에서도 다른 키를 지우지 않는다', () => {
+    useWorkspaceStore.setState({
+      workspace: { ...emptyWorkspace(), seenBy: { hoyabom: 1_000 } },
+      dirty: false,
+    });
+    store().markSeen('song');
+
+    expect(ws().seenBy!.hoyabom).toBe(1_000);
+    expect(typeof ws().seenBy!.song).toBe('number');
   });
 });

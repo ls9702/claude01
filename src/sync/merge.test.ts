@@ -11,7 +11,7 @@ import type {
   Trip,
   Workspace,
 } from '../types/models';
-import { TOMBSTONE_TTL_MS, merge } from './merge';
+import { TOMBSTONE_TTL_MS, merge, workspaceEquals } from './merge';
 
 /* ------------------------------------------------------------------ *
  * Fixtures
@@ -718,5 +718,61 @@ describe('merge — 멱등성', () => {
     const merged = merge(local, remote, NOW);
     expect(merge(merged, merged, NOW)).toEqual(merged);
     expect(merge(remote, merged, NOW)).toEqual(merged);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * seenBy — 누가 봤는지 (M13)
+ * ------------------------------------------------------------------ */
+
+describe('merge — seenBy', () => {
+  it('양쪽 다 없으면 필드를 만들지 않는다', () => {
+    const merged = merge(ws(), ws(), NOW);
+    expect(merged.seenBy).toBeUndefined();
+    // 없던 필드가 `{}`로 생기면 그것만으로 "달라졌다"가 되어 무의미한 푸시를
+    // 부른다.
+    expect(workspaceEquals(merged, ws())).toBe(true);
+  });
+
+  it('두 기기의 키가 모두 살아남고, 같은 키는 큰 쪽(최신)이 이긴다', () => {
+    const local: Workspace = { ...ws(), seenBy: { song: T(100), hoyabom: T(10) } };
+    const remote: Workspace = { ...ws(), seenBy: { hoyabom: T(50), ghost: T(7) } };
+
+    const merged = merge(local, remote, NOW);
+    expect(merged.seenBy).toEqual({ song: T(100), hoyabom: T(50), ghost: T(7) });
+
+    // 엔티티 LWW의 타이브레이크와 달리 순수한 max다 — 인자 순서와 무관하다.
+    expect(merge(remote, local, NOW).seenBy).toEqual(merged.seenBy);
+  });
+
+  it('한쪽에만 있으면 그대로 넘어온다 (양방향)', () => {
+    const seen = { song: T(3) };
+    expect(merge({ ...ws(), seenBy: seen }, ws(), NOW).seenBy).toEqual(seen);
+    expect(merge(ws(), { ...ws(), seenBy: seen }, NOW).seenBy).toEqual(seen);
+  });
+
+  it('숫자가 아닌 값은 버린다 (손상된 백업/구버전 방어)', () => {
+    const local = {
+      ...ws(),
+      seenBy: { song: 'yesterday', hoyabom: T(4) },
+    } as unknown as Workspace;
+
+    expect(merge(local, ws(), NOW).seenBy).toEqual({ hoyabom: T(4) });
+  });
+
+  it('멱등이다', () => {
+    const local: Workspace = { ...ws(), seenBy: { song: T(100) } };
+    const remote: Workspace = { ...ws(), seenBy: { hoyabom: T(50) } };
+    const once = merge(local, remote, NOW);
+    expect(merge(local, once, NOW)).toEqual(once);
+    expect(merge(once, once, NOW)).toEqual(once);
+  });
+
+  it('workspaceEquals가 seenBy 차이를 본다', () => {
+    const a: Workspace = { ...ws(), seenBy: { song: T(1) } };
+    const b: Workspace = { ...ws(), seenBy: { song: T(2) } };
+    expect(workspaceEquals(a, a)).toBe(true);
+    expect(workspaceEquals(a, b)).toBe(false);
+    expect(workspaceEquals(a, ws())).toBe(false);
   });
 });

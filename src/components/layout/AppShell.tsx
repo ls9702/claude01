@@ -1,3 +1,4 @@
+import { useProfileStore } from '../../profile/profile';
 import { useUiStore, type TabId } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useHashSync } from './HashSync';
@@ -8,6 +9,7 @@ import TimelineView from '../timeline/TimelineView';
 import MapView from '../map/MapView';
 import Icon from '../common/Icon';
 import PersistBanner from '../common/PersistBanner';
+import ProfilePicker from '../common/ProfilePicker';
 import UndoToast from '../common/UndoToast';
 
 const VIEWS: Record<TabId, () => React.JSX.Element> = {
@@ -40,8 +42,14 @@ export default function AppShell() {
   useHashSync();
   const hydrated = useWorkspaceStore((s) => s.hydrated);
   const activeTab = useUiStore((s) => s.activeTab);
+  const profileId = useProfileStore((s) => s.profileId);
 
   if (!hydrated) return <Splash />;
+  // After the hydration gate, never before: the picker is the first thing this
+  // device is asked, but it must not compete with the splash for the screen
+  // (M13). Nothing else mounts until it is answered — there is no 건너뛰기,
+  // because an unstamped card is exactly what this milestone is about.
+  if (!profileId) return <ProfilePicker />;
 
   const View = VIEWS[activeTab];
 

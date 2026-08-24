@@ -1,9 +1,11 @@
 import { useState, type KeyboardEvent } from 'react';
+import { isProfileId } from '../../profile/profile';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, Id } from '../../types/models';
 import { MAX_AMOUNT, formatBudget, formatLocalAmount, isValidExpenseAmount } from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatStamp } from '../../utils/time';
+import Avatar from './Avatar';
 import Icon from './Icon';
 import {
   CHIP_BUTTON_QUIET,
@@ -27,6 +29,23 @@ export interface LocalMoney {
   localCurrency?: string;
   /** 기준통화 per 1 local unit, e.g. `9.3` KRW per JPY. */
   fxRate?: number;
+}
+
+/**
+ * Who wrote this row (M13) — an 18px avatar in front of the text.
+ *
+ * In front, not behind: two people splitting a bill scan the *left* edge of the
+ * list to see whose receipts these are. A row written before M13 (or by a
+ * device that never picked a profile) carries no `by` and gets nothing at all —
+ * a placeholder would be a third identity nobody has.
+ */
+function LedgerAuthor({ by, className = '' }: { by?: string; className?: string }) {
+  if (!isProfileId(by)) return null;
+  return (
+    <span data-testid="ledger-author" data-profile={by} className={`shrink-0 ${className}`}>
+      <Avatar id={by} size="sm" />
+    </span>
+  );
 }
 
 /** True when both halves are usable — a rate of 0 is not a rate. */
@@ -253,6 +272,7 @@ export default function CardLedger({
                 data-amount={expense.amount}
                 className="flex h-11 items-center gap-2 rounded-md bg-sunken px-3"
               >
+                <LedgerAuthor by={expense.by} />
                 <span className="min-w-0 flex-1 truncate text-label font-normal text-ink">
                   {expense.label?.trim() || '지출'}
                 </span>
@@ -310,6 +330,9 @@ export default function CardLedger({
                   data-comment-id={entry.id}
                   className="flex items-start gap-2 rounded-md bg-sunken px-3 py-2"
                 >
+                  {/* `mt-px` puts an 18px circle on the first line's baseline
+                      in a row whose text may wrap to three. */}
+                  <LedgerAuthor by={entry.by} className="mt-px" />
                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-label font-normal text-ink">
                     {entry.text}
                   </span>

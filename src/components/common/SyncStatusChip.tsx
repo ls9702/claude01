@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { useCurrentProfile } from '../../profile/profile';
 import { SYNC_STATUS_LABELS, useSyncStore, type SyncStatus } from '../../stores/syncStore';
+import Avatar from './Avatar';
 import SyncSettingsSheet from './SyncSettingsSheet';
 import { CHIP_BASE, withoutHeight, withoutPadX } from './formStyles';
 
@@ -31,12 +33,31 @@ export const SYNC_DOT_CLASS: Record<SyncStatus, string> = {
  */
 export default function SyncStatusChip({ variant = 'chip' }: { variant?: 'chip' | 'dot' }) {
   const status = useSyncStore((s) => s.status);
+  const profile = useCurrentProfile();
   const [open, setOpen] = useState(false);
 
   const dot = variant === 'dot';
 
   return (
     <>
+      {/* 이 기기는 누구인가 (M13) — 동기화 표시 바로 옆, 같은 시트로 들어간다.
+          탭 바가 아니라 이 컴포넌트에 붙는 이유: 데스크톱 상단 바와 네 화면의
+          모바일 헤더가 이미 전부 이 칩을 걸고 있고, 설정으로 가는 길도 이 칩
+          하나뿐이기 때문이다. 탭은 여전히 정확히 4개다. */}
+      {profile ? (
+        <button
+          type="button"
+          data-testid="profile-chip"
+          data-profile={profile.id}
+          onClick={() => setOpen(true)}
+          aria-label={`프로필 ${profile.label}`}
+          title={`프로필 ${profile.label}`}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors duration-[140ms] ease-quick hover:bg-sunken"
+        >
+          <Avatar id={profile.id} size="sm" />
+        </button>
+      ) : null}
+
       <button
         type="button"
         data-testid="sync-chip"

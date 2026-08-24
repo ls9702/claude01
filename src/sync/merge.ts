@@ -78,6 +78,33 @@ function mergeMap<T extends Timestamped>(
   return out;
 }
 
+/**
+ * Union of two `seenBy` maps, **per key, greatest wins** (M13).
+ *
+ * Not `mergeMap`: these are not entities, they carry no `updatedAt`, and there
+ * is no whole-object LWW that could pick between them without throwing one
+ * device's key away — which is precisely the case that matters, since each
+ * device only ever writes its own key. Absent-safe on both sides, and returns
+ * `undefined` for an empty result so a pre-M13 workspace stays byte-identical
+ * to itself through a merge (an empty `{}` here would read as a change and
+ * bounce a pointless push off the server).
+ */
+function mergeSeenBy(
+  local: Record<string, Millis> | undefined,
+  remote: Record<string, Millis> | undefined,
+): Record<string, Millis> | undefined {
+  if (!local && !remote) return undefined;
+  const out: Record<string, Millis> = {};
+  for (const source of [local, remote]) {
+    for (const [key, at] of Object.entries(source ?? {})) {
+      if (typeof at !== 'number' || !Number.isFinite(at)) continue;
+      const current = out[key];
+      if (current === undefined || at > current) out[key] = at;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** Union of two tombstone lists keyed by `(entity, id)`, newest `deletedAt`. */
 function mergeTombstones(local: Tombstone[], remote: Tombstone[]): Map<string, Tombstone> {
   const out = new Map<string, Tombstone>();
@@ -291,7 +318,11 @@ export function workspaceEquals(a: Workspace, b: Workspace): boolean {
     deepEqual(a.columns, b.columns) &&
     deepEqual(a.cards, b.cards) &&
     deepEqual(a.days, b.days) &&
-    deepEqual(a.entries, b.entries)
+    deepEqual(a.entries, b.entries) &&
+    // `undefined` and `{}` are not the same value here, but `deepEqual` treats
+    // a missing key and an `undefined` one alike — which is what makes a
+    // pre-M13 workspace compare equal to itself after a round trip.
+    deepEqual(a.seenBy, b.seenBy)
   );
 }
 
@@ -342,5 +373,6 @@ export function merge(local: Workspace, remote: Workspace, now: Millis = Date.no
     days: draft.days,
     entries: draft.entries,
     tombstones,
+    seenBy: mergeSeenBy(local.seenBy, remote.seenBy),
   };
 }

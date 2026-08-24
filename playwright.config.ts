@@ -13,6 +13,27 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'on-first-retry',
+    /**
+     * Every spec starts already knowing who it is (M13).
+     *
+     * The app asks 누구세요? on first open and renders nothing else until it is
+     * answered, which would put a wall in front of all 65 specs that came
+     * before it. Seeding the profile here — rather than clicking the picker in
+     * 65 `beforeEach`es — keeps those specs about what they are about.
+     *
+     * The value is exactly what `profile.saveProfile` writes: a JSON string,
+     * quotes and all. `e2e/profile.spec.ts` opts back out with an empty
+     * `storageState` to get at the first-run experience itself.
+     */
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: baseURL,
+          localStorage: [{ name: 'trip-board/profile', value: '"song"' }],
+        },
+      ],
+    },
   },
   projects: [
     {

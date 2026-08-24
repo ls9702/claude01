@@ -117,6 +117,15 @@ export interface CardExpense {
   label?: string;
   /** When it was recorded. */
   at: Millis;
+  /**
+   * Who paid / recorded it (M13) — a profile id, today `'song'` or `'hoyabom'`.
+   *
+   * A plain `string` on purpose: this layer must not depend on `profile/`, and
+   * a receipt written by a profile a future build no longer knows about is
+   * still a receipt. Optional and additive — an expense recorded before M13
+   * has no field and `schemaVersion` stays 1; the UI simply shows no avatar.
+   */
+  by?: string;
 }
 
 /** A free-text note appended to a card, oldest first (M6). */
@@ -124,6 +133,8 @@ export interface CardComment {
   id: Id;
   text: string;
   at: Millis;
+  /** Who wrote it (M13). Same shape and same caveats as {@link CardExpense.by}. */
+  by?: string;
 }
 
 /**
@@ -178,6 +189,15 @@ export interface Card {
    * as {@link Card.expenses} — sync merges the card whole.
    */
   photos?: CardPhoto[];
+  /**
+   * Who made this card (M13) — a profile id, today `'song'` or `'hoyabom'`.
+   *
+   * Written once, at creation, and never patched afterwards: it answers "누가
+   * 올린 아이디어지?", not "who touched it last". A plain `string` for the same
+   * reason {@link CardExpense.by} is one. Optional and additive — a card made
+   * before M13 has no field and `schemaVersion` stays 1.
+   */
+  createdBy?: string;
   createdAt: Millis;
   updatedAt: Millis;
 }
@@ -225,6 +245,22 @@ export interface Workspace {
   days: Record<Id, Day>;
   entries: Record<Id, TimelineEntry>;
   tombstones: Tombstone[];
+  /**
+   * When each profile last opened the app (M13) — profile id → epoch ms.
+   *
+   * The one piece of *device* news that is deliberately kept **inside** the
+   * workspace: the whole point is for the other person to see it, and the only
+   * thing that travels between the two devices is this blob.
+   *
+   * It is not an entity and carries no `updatedAt`, so it cannot ride the
+   * entity LWW in `sync/merge`: two devices each stamping their own key would
+   * lose one of the keys. `merge` folds it **per key, newest wins** instead.
+   *
+   * Optional and additive — a workspace saved before M13 has no field,
+   * {@link emptyWorkspace} still does not create one, and `schemaVersion`
+   * stays 1.
+   */
+  seenBy?: Record<string, Millis>;
 }
 
 /** A fresh, empty workspace. */
