@@ -94,6 +94,40 @@ async function mapCenter(page: Page): Promise<string> {
   return `${lat.toFixed(1)},${lng.toFixed(1)}`;
 }
 
+/**
+ * Waits until the workspace blob actually sitting in IndexedDB mentions
+ * `needle`, so a `reload()` cannot race the persist middleware's write.
+ */
+async function waitForPersisted(page: Page, needle: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          (key) =>
+            new Promise<string>((resolve) => {
+              const request = indexedDB.open('trip-board');
+              request.onerror = () => resolve('');
+              request.onsuccess = () => {
+                try {
+                  const read = request.result
+                    .transaction('state', 'readonly')
+                    .objectStore('state')
+                    .get(key);
+                  read.onsuccess = () =>
+                    resolve(typeof read.result === 'string' ? read.result : '');
+                  read.onerror = () => resolve('');
+                } catch {
+                  resolve('');
+                }
+              };
+            }),
+          'trip-board/workspace',
+        ),
+      { timeout: 5_000 },
+    )
+    .toContain(needle);
+}
+
 /** Creates a trip from the 여행 tab and lands on its board. */
 async function createTrip(page: Page, title: string): Promise<void> {
   await page.getByTestId('add-trip').click();
@@ -348,7 +382,7 @@ test('위치를 제거하면 카드에서 사라진다', async ({ page }) => {
   await expect(page.getByTestId('card-chip-location')).toHaveCount(0);
 });
 
-test('일자를 고르면 그날의 동선이 화살표로 그려진다', async ({ page }) => {
+test('지도는 전체 동선으로 열리고, 일차를 고르면 그날만 남는다', async ({ page }) => {
   await stubNetwork(page);
   await page.goto('/');
   await createTrip(page, '도쿄 동선');
@@ -370,10 +404,12 @@ test('일자를 고르면 그날의 동선이 화살표로 그려진다', async 
   await page.getByTestId('place-search-result').nth(1).click();
   await page.getByTestId('card-submit').click();
 
-  // One day, both cards on it — 10:00 and 10:30, so the order is unambiguous.
+  // 1일차: both cards on it — 10:00 and 10:30, so the order is unambiguous.
   await page.getByTestId('tab-timeline').click();
   await page.getByTestId('timeline-add-day-empty').click();
   await expect(page.getByTestId('timeline-day')).toHaveCount(1);
+  await page.getByTestId('timeline-add-day').click();
+  await expect(page.getByTestId('timeline-day')).toHaveCount(2);
 
   for (const [title, nudges] of [
     ['스크램블 교차로', 0],
@@ -387,33 +423,68 @@ test('일자를 고르면 그날의 동선이 화살표로 그려진다', async 
     await expect(page.getByTestId('schedule-sheet')).toHaveCount(0);
   }
 
+  // 2일차: 시부야역 앞 once more, so the two days really do differ.
+  await openCard(page, '시부야역 앞');
+  await page.getByTestId('card-schedule').click();
+  await page.getByTestId('schedule-day-option').nth(1).click();
+  await page.getByTestId('schedule-submit').click();
+  await expect(page.getByTestId('schedule-sheet')).toHaveCount(0);
+
   await page.getByTestId('tab-map').click();
   await expectLiveMap(page);
   await expect(page.getByTestId('map-marker')).toHaveCount(2);
 
-  // The route is off until a day is picked.
+  // M15 §3 — 지도는 「전체」로 열린다. M6에서는 경로가 꺼진 채 열렸고(사용자가
+  // 칩 줄을 찾아 일자를 골라야 했다), 그 때문에 화살표를 본 적이 없다는 것이
+  // 이번 피드백이었다. 이제 아무것도 누르지 않아도 동선이 그려져 있다.
   await expect(page.getByTestId('map-route-controls')).toBeVisible();
   await expect(page.getByTestId('map-route-sheet-select')).toBeVisible();
-  await expect(page.getByTestId('route-stop')).toHaveCount(0);
+  await expect(page.getByTestId('map-route-all')).toHaveAttribute('data-active', 'true');
+  await expect(page.getByTestId('map-route-off')).toHaveAttribute('data-active', 'false');
+  await expect(page.getByTestId('route-stop')).toHaveCount(3);
+  await expect(page.getByTestId('route-leg')).toHaveCount(1);
+  // 전체 모드의 배지는 `일자-순번`이다.
+  await expect(page.getByTestId('route-stop').first()).toHaveAttribute('data-order', '1');
 
+  // 1일차 — 그날의 두 정거장과 그 사이 한 구간만.
   const dayChip = page.getByTestId('map-route-day').first();
   await dayChip.click();
   await expect(dayChip).toHaveAttribute('data-active', 'true');
+  await expect(page.getByTestId('map-route-all')).toHaveAttribute('data-active', 'false');
   await expect(page.getByTestId('route-stop')).toHaveCount(2);
   await expect(page.getByTestId('route-leg')).toHaveCount(1);
   await expect(page.getByTestId('route-stop').first()).toHaveAttribute('data-order', '1');
   // The pins stay put underneath the numbered badges.
   await expect(page.getByTestId('map-marker')).toHaveCount(2);
 
-  // 전체 draws the same single day; tapping it again turns the route off.
-  await page.getByTestId('map-route-all').click();
-  await expect(page.getByTestId('map-route-all')).toHaveAttribute('data-active', 'true');
-  await expect(dayChip).toHaveAttribute('data-active', 'false');
-  await expect(page.getByTestId('route-stop')).toHaveCount(2);
+  // 2일차 — 정거장 하나, 구간 없음. 그날에 없는 장소의 핀은 흐려진다.
+  const secondDay = page.getByTestId('map-route-day').nth(1);
+  await secondDay.click();
+  await expect(page.getByTestId('route-stop')).toHaveCount(1);
+  await expect(page.getByTestId('route-leg')).toHaveCount(0);
+  await expect(page.locator('[data-testid="map-marker"][data-dimmed="true"]')).toHaveCount(1);
 
-  await page.getByTestId('map-route-all').click();
+  // 끔 — 경로를 통째로 감춘다. (M6에서는 전체 칩을 한 번 더 눌러 껐다.)
+  await page.getByTestId('map-route-off').click();
   await expect(page.getByTestId('route-stop')).toHaveCount(0);
   await expect(page.getByTestId('route-leg')).toHaveCount(0);
+  await expect(page.locator('[data-testid="map-marker"][data-dimmed="true"]')).toHaveCount(0);
+
+  // 마지막 선택은 이 기기에 남는다 — 새로고침해도 꺼진 채로 열린다.
+  await waitForPersisted(page, '시부야역 앞');
+  await page.reload();
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+  await expectLiveMap(page);
+  await expect(page.getByTestId('map-route-off')).toHaveAttribute('data-active', 'true');
+  await expect(page.getByTestId('route-stop')).toHaveCount(0);
+
+  await page.getByTestId('map-route-all').click();
+  await expect(page.getByTestId('route-stop')).toHaveCount(3);
+  await page.reload();
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+  await expectLiveMap(page);
+  await expect(page.getByTestId('map-route-all')).toHaveAttribute('data-active', 'true');
+  await expect(page.getByTestId('route-leg')).toHaveCount(1);
 });
 
 test('여행에 목적지를 정하면 지도가 그 근처에서 열린다', async ({ page }) => {

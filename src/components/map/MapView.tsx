@@ -3,6 +3,7 @@ import { latLngBounds } from 'leaflet';
 import { MapContainer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
+import { loadRouteChoice, saveRouteChoice, storedDayId } from '../../stores/mapRoutePref';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { BoardColumn, Card, Day, Id, Sheet as SheetModel } from '../../types/models';
@@ -11,15 +12,13 @@ import { colorClasses } from '../../utils/colors';
 import { formatBudget } from '../../utils/money';
 import { cardCommentCount, cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
-import { dayTitle } from '../../timeline/dayLabel';
+import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
 import Icon, { EmojiIcon } from '../common/Icon';
 import BackupNudge from '../common/BackupNudge';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
-  CHIP_BUTTON,
   CHIP_MONEY,
   CHIP_NEUTRAL,
-  CHIP_SELECTED,
   DANGER_TEXT_BUTTON_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
@@ -217,14 +216,32 @@ function useOnline(): boolean {
 type RouteSelection = { kind: 'off' } | { kind: 'day'; dayId: Id } | { kind: 'all' };
 
 /**
- * The route's only colour.
+ * The colour of *one* day's route.
  *
- * Ink, for one day and for 전체 alike (M9 §4.7-6): a route answers "in what
- * order", not "of what kind", and borrowing the category palette for it meant
- * the 할일 purple and the day-2 purple were the same purple. Days are told
- * apart by the numbered stop badges instead.
+ * Ink (M9 §4.7-6): a single day's route answers "in what order", not "of what
+ * kind", and borrowing the category palette for it meant the 할일 purple and
+ * the day-2 purple were the same purple.
  */
 const ROUTE_HEX = '#453f3a';
+
+/**
+ * 전체 mode's per-day inks (M15 §3).
+ *
+ * With every day drawn at once one colour is not enough — 「일차별 지도 분리 및
+ * 전체 일정 표시」 asks for a whole-trip view where the days are still tellable
+ * apart. These are deliberately *not* the category palette (that is what M9
+ * ruled out): six deep, saturated line colours whose only job on this screen is
+ * to say "different day", cycled for trips longer than six days. The 일자-순번
+ * badges stay, so the reading never depends on colour alone.
+ */
+const ROUTE_DAY_HEX: readonly string[] = [
+  '#1d4ed8',
+  '#b91c1c',
+  '#047857',
+  '#a16207',
+  '#7c3aed',
+  '#0e7490',
+];
 
 /**
  * The 지도 tab: every located card of the active trip as a colored pin.
@@ -366,12 +383,32 @@ export default function MapView() {
         // Only 전체 needs the 일자-순번 badge: on a single day the stop
         // numbers already run 1, 2, 3 with nothing to confuse them with.
         ...(selection.kind === 'all' ? { dayIndex: routeDays.indexOf(day) + 1 } : {}),
-        // One ink line whatever is drawn — days are told apart by the badges.
-        color: ROUTE_HEX,
+        // One strong ink line for one day; a colour per day for 전체.
+        color:
+          selection.kind === 'all'
+            ? ROUTE_DAY_HEX[routeDays.indexOf(day) % ROUTE_DAY_HEX.length]
+            : ROUTE_HEX,
         route: dayRoute(workspace, day.id),
       }))
       .filter((drawing) => drawing.route.stops.length > 0);
   }, [selection, routeDays, workspace]);
+
+  /**
+   * Does this trip have anything to draw at all?
+   *
+   * The 전체 default only makes sense once at least one located card has been
+   * scheduled; before that the control would open on a mode with nothing in it.
+   */
+  const hasRoutableDay = useMemo(
+    () => routeDays.some((day) => dayRoute(workspace, day.id).stops.length > 0),
+    [routeDays, workspace],
+  );
+
+  /** The cards the *selected day* passes through — everything else dims. */
+  const routeCardIds = useMemo(
+    () => new Set(drawings.flatMap((drawing) => drawing.route.stops.map((stop) => stop.cardId))),
+    [drawings],
+  );
 
   const routePoints = useMemo(
     () => drawings.flatMap((drawing) => drawing.route.stops),
@@ -389,11 +426,49 @@ export default function MapView() {
     if (!routeDays.some((day) => day.id === selection.dayId)) setSelection({ kind: 'off' });
   }, [selection, routeDays]);
 
-  // Switching trips resets the control rather than pointing it at a stale sheet.
+  /**
+   * What the control opens on (M15 §3).
+   *
+   * Was: 「off, always」 — and the owner never found the chip row, so they never
+   * saw an arrow. Now: this device's last choice for *this* trip, else 전체 as
+   * soon as the trip has a located, scheduled card. `resolvedTripRef` makes it
+   * a once-per-trip decision, so a later tap on 끔 is never overruled by a
+   * re-render.
+   */
+  const resolvedTripRef = useRef<Id | null>(null);
   useEffect(() => {
+    // Blank first, so a previous trip's day id can never survive the switch;
+    // the effect below runs in the same commit and puts the real choice in.
     setSelection({ kind: 'off' });
     setRouteSheetId(undefined);
+    resolvedTripRef.current = null;
   }, [trip?.id]);
+
+  useEffect(() => {
+    const tripId = trip?.id;
+    if (!tripId || resolvedTripRef.current === tripId) return;
+
+    const stored = loadRouteChoice(tripId);
+    const storedDay = storedDayId(stored);
+    if (storedDay) {
+      // Only once the days are in hand — a remembered day id cannot be
+      // honoured against an empty list.
+      if (routeDays.length === 0) return;
+      resolvedTripRef.current = tripId;
+      if (routeDays.some((day) => day.id === storedDay)) {
+        setSelection({ kind: 'day', dayId: storedDay });
+      }
+      return;
+    }
+    if (stored === 'off' || stored === 'all') {
+      resolvedTripRef.current = tripId;
+      setSelection({ kind: stored === 'all' ? 'all' : 'off' });
+      return;
+    }
+    if (!hasRoutableDay) return;
+    resolvedTripRef.current = tripId;
+    setSelection({ kind: 'all' });
+  }, [trip?.id, routeDays, hasRoutableDay]);
 
   // A legend chip for a category that no longer has pins would be unreachable.
   useEffect(() => {
@@ -419,6 +494,23 @@ export default function MapView() {
     focusCard(card.id);
     setTab('board');
   };
+
+  /** Every route pick goes through here, so every pick is remembered. */
+  const chooseRoute = (next: RouteSelection) => {
+    setSelection(next);
+    resolvedTripRef.current = trip.id;
+    saveRouteChoice(trip.id, next.kind === 'day' ? `day:${next.dayId}` : next.kind);
+  };
+
+  /** 끔 / 전체 / 1일차 … — one segmented control, not a chip you must find. */
+  const segmentClass = (active: boolean) =>
+    [
+      'inline-flex h-9 shrink-0 items-center rounded-full px-3 text-micro',
+      'transition-colors duration-[140ms] ease-quick lg:h-8',
+      active
+        ? 'bg-inverse text-surface'
+        : 'text-ink-muted hover:bg-surface hover:text-ink',
+    ].join(' ');
 
   return (
     <section
@@ -534,7 +626,8 @@ export default function MapView() {
                   value={routeSheet?.id ?? ''}
                   onChange={(event) => {
                     setRouteSheetId(event.target.value);
-                    setSelection({ kind: 'off' });
+                    // Another 일정표 is another itinerary — show all of it.
+                    chooseRoute({ kind: 'all' });
                   }}
                   className="h-9 max-w-32 appearance-none rounded-md border border-line bg-surface pl-3 pr-8 text-label text-ink outline-none transition-colors duration-[140ms] ease-quick hover:border-line-strong focus:border-ink lg:h-8"
                 >
@@ -552,44 +645,53 @@ export default function MapView() {
               </div>
             ) : null}
 
-            <button
-              type="button"
-              data-testid="map-route-all"
-              data-active={selection.kind === 'all'}
-              aria-pressed={selection.kind === 'all'}
-              onClick={() =>
-                setSelection((current) =>
-                  current.kind === 'all' ? { kind: 'off' } : { kind: 'all' },
-                )
-              }
-              className={selection.kind === 'all' ? CHIP_SELECTED : CHIP_BUTTON}
+            {/* One segmented control — 끔 · 전체 · 일차 — rather than a row of
+                chips that could each be missed. `전체` no longer toggles
+                itself off: 끔 is a segment of its own now (M15 §3). */}
+            <div
+              data-testid="map-route-segments"
+              className="flex shrink-0 items-center gap-1 rounded-full bg-sunken p-1"
             >
-              전체
-            </button>
+              <button
+                type="button"
+                data-testid="map-route-off"
+                data-active={selection.kind === 'off'}
+                aria-pressed={selection.kind === 'off'}
+                onClick={() => chooseRoute({ kind: 'off' })}
+                className={segmentClass(selection.kind === 'off')}
+              >
+                끔
+              </button>
+              <button
+                type="button"
+                data-testid="map-route-all"
+                data-active={selection.kind === 'all'}
+                aria-pressed={selection.kind === 'all'}
+                onClick={() => chooseRoute({ kind: 'all' })}
+                className={segmentClass(selection.kind === 'all')}
+              >
+                전체
+              </button>
 
-            {routeDays.map((day, index) => {
-              const active = selection.kind === 'day' && selection.dayId === day.id;
-              return (
-                <button
-                  key={day.id}
-                  type="button"
-                  data-testid="map-route-day"
-                  data-day-id={day.id}
-                  data-active={active}
-                  aria-pressed={active}
-                  onClick={() =>
-                    setSelection((current) =>
-                      current.kind === 'day' && current.dayId === day.id
-                        ? { kind: 'off' }
-                        : { kind: 'day', dayId: day.id },
-                    )
-                  }
-                  className={active ? CHIP_SELECTED : CHIP_BUTTON}
-                >
-                  {dayTitle(day, index)}
-                </button>
-              );
-            })}
+              {routeDays.map((day, index) => {
+                const active = selection.kind === 'day' && selection.dayId === day.id;
+                return (
+                  <button
+                    key={day.id}
+                    type="button"
+                    data-testid="map-route-day"
+                    data-day-id={day.id}
+                    data-active={active}
+                    aria-pressed={active}
+                    title={daySubtitle(day, index) || undefined}
+                    onClick={() => chooseRoute({ kind: 'day', dayId: day.id })}
+                    className={segmentClass(active)}
+                  >
+                    {dayTitle(day, index)}
+                  </button>
+                );
+              })}
+            </div>
 
             {selection.kind !== 'off' && routePoints.length === 0 ? (
               <span
@@ -645,7 +747,15 @@ export default function MapView() {
             <Marker
               key={card.id}
               position={[card.location!.lat, card.location!.lng]}
-              icon={cardPinIcon(column.color, column.icon, card.id, column.id)}
+              icon={cardPinIcon(
+                column.color,
+                column.icon,
+                card.id,
+                column.id,
+                // 일차별 지도 분리: while one day is on screen, the places that
+                // belong to the other days step back rather than disappear.
+                selection.kind === 'day' && routeCardIds.size > 0 && !routeCardIds.has(card.id),
+              )}
             >
               <Popup>
                 <div

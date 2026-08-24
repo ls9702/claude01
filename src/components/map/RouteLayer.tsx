@@ -84,7 +84,13 @@ function stopIcon(order: number, cardId: Id, color: string, dayIndex?: number): 
  * turned by `bearing` degrees, which is what a polyline decorator would do
  * anyway. A leg that carries a ride also gets a white pill with that category's
  * emoji, so 🚗 / ✈️ reads at a glance.
+ *
+ * M15 §3 — the arrowhead was 16px of thin outline and the owner reported never
+ * having seen one. It is 22px now, with a heavier white keyline and a drop
+ * shadow, so 이동 방향 reads over any tile without zooming in.
  */
+const ARROW_PX = 22;
+
 function legIcon(
   bearing: number,
   fromCardId: Id,
@@ -93,27 +99,29 @@ function legIcon(
   rideIcon?: string,
 ): DivIcon {
   const arrow = [
-    `<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"`,
-    ` style="transform:rotate(${bearing.toFixed(1)}deg);display:block;">`,
-    `<path d="M12 2 L20 21 L12 16.5 L4 21 Z" fill="${color}" stroke="#ffffff"`,
-    ` stroke-width="1.6" stroke-linejoin="round" />`,
+    `<svg width="${ARROW_PX}" height="${ARROW_PX}" viewBox="0 0 24 24" aria-hidden="true"`,
+    ` style="transform:rotate(${bearing.toFixed(1)}deg);display:block;`,
+    `filter:drop-shadow(0 1px 2px rgba(28,25,23,0.45));">`,
+    `<path d="M12 1.5 L20.5 21.5 L12 16.6 L3.5 21.5 Z" fill="${color}" stroke="#ffffff"`,
+    ` stroke-width="2.2" stroke-linejoin="round" />`,
     '</svg>',
   ].join('');
 
   const pill = rideIcon
     ? [
-        `<span style="background:#fff;border-radius:9999px;padding:1px 5px;font-size:11px;`,
+        `<span style="background:#fff;border-radius:9999px;padding:1px 5px;font-size:12px;`,
         `line-height:1.4;${SHADOW};">`,
         escapeHtml(rideIcon),
         '</span>',
       ].join('')
     : '';
 
-  const width = rideIcon ? 48 : 20;
+  const width = rideIcon ? 52 : ARROW_PX;
   const html = [
     `<div data-testid="route-leg" data-from="${escapeHtml(fromCardId)}"`,
     ` data-to="${escapeHtml(toCardId)}"`,
-    ` style="width:${width}px;height:20px;display:flex;align-items:center;`,
+    ` data-ride="${rideIcon ? 'true' : 'false'}"`,
+    ` style="width:${width}px;height:${ARROW_PX}px;display:flex;align-items:center;`,
     `justify-content:center;gap:2px;">`,
     pill,
     arrow,
@@ -123,8 +131,8 @@ function legIcon(
   return divIcon({
     html,
     className: 'tb-route-leg',
-    iconSize: [width, 20],
-    iconAnchor: [width / 2, 10],
+    iconSize: [width, ARROW_PX],
+    iconAnchor: [width / 2, ARROW_PX / 2],
     popupAnchor: [0, -8],
   });
 }
@@ -156,7 +164,7 @@ export default function RouteLayer({ drawings, cards, columns }: RouteLayerProps
             {route.stops.length > 1 ? (
               <Polyline
                 positions={route.stops.map((stop) => [stop.lat, stop.lng] as [number, number])}
-                pathOptions={{ color, weight: 4, opacity: 0.75, lineJoin: 'round' }}
+                pathOptions={{ color, weight: 5, opacity: 0.85, lineJoin: 'round' }}
               />
             ) : null}
 

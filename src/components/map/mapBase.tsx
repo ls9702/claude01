@@ -58,12 +58,25 @@ const PIN_PX = 30;
  * classic map-pin silhouette; the emoji is counter-rotated to stay upright.
  * The tip sits ~6px below the icon box, hence the `iconAnchor` of 36.
  */
-export function cardPinIcon(color: string, icon: string, cardId: Id, columnId: Id): DivIcon {
+export function cardPinIcon(
+  color: string,
+  icon: string,
+  cardId: Id,
+  columnId: Id,
+  /**
+   * Fade the pin back (M15 §3) — a place that belongs to some *other* day
+   * while one day's route is on screen. Still a pin, still tappable; just no
+   * longer competing with the day being read.
+   */
+  dimmed = false,
+): DivIcon {
   const hex = colorHex(color);
   const html = [
     `<div data-testid="map-marker" data-card-id="${escapeHtml(cardId)}"`,
     ` data-column-id="${escapeHtml(columnId)}"`,
+    ` data-dimmed="${dimmed ? 'true' : 'false'}"`,
     ` style="width:${PIN_PX}px;height:${PIN_PX}px;background:${hex};border:2px solid #fff;`,
+    dimmed ? 'opacity:0.35;' : '',
     `border-radius:50% 50% 50% 0;transform:rotate(-45deg);`,
     `box-shadow:0 2px 6px rgba(28,25,23,0.35);display:flex;align-items:center;`,
     `justify-content:center;">`,

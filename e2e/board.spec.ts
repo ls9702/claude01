@@ -168,3 +168,81 @@ test('＋ 카테고리로 칸을 추가한다', async ({ page }) => {
   await expect(columns).toHaveCount(6);
   await expect(columns.nth(5)).toContainText('쇼핑');
 });
+
+/**
+ * 카테고리 접기 — M15 §2.
+ *
+ * The fold is a *per-device* preference in `localStorage`, so it has to
+ * survive a reload while never travelling to another phone; both halves are
+ * checked here. The count on the header is what a folded column has to keep
+ * saying, otherwise folding hides the fact that anything is in there.
+ */
+test('카테고리 헤더를 눌러 접고, 새로고침해도 접힌 채로 열린다', async ({ page }) => {
+  await createTrip(page, '치앙마이');
+  await addCard(page, 2, '카오소이');
+  await addCard(page, 2, '망고밥');
+  await waitForPersisted(page, '카오소이');
+
+  const column = page.getByTestId('board-column').nth(2);
+  const toggle = column.getByTestId('column-collapse');
+  await expect(toggle).toHaveAttribute('data-collapsed', 'false');
+  await expect(column.getByTestId('board-card')).toHaveCount(2);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('data-collapsed', 'true');
+  await expect(column).toHaveAttribute('data-collapsed', 'true');
+  // 카드는 숨고, 몇 장인지는 계속 보인다.
+  await expect(column.getByTestId('board-card')).toHaveCount(0);
+  await expect(column.getByTestId('add-card-footer')).toHaveCount(0);
+  await expect(column.getByTestId('column-count')).toHaveText('2');
+  // 옆 칸은 그대로다 — 접힘은 칸마다 따로다.
+  await expect(page.getByTestId('board-column').nth(3)).toHaveAttribute('data-collapsed', 'false');
+
+  await page.reload();
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+  const reopened = page.getByTestId('board-column').nth(2);
+  await expect(reopened.getByTestId('column-collapse')).toHaveAttribute('data-collapsed', 'true');
+  await expect(reopened.getByTestId('board-card')).toHaveCount(0);
+  await expect(reopened.getByTestId('column-count')).toHaveText('2');
+
+  await reopened.getByTestId('column-collapse').click();
+  await expect(reopened.getByTestId('column-collapse')).toHaveAttribute('data-collapsed', 'false');
+  await expect(reopened.getByTestId('board-card')).toHaveCount(2);
+});
+
+/**
+ * 접힌 칸으로도 카드를 떨어뜨릴 수 있어야 한다 — 접힘이 dnd를 깨지 않는지.
+ */
+test('접힌 카테고리 위로 카드를 끌어다 놓아도 멀쩡히 옮겨진다', async ({ page }) => {
+  await createTrip(page, '방콕');
+  await addCard(page, 1, '유심 사기');
+
+  const source = page.getByTestId('board-column').nth(1);
+  const target = page.getByTestId('board-column').nth(2);
+  await target.getByTestId('column-collapse').click();
+  await expect(target).toHaveAttribute('data-collapsed', 'true');
+
+  const card = source.getByTestId('board-card').first();
+  const from = await card.boundingBox();
+  const to = await target.getByTestId('column-collapse').boundingBox();
+  if (!from || !to) throw new Error('드래그 대상의 위치를 찾지 못했어요');
+
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  for (const step of [0.15, 0.35, 0.6, 0.85, 1]) {
+    await page.mouse.move(
+      from.x + from.width / 2 + (to.x + to.width / 2 - from.x - from.width / 2) * step,
+      from.y + from.height / 2 + (to.y + to.height / 2 - from.y - from.height / 2) * step,
+    );
+  }
+  await page.mouse.up();
+
+  // 접힌 칸이 카드를 받아 갔고(개수만 늘고), 화면은 멀쩡하다.
+  await expect(target.getByTestId('column-count')).toHaveText('1');
+  await expect(source.getByTestId('column-count')).toHaveText('0');
+  await expect(target.getByTestId('board-card')).toHaveCount(0);
+
+  await target.getByTestId('column-collapse').click();
+  await expect(target.getByTestId('board-card')).toHaveCount(1);
+  await expect(target).toContainText('유심 사기');
+});

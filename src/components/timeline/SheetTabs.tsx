@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Id, Sheet as SheetModel } from '../../types/models';
+import AnchoredMenu from '../common/AnchoredMenu';
 import Icon from '../common/Icon';
-import { POPOVER_CLASS, POPOVER_ROW_CLASS, POPOVER_ROW_DANGER_CLASS } from '../common/formStyles';
+import { POPOVER_ROW_CLASS, POPOVER_ROW_DANGER_CLASS } from '../common/formStyles';
 
 interface SheetTabsProps {
   sheets: readonly SheetModel[];
@@ -26,6 +27,12 @@ interface SheetTabsProps {
  * beside it, so the pair stops reading as two half-broken buttons.
  * `timeline-sheet-name` rides on the active chip's label so M2a's assertions
  * keep working with one sheet or ten.
+ *
+ * M15 §1 — the menu **panel** does not live in this row any more. The strip is
+ * `overflow-x-auto`, which clips the other axis too, and the panel used to be
+ * drawn entirely outside that box: the owner tapped ⋯, saw nothing, and
+ * reported 「삭제가 안 됨」. It is an {@link AnchoredMenu} now, portalled to the
+ * body, and the ⋯ itself is a 44px touch target below `lg`.
  */
 /** Toggles the right-hand fade on only while a strip really has more to show. */
 function useStripOverflow<T extends HTMLElement>() {
@@ -55,19 +62,38 @@ export default function SheetTabs({
   trailing,
 }: SheetTabsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  /** The ⋯ button itself — the menu positions against its rect. */
+  const [menuAnchor, setMenuAnchor] = useState<HTMLButtonElement | null>(null);
   const strip = useStripOverflow<HTMLDivElement>();
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    window.addEventListener('pointerdown', onDown);
-    return () => window.removeEventListener('pointerdown', onDown);
-  }, [menuOpen]);
-
   const active = sheets.find((sheet) => sheet.id === activeSheetId);
+
+  // A menu left open over a sheet that is no longer the active one would act
+  // on the wrong sheet the moment it is tapped.
+  useEffect(() => {
+    if (!active) setMenuOpen(false);
+  }, [active]);
+
+  /**
+   * Keeps the active chip — the only one carrying ⋯ — inside the strip.
+   *
+   * With half a dozen sheets the chip that owns the menu could sit off the
+   * right-hand edge, which is the same "the app has no delete" experience by
+   * another route. Only the strip's own `scrollLeft` moves; `scrollIntoView`
+   * would drag the whole page around it.
+   */
+  const chipRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const scroller = strip.ref.current;
+    const chip = chipRef.current;
+    if (!scroller || !chip) return;
+    const left = chip.offsetLeft;
+    const right = left + chip.offsetWidth;
+    if (left < scroller.scrollLeft) scroller.scrollLeft = Math.max(left - 16, 0);
+    else if (right > scroller.scrollLeft + scroller.clientWidth) {
+      scroller.scrollLeft = right - scroller.clientWidth + 16;
+    }
+  }, [activeSheetId, strip.ref]);
 
   const runAction = (action: (sheet: SheetModel) => void) => {
     setMenuOpen(false);
@@ -96,8 +122,11 @@ export default function SheetTabs({
           return (
             <div
               key={sheet.id}
+              ref={isActive ? chipRef : undefined}
               className={[
-                'relative flex h-9 shrink-0 items-center rounded-full transition-colors duration-[140ms] ease-quick',
+                // 44px of pill below `lg` so the ⋯ inside it can be a real
+                // touch target; the desktop keeps M9's 36px density.
+                'relative flex h-11 shrink-0 items-center rounded-full transition-colors duration-[140ms] ease-quick lg:h-9',
                 isActive ? 'bg-inverse pl-3 pr-1' : 'bg-sunken px-3 hover:bg-line',
                 empty ? 'border border-dashed border-line bg-transparent' : '',
               ].join(' ')}
@@ -125,7 +154,7 @@ export default function SheetTabs({
               </button>
 
               {isActive ? (
-                <div ref={menuRef} className="relative ml-2 flex items-center">
+                <div className="ml-2 flex items-center">
                   {/* The hairline that turns one pill into two zones. */}
                   <span
                     aria-hidden="true"
@@ -133,55 +162,63 @@ export default function SheetTabs({
                   />
                   <button
                     type="button"
+                    ref={setMenuAnchor}
                     data-testid="sheet-menu"
-                    aria-label={`${sheet.name} 시트 메뉴`}
+                    aria-label={`${sheet.name} 시트 메뉴 (이름 변경 · 삭제)`}
+                    aria-haspopup="menu"
                     aria-expanded={menuOpen}
                     onClick={() => setMenuOpen((open) => !open)}
                     className={[
-                      'grid h-8 w-8 place-items-center rounded-full',
+                      // 44 × 44 on a phone, M9's 32 on a mouse-driven desktop.
+                      'grid h-11 w-11 place-items-center rounded-full lg:h-8 lg:w-8',
                       empty ? 'text-ink-faint hover:text-ink' : 'text-surface/70 hover:text-surface',
                     ].join(' ')}
                   >
-                    <Icon name="more" size={16} />
+                    <Icon name="more" size={20} />
                   </button>
-
-                  {menuOpen ? (
-                    <div data-testid="sheet-menu-panel" className={`${POPOVER_CLASS} right-0 top-full`}>
-                      <button
-                        type="button"
-                        data-testid="sheet-rename"
-                        onClick={() => runAction(onRename)}
-                        className={POPOVER_ROW_CLASS}
-                      >
-                        <Icon name="pencil" size={16} />
-                        이름 변경
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="sheet-edit-flights"
-                        onClick={() => runAction(onEditFlights)}
-                        className={POPOVER_ROW_CLASS}
-                      >
-                        <Icon name="calendar" size={16} />
-                        항공편 수정
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="sheet-delete"
-                        onClick={() => runAction(onDelete)}
-                        className={POPOVER_ROW_DANGER_CLASS}
-                      >
-                        <Icon name="trash" size={16} />
-                        시트 삭제
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
               ) : null}
             </div>
           );
         })}
       </div>
+
+      {/* Portalled, so the strip's `overflow-x-auto` cannot clip it (M15 §1). */}
+      {menuOpen && active ? (
+        <AnchoredMenu
+          anchor={menuAnchor}
+          testId="sheet-menu-panel"
+          onClose={() => setMenuOpen(false)}
+        >
+          <button
+            type="button"
+            data-testid="sheet-rename"
+            onClick={() => runAction(onRename)}
+            className={POPOVER_ROW_CLASS}
+          >
+            <Icon name="pencil" size={16} />
+            이름 변경
+          </button>
+          <button
+            type="button"
+            data-testid="sheet-edit-flights"
+            onClick={() => runAction(onEditFlights)}
+            className={POPOVER_ROW_CLASS}
+          >
+            <Icon name="calendar" size={16} />
+            항공편 수정
+          </button>
+          <button
+            type="button"
+            data-testid="sheet-delete"
+            onClick={() => runAction(onDelete)}
+            className={POPOVER_ROW_DANGER_CLASS}
+          >
+            <Icon name="trash" size={16} />
+            시트 삭제
+          </button>
+        </AnchoredMenu>
+      ) : null}
 
       {trailing ? <div className="ml-auto shrink-0">{trailing}</div> : null}
 
@@ -190,7 +227,7 @@ export default function SheetTabs({
         type="button"
         data-testid="sheet-add"
         onClick={onCreate}
-        className="flex h-9 shrink-0 items-center gap-1 rounded-full border border-dashed border-line px-3 text-micro text-ink-muted transition-colors duration-[140ms] ease-quick hover:border-line-strong hover:text-ink"
+        className="flex h-11 shrink-0 items-center gap-1 rounded-full border border-dashed border-line px-3 text-micro text-ink-muted transition-colors duration-[140ms] ease-quick hover:border-line-strong hover:text-ink lg:h-9"
       >
         <Icon name="plus" size={16} />
         <span className="hidden sm:inline">새 시트</span>

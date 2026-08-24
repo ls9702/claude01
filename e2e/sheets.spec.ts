@@ -286,6 +286,73 @@ test.describe('모바일', () => {
     // Placed on the active sheet → out of the tray.
     await expect(tray.getByTestId('tray-count')).toHaveAttribute('data-count', '0');
   });
+
+  /**
+   * M15 §1 — 「일정 시트를 만들고 나서 삭제가 안 됨」.
+   *
+   * The menu opened all along; it was drawn *outside* the chip strip's
+   * `overflow-x-auto` clipping box, so on a phone it was invisible and
+   * untappable. `.click()` never noticed because Playwright scrolls its target
+   * into view first — so this test does what a finger does instead: it asks
+   * the document what is actually painted at the row's centre, and then clicks
+   * that raw coordinate rather than the locator.
+   */
+  test('⋯ 메뉴가 화면에 실제로 뜨고, 그 자리를 눌러 시트를 삭제할 수 있다', async ({ page }) => {
+    await createTrip(page, '삿포로');
+    await page.getByTestId('tab-timeline').click();
+    await page.getByTestId('sheet-add').click();
+    await page.getByTestId('wizard-name-input').fill('본 일정');
+    await page.getByTestId('wizard-mode-days').click();
+    await page.getByTestId('wizard-submit').click();
+    await expect(page.getByTestId('timeline-sheet-name')).toHaveText('본 일정');
+
+    // A 44px touch target, not a 32px one.
+    const menu = page.getByTestId('sheet-menu');
+    const menuBox = await menu.boundingBox();
+    expect(menuBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(menuBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+    await menu.click();
+    const panel = page.getByTestId('sheet-menu-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('이름 변경');
+    await expect(panel).toContainText('항공편 수정');
+    await expect(panel).toContainText('시트 삭제');
+
+    // Nothing is painted over 시트 삭제 — this is the assertion the bug failed.
+    const onTop = await page.evaluate(() => {
+      const row = document.querySelector('[data-testid="sheet-delete"]');
+      if (!row) return 'no row';
+      const rect = row.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return hit && row.contains(hit) ? 'row' : 'something else';
+    });
+    expect(onTop).toBe('row');
+
+    const rowBox = await page.getByTestId('sheet-delete').boundingBox();
+    await page.mouse.click(
+      (rowBox?.x ?? 0) + (rowBox?.width ?? 0) / 2,
+      (rowBox?.y ?? 0) + (rowBox?.height ?? 0) / 2,
+    );
+
+    await expect(page.getByTestId('sheet-delete-confirm')).toBeVisible();
+    await page.getByTestId('confirm-accept').click();
+    await expect(page.getByTestId('sheet-tab')).toHaveCount(0);
+    await expect(page.getByTestId('timeline-empty')).toBeVisible();
+  });
+
+  test('⋯ 메뉴에서 이름을 바꾸면 칩 이름이 따라 바뀐다', async ({ page }) => {
+    await createTrip(page, '후쿠오카');
+    await page.getByTestId('tab-timeline').click();
+    await expect(page.getByTestId('timeline-sheet-name')).toHaveText('일정 1');
+
+    await page.getByTestId('sheet-menu').click();
+    await page.getByTestId('sheet-rename').click();
+    await expect(page.getByTestId('sheet-menu-panel')).toHaveCount(0);
+    await page.getByTestId('sheet-rename-input').fill('가족 일정');
+    await page.getByTestId('sheet-rename-submit').click();
+    await expect(page.getByTestId('timeline-sheet-name')).toHaveText('가족 일정');
+  });
 });
 
 test('일수 모드로 날짜 없는 3일짜리 시트를 만든다', async ({ page }) => {
