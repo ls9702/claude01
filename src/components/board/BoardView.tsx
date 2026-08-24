@@ -260,19 +260,18 @@ export default function BoardView() {
 
   return (
     <section data-testid="view-board" aria-labelledby="view-board-title" className="shrink-0">
-      <header className="flex items-center gap-3 px-4 pb-4 pt-6">
-        <div className="min-w-0">
-          <h1
-            id="view-board-title"
-            // 제목은 줄바꿈되지 않는다 (M18 §1) — 좁아지면 옆의 버튼이 양보한다.
-            className="shrink-0 whitespace-nowrap text-display text-ink"
-          >
-            보드
-          </h1>
-          <p data-testid="board-trip-title" className="mt-1 min-w-0 truncate text-label text-ink-muted">
-            {trip.title}
-          </p>
-        </div>
+      {/* M19 — 여행 이름은 둘째 줄인데도 첫 줄의 폭만 쓰고 있었다: 「오사카 봄
+          여행 3박4일」이 390px에서 「오사카 봄 여행 3…」로 잘리고, 정작 그 오른쪽
+          (AI 버튼들 **아래**)은 비어 있었다. 두 줄을 격자로 세워 이름 줄이 폭 전체를
+          쓰게 한다 — 첫 줄의 배치는 그대로다. */}
+      <header className="grid grid-cols-[auto_1fr] items-center gap-x-3 px-4 pb-4 pt-6">
+        <h1
+          id="view-board-title"
+          // 제목은 줄바꿈되지 않는다 (M18 §1) — 좁아지면 옆의 버튼이 양보한다.
+          className="shrink-0 whitespace-nowrap text-display text-ink"
+        >
+          보드
+        </h1>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {aiOn ? (
             <button
@@ -289,6 +288,12 @@ export default function BoardView() {
           {isDesktop ? null : <AiAskButton />}
           {isDesktop ? null : <SyncStatusChip variant="dot" />}
         </div>
+        <p
+          data-testid="board-trip-title"
+          className="col-span-2 mt-1 min-w-0 truncate text-label text-ink-muted"
+        >
+          {trip.title}
+        </p>
       </header>
 
       {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the

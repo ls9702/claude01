@@ -119,7 +119,9 @@ export default function BoardColumnView({
             data-testid="add-card"
             aria-label={`${column.name}에 카드 추가`}
             onClick={() => onAddCard(column)}
-            className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 transition-colors duration-[140ms] ease-quick hover:bg-surface/70"
+            // M19 — 32px는 M9의 아이콘 버튼 표준(36px)보다도 작았다. 옆의 ⋯와
+            // 붙어 있어 44px까지는 못 키운다: 서로의 영역을 먹기 때문이다.
+            className="-m-1 grid h-9 w-9 shrink-0 place-items-center rounded-full p-1 transition-colors duration-[140ms] ease-quick hover:bg-surface/70"
           >
             <Icon name="plus" size={16} />
           </button>
@@ -130,7 +132,7 @@ export default function BoardColumnView({
             data-testid="edit-column"
             aria-label={`${column.name} 카테고리 수정`}
             onClick={() => onEditColumn(column)}
-            className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 opacity-60 transition-colors duration-[140ms] ease-quick hover:bg-surface/70 hover:opacity-100"
+            className="-m-1 grid h-9 w-9 shrink-0 place-items-center rounded-full p-1 opacity-60 transition-colors duration-[140ms] ease-quick hover:bg-surface/70 hover:opacity-100"
           >
             <Icon name="more" size={16} />
           </button>
@@ -177,7 +179,9 @@ export default function BoardColumnView({
               // Right under the last card, not pinned to the bottom of a
               // viewport-tall column: 「＋ 카드 추가」 belongs to the list it adds
               // to. The space left over below it stays a drop zone (M9 §4.2-3).
-              className="flex items-center gap-1 rounded-md px-3 py-2 text-left text-label text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-surface hover:text-ink"
+              // M19 — 34.8px였다. 카드를 만드는 두 손잡이 중 하나인데 44px 아래
+              // 였고, 폭이 칸 전체라 높이만 채우면 그대로 44px 타깃이 된다.
+              className="flex min-h-11 items-center gap-1 rounded-md px-3 py-2 text-left text-label text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-surface hover:text-ink"
             >
               <Icon name="plus" size={16} />
               카드 추가

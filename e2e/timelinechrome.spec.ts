@@ -170,6 +170,58 @@ test.describe('모바일', () => {
     await page.getByTestId('sheet-tab').filter({ hasText: '일정 1' }).click();
     await expect(page.getByTestId('timeline-sheet-name')).toHaveText('일정 1');
   });
+
+  /**
+   * 손가락이 실제로 닿는 자리 — M19 모바일 검수에서 나온 세 건.
+   *
+   * 1. **시트 알약은 통째로 버튼이다.** 알약은 44px인데 그 안의 `button`은 글자
+   *    높이(14px)뿐이라, 시트를 바꾸는 자리는 알약 한가운데의 가느다란 띠
+   *    하나였다. 알약 위쪽을 스친 손가락은 아무 일도 일으키지 못했다.
+   * 2. **일자 페이저는 44px을 갖는다.** 하루씩 넘기는 유일한 손잡이가 32×32였다.
+   * 3. **엔트리 블록은 화면 끝에 닿지 않는다.** 오른쪽 모서리가 마지막 픽셀에
+   *    걸려 잘린 것처럼 보였다.
+   */
+  test('시트 알약·페이저·그리드 오른쪽 끝이 손가락 크기를 지킨다', async ({ page }) => {
+    await createTrip(page, '오사카 터치');
+    await page.getByTestId('board-column').nth(2).getByTestId('add-card').click();
+    await page.getByTestId('card-title-input').fill('이치란');
+    await page.getByTestId('card-submit').click();
+    await expect(page.getByTestId('card-form')).toHaveCount(0);
+    await seedOneDay(page);
+
+    // 1) 시트 탭 버튼 자체가 알약 높이다.
+    const tabBox = await page.getByTestId('sheet-tab').first().boundingBox();
+    expect(Math.round(tabBox?.height ?? 0)).toBeGreaterThanOrEqual(44);
+
+    // 2) 페이저 화살표는 좌우 44px — 손가락이 흔들리는 방향이다.
+    for (const id of ['day-pager-prev', 'day-pager-next']) {
+      const box = await page.getByTestId(id).boundingBox();
+      expect(Math.round(box?.width ?? 0)).toBeGreaterThanOrEqual(44);
+    }
+
+    // 3) 트레이에서 카드를 놓고, 블록이 화면 오른쪽 끝을 비워 두는지 본다.
+    const tray = page.getByTestId('unscheduled-tray');
+    await tray.getByTestId('tray-toggle').click();
+    await tray.getByTestId('tray-card').first().click();
+    await expect(page.getByTestId('schedule-sheet')).toBeVisible();
+    await page.getByTestId('schedule-submit').click();
+    await expect(page.getByTestId('timeline-entry')).toHaveCount(1);
+    const entry = await page.getByTestId('timeline-entry').first().boundingBox();
+    expect((entry?.x ?? 0) + (entry?.width ?? 0)).toBeLessThanOrEqual(390 - 4);
+
+    // 그리고 알약의 *위쪽 모서리*를 눌러도 시트가 바뀐다 — 좌표로 누른다.
+    await page.getByTestId('sheet-add').click();
+    await page.getByTestId('wizard-name-input').fill('플랜 B');
+    await page.getByTestId('wizard-mode-days').click();
+    await page.getByTestId('wizard-submit').click();
+    await expect(page.getByTestId('timeline-sheet-name')).toHaveText('플랜 B');
+
+    const pill = page.getByTestId('sheet-tab').first().locator('xpath=..');
+    const pillBox = await pill.boundingBox();
+    if (!pillBox) throw new Error('시트 알약을 찾지 못했어요');
+    await page.mouse.click(pillBox.x + pillBox.width / 2, pillBox.y + 3);
+    await expect(page.getByTestId('timeline-sheet-name')).toHaveText('일정 1');
+  });
 });
 
 test('데스크톱에는 접기 토글이 아예 없다', async ({ page }) => {

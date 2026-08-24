@@ -586,7 +586,9 @@ export default function TimelineView() {
         className={
           isDesktop
             ? 'flex shrink-0 items-center gap-3 px-4 pb-4 pt-6'
-            : 'flex shrink-0 items-center gap-2 px-4 pb-1 pt-2'
+            : // M19 — gap-2 → gap-1: 접힘 줄에서 시트 이름이 가져갈 수 있는
+              // 폭을 4px라도 더 남긴다. 오른쪽 액션 묶음은 이미 gap-1이다.
+              'flex shrink-0 items-center gap-1 px-4 pb-1 pt-2'
         }
       >
         {isDesktop ? (
@@ -620,9 +622,15 @@ export default function TimelineView() {
                 // 접혀 있어도 시트 전환은 두 탭 안이어야 한다: 이름을 누르면
                 // 탭 줄이 그대로 돌아온다.
                 aria-label={`${sheet.name} — 상단 메뉴 펼치기`}
-                className="flex h-11 min-w-0 items-center gap-1 rounded-full px-2 text-title text-ink transition-colors duration-[140ms] ease-quick hover:bg-sunken"
+                /* M19 — 이 줄의 폭 예산은 빠듯하다. 360px에서 오른쪽 액션 여섯
+                   개가 260px를 가져가고 남는 60px 안에 아이콘(16)+간격(4)+좌우
+                   패딩(16)이 먼저 앉으면 이름 몫은 24px, 즉 「본 일정」이 「본.」
+                   이 된다 — 접힘 줄이 답해야 할 단 하나의 질문에 답하지 못한다.
+                   그래서 달력 아이콘을 뺀다: 이 줄에서 이름 옆의 아이콘은 이름을
+                   설명하지 않고 자리만 먹었다. 아래 탭 바의 「일정」이 이미 어느
+                   화면인지 말하고 있다. */
+                className="flex h-11 min-w-0 items-center rounded-full px-1 text-title text-ink transition-colors duration-[140ms] ease-quick hover:bg-sunken"
               >
-                <Icon name="calendar" size={16} className="shrink-0 text-ink-faint" />
                 <span data-testid="timeline-sheet-name" className="min-w-0 truncate">
                   {sheet.name}
                 </span>
@@ -788,7 +796,10 @@ export default function TimelineView() {
                 aria-label="이전 일자"
                 disabled={safePage === 0}
                 onClick={() => setPageIndex((index) => Math.max(index - 1, 0))}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-muted transition-colors duration-[140ms] ease-quick hover:bg-sunken disabled:text-ink-faint/50 disabled:hover:bg-transparent"
+                // M19 — 일자를 넘기는 유일한 손잡이다. 32×32는 이 화면에서 가장
+                // 자주 눌리는 버튼치고 작았다: 줄 높이(38px 안쪽)가 허락하는
+                // 만큼 키우고, 폭은 손가락이 흔들리는 방향인 좌우로 44px 준다.
+                className="grid h-9 w-11 shrink-0 place-items-center rounded-full text-ink-muted transition-colors duration-[140ms] ease-quick hover:bg-sunken disabled:text-ink-faint/50 disabled:hover:bg-transparent"
               >
                 <Icon name="chevron-left" size={20} />
               </button>
@@ -842,7 +853,9 @@ export default function TimelineView() {
                     aria-label={`${dayTitle(currentDay, safePage)} 메뉴`}
                     aria-expanded={dayMenuOpen}
                     onClick={() => setDayMenuOpen((open) => !open)}
-                    className="grid h-8 w-8 place-items-center rounded-full text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink"
+                    // M19 — M9의 아이콘 버튼 표준(36px)까지. 옆의 ›와 4px밖에
+                    // 떨어져 있지 않아 44px까지 키우면 서로의 영역을 먹는다.
+                    className="grid h-9 w-9 place-items-center rounded-full text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink"
                   >
                     <Icon name="more" size={16} />
                   </button>
@@ -871,7 +884,7 @@ export default function TimelineView() {
                 aria-label="다음 일자"
                 disabled={safePage >= days.length - 1}
                 onClick={() => setPageIndex((index) => Math.min(index + 1, days.length - 1))}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-muted transition-colors duration-[140ms] ease-quick hover:bg-sunken disabled:text-ink-faint/50 disabled:hover:bg-transparent"
+                className="grid h-9 w-11 shrink-0 place-items-center rounded-full text-ink-muted transition-colors duration-[140ms] ease-quick hover:bg-sunken disabled:text-ink-faint/50 disabled:hover:bg-transparent"
               >
                 <Icon name="chevron-right" size={20} />
               </button>

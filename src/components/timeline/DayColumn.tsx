@@ -145,7 +145,10 @@ export default function DayColumn({
       data-testid="timeline-day"
       data-day-id={day.id}
       aria-label={dayTitle(day, index)}
-      className={`flex flex-col border-l border-line ${fullWidth ? 'min-w-0 flex-1' : 'shrink-0'}`}
+      // M19 — 폰에서는 이 칸 하나가 그리드 전부라, 엔트리 블록의 오른쪽 모서리가
+      // 화면 맨 끝 픽셀에 닿아 잘린 것처럼 보였다(위의 페이저 카드는 16px 안쪽에
+      // 있어 어긋나 보이기까지 했다). 8px만 비워 두면 블록이 제 모양으로 끝난다.
+      className={`flex flex-col border-l border-line ${fullWidth ? 'min-w-0 flex-1 pr-2' : 'shrink-0'}`}
       style={fullWidth ? undefined : { width: DAY_COLUMN_PX }}
     >
       {/* Below `lg` the pager above the grid says all of this, so the header

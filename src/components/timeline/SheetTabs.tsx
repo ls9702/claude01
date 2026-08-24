@@ -141,7 +141,14 @@ export default function SheetTabs({
                 data-empty={empty ? 'true' : 'false'}
                 onClick={() => onSelect(sheet.id)}
                 className={[
-                  'max-w-40 text-micro',
+                  // M19 — 알약은 44px인데 그 안의 버튼은 글자 높이(14px)뿐이라,
+                  // 실제로 시트를 바꾸는 자리는 알약 한가운데의 가느다란 띠
+                  // 하나였다. 손가락이 알약 위쪽을 스치면 아무 일도 일어나지
+                  // 않는다 — 알약이 곧 버튼이 되도록 세로를 채우고, 좌우
+                  // 패딩(알약 몫)까지 ::after로 되찾는다.
+                  'relative flex h-full max-w-40 items-center text-micro',
+                  "after:absolute after:inset-y-0 after:-left-3 after:content-['']",
+                  isActive ? 'after:right-0' : 'after:-right-3',
                   empty ? 'text-ink-faint' : isActive ? 'text-surface' : 'text-ink-muted',
                 ].join(' ')}
               >

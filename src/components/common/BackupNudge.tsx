@@ -87,7 +87,9 @@ export default function BackupNudge({
           title={message}
           className={
             banner
-              ? 'min-w-0 flex-1 truncate text-left hover:underline'
+              ? // M19 — 배너는 44px인데 그 안의 글자 버튼은 19px이었다. 높이를
+                // 채워 배너 어디를 눌러도 백업 시트가 열리게 한다.
+                'h-full min-w-0 flex-1 truncate text-left hover:underline'
               : 'min-w-0 truncate py-1 hover:underline'
           }
         >
@@ -108,7 +110,7 @@ export default function BackupNudge({
           data-testid="backup-nudge-dismiss"
           aria-label="백업 알림 숨기기"
           onClick={dismiss}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-warn/70 transition-colors duration-[140ms] ease-quick hover:bg-warn/10 hover:text-warn-ink"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-warn/70 transition-colors duration-[140ms] ease-quick hover:bg-warn/10 hover:text-warn-ink"
         >
           <Icon name="close" size={16} />
         </button>

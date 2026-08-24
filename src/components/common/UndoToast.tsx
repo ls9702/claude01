@@ -48,7 +48,9 @@ export default function UndoToast() {
             type="button"
             data-testid="undo-action"
             onClick={runUndo}
-            className="shrink-0 rounded-xs px-2 py-1 text-label font-semibold text-surface underline decoration-surface/40 underline-offset-4 hover:decoration-surface"
+            // M19 — 27px였다. 되돌리기는 5초 안에 눌러야 하는 버튼이라 작을수록
+            // 손해다: 글자 크기는 그대로 두고 위아래로 눌러 44px을 만든다.
+            className="-my-2 inline-flex min-h-11 shrink-0 items-center rounded-xs px-2 py-1 text-label font-semibold text-surface underline decoration-surface/40 underline-offset-4 hover:decoration-surface"
           >
             실행 취소
           </button>

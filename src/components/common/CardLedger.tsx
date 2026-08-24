@@ -287,7 +287,7 @@ export default function CardLedger({
                   data-testid="card-expense-remove"
                   aria-label="지출 삭제"
                   onClick={() => removeExpense(card.id, expense.id)}
-                  className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-danger-wash hover:text-danger"
+                  className="-m-1 grid h-9 w-9 shrink-0 place-items-center rounded-full p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-danger-wash hover:text-danger"
                 >
                   <Icon name="close" size={16} />
                 </button>
@@ -344,7 +344,7 @@ export default function CardLedger({
                     data-testid="card-comment-remove"
                     aria-label="코멘트 삭제"
                     onClick={() => removeComment(card.id, entry.id)}
-                    className="-m-1 grid h-8 w-8 shrink-0 place-items-center rounded-full p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-danger-wash hover:text-danger"
+                    className="-m-1 grid h-9 w-9 shrink-0 place-items-center rounded-full p-1 text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-danger-wash hover:text-danger"
                   >
                     <Icon name="close" size={16} />
                   </button>

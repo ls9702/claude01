@@ -176,8 +176,16 @@ export const POPOVER_CLASS =
   'absolute z-40 mt-1 min-w-36 overflow-hidden rounded-lg border border-line ' +
   'bg-surface py-1 shadow-float';
 
+/**
+ * 팝오버 한 줄. `min-h-11`은 장식이 아니다 (M19).
+ *
+ * 35px이던 시절 이 줄들은 M9가 모든 버튼에 요구한 44px 아래였다. 시트 메뉴의
+ * 「시트 삭제」처럼 되돌리기 어려운 항목이 이 줄을 쓰는데, 줄이 얇으면 노려서
+ * 누르기도 어렵고 옆줄을 잘못 누르기도 쉽다.
+ */
 export const POPOVER_ROW_CLASS =
-  'flex w-full items-center gap-2 px-3 py-2 text-left text-label text-ink hover:bg-sunken';
+  'flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-label text-ink hover:bg-sunken';
 
 export const POPOVER_ROW_DANGER_CLASS =
-  'flex w-full items-center gap-2 px-3 py-2 text-left text-label text-danger hover:bg-danger-wash';
+  'flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-label text-danger ' +
+  'hover:bg-danger-wash';
