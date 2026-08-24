@@ -43,6 +43,8 @@ interface CardEditSheetProps extends LocalMoney {
   columnName: string;
   /** Trip currency, used by the 지출 기록 section. Defaults to `KRW`. */
   currency?: string;
+  /** The trip's 목적지 (M12) — where 지도에서 선택 opens for an unplaced card. */
+  tripDestination?: GeoPoint;
   /** Timeline entries this card already has; shown next to 시간표에 추가. */
   scheduledCount?: number;
   onSubmit: (values: CardFormValues) => void;
@@ -67,6 +69,7 @@ export default function CardEditSheet({
   card,
   columnName,
   currency = 'KRW',
+  tripDestination,
   localCurrency,
   fxRate,
   scheduledCount = 0,
@@ -394,6 +397,7 @@ export default function CardEditSheet({
       {picker === 'pin' ? (
         <PinPicker
           initial={location}
+          fallback={tripDestination}
           onPick={(point) => {
             setLocation(point);
             setPicker(null);

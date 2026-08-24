@@ -3,10 +3,11 @@ import { format } from 'date-fns';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { useUiStore } from '../../stores/uiStore';
 import { deleteWithUndo } from '../../stores/undoDelete';
-import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { useWorkspaceStore, type TripPatch } from '../../stores/workspaceStore';
 import type { Id, Trip } from '../../types/models';
 import { todayIso } from '../../timeline/today';
 import { diffDaysIso, formatShortDate, isIsoDate } from '../../utils/flights';
+import { formatLatLng, shortPlace } from '../../utils/geo';
 import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
@@ -109,10 +110,14 @@ export default function TripListView() {
     } else {
       const id = addTrip(values.title, values.currency);
       // `addTrip` only knows the two required fields; the 현지 통화 pair (M7b)
-      // is optional, so it arrives as a patch right after.
+      // and the 목적지 (M12) are optional, so they arrive as a patch right after.
+      const extras: TripPatch = {};
       if (values.localCurrency && values.fxRate) {
-        updateTrip(id, { localCurrency: values.localCurrency, fxRate: values.fxRate });
+        extras.localCurrency = values.localCurrency;
+        extras.fxRate = values.fxRate;
       }
+      if (values.destination) extras.destination = values.destination;
+      if (Object.keys(extras).length > 0) updateTrip(id, extras);
       setActiveTrip(id);
     }
     setDialog(null);
@@ -209,6 +214,16 @@ export default function TripListView() {
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {trips.map((trip) => {
             const count = counts[trip.id] ?? { columns: 0, cards: 0 };
+            // 언제 · 어디 — one third-rank line, joined by interpuncts, never a
+            // second row of its own (M9 §4.1-3).
+            const where = trip.destination
+              ? `📍 ${shortPlace(
+                  trip.destination.address ??
+                    formatLatLng(trip.destination.lat, trip.destination.lng),
+                )}`
+              : '';
+            const secondary =
+              [periods[trip.id] ?? trip.currency, where].filter(Boolean).join(' · ');
             return (
               // `min-w-0`: a grid item's automatic minimum size is its content,
               // so without this the `truncate` on the title below never gets to
@@ -226,8 +241,12 @@ export default function TripListView() {
                   className="w-full rounded-lg border border-line bg-surface px-4 py-4 pr-28 text-left shadow-raise transition-colors duration-[140ms] ease-quick hover:border-line-strong"
                 >
                   <h2 className="truncate text-title text-ink">{trip.title}</h2>
-                  <p data-testid="trip-period" className="mt-1 text-label text-ink-muted">
-                    {periods[trip.id] ?? trip.currency}
+                  <p
+                    data-testid="trip-period"
+                    data-destination={Boolean(trip.destination)}
+                    className="mt-1 truncate text-label text-ink-muted"
+                  >
+                    {secondary}
                   </p>
                   {/* Third rank, joined by interpuncts — three grey pills were
                       three objects competing with the title (M9 §4.1-3). */}

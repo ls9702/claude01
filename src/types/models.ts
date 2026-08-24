@@ -34,6 +34,19 @@ export interface Trip {
    * rate later never rewrites a receipt that was already recorded.
    */
   fxRate?: number;
+  /**
+   * Where this trip happens — "일본 오사카" (M12).
+   *
+   * Purely a *view* hint: the 지도 tab opens over this point when the trip has
+   * no located card yet, and the pin picker starts here instead of over Seoul.
+   * Nothing is computed from it, so a stale destination costs a pan, not data.
+   *
+   * Optional and additive — a trip saved before M12 simply has no field and
+   * `schemaVersion` stays 1. The LWW caveat that {@link Card.expenses} carries
+   * does not apply: this is one scalar the trip owns, not a list two devices
+   * can append to, so "the newest edit wins" is exactly the wanted behaviour.
+   */
+  destination?: GeoPoint;
   /** Ordered {@link BoardColumn} ids for the 보드 tab. */
   columnOrder: Id[];
   /** Ordered {@link Sheet} ids for the 일정 tab. */

@@ -39,9 +39,12 @@ export type { SheetFlightOpts } from '../utils/flights';
 
 /**
  * Fields of a {@link Trip} that callers may change. Passing `undefined` for
- * `localCurrency` / `fxRate` clears the 현지 통화 pair (M7b).
+ * `localCurrency` / `fxRate` clears the 현지 통화 pair (M7b), and `undefined`
+ * for `destination` takes the trip off the map's default view (M12).
  */
-export type TripPatch = Partial<Pick<Trip, 'title' | 'currency' | 'localCurrency' | 'fxRate'>>;
+export type TripPatch = Partial<
+  Pick<Trip, 'title' | 'currency' | 'localCurrency' | 'fxRate' | 'destination'>
+>;
 
 /** Fields of a {@link BoardColumn} that callers may change. */
 export type ColumnPatch = Partial<Pick<BoardColumn, 'name' | 'color' | 'icon'>>;

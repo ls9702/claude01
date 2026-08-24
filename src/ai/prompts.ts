@@ -18,7 +18,7 @@
  *    it ours first only teaches it to agree.
  */
 
-import type { Id, Workspace } from '../types/models';
+import type { GeoPoint, Id, Workspace } from '../types/models';
 import { dayTitle } from '../timeline/dayLabel';
 import { dayGaps } from '../timeline/gap';
 import { byStart, formatDistanceKm } from '../timeline/route';
@@ -54,6 +54,18 @@ export function truncate(text: string, max: number = MAX_PROMPT_CHARS): string {
 /** Joins non-empty lines and applies the global cap. */
 const assemble = (lines: string[]): string =>
   truncate(lines.filter((line) => line !== '').join('\n'));
+
+/**
+ * `여행지: 오사카시, 오사카부, 일본` — or `''` when the trip has no 목적지 (M12).
+ *
+ * The **full** address, not {@link shortPlace}'s head: the chip on screen has
+ * 4mm to work with and the model has none of that problem, and "오사카시" alone
+ * would drop the one word that says which country it is in.
+ */
+function destinationLine(trip: { destination?: GeoPoint } | undefined): string {
+  const address = trip?.destination?.address?.trim();
+  return address ? `여행지: ${address}` : '';
+}
 
 /* ------------------------------------------------------------------ *
  * 추천 — 보드에 넣을 아이디어
@@ -146,6 +158,9 @@ export function buildSuggestPrompt(
 
   return assemble([
     `여행 이름: ${trip?.title.trim() || '(이름 없음)'}`,
+    // 「3월 오사카」 alone leaves the model guessing which 오사카; the 목적지
+    // (M12) is the one fact that pins a suggestion to a real place.
+    destinationLine(trip),
     `보드의 칸: ${columnLine}`,
     titles.length
       ? `이미 보드에 있는 카드(${titles.length}개, 중복 금지): ${titles.join(', ')}`
@@ -311,6 +326,9 @@ export function buildAskPrompt(
 
   if (trip && workspace) {
     lines.push(`지금 계획 중인 여행: ${trip.title.trim() || '(이름 없음)'}`);
+    // 「여기」 has to mean somewhere — the 목적지 (M12) is what makes it.
+    const where = destinationLine(trip);
+    if (where) lines.push(where);
     const titles: string[] = [];
     for (const columnId of trip.columnOrder) {
       const column = workspace.columns[columnId];

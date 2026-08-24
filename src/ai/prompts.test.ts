@@ -135,6 +135,17 @@ describe('buildSuggestPrompt', () => {
     expect(prompt).toContain('5~8개');
   });
 
+  it('names the 목적지 in full when the trip has one (M12)', () => {
+    const ws = scaffold();
+    ws.trips.t1.destination = { lat: 34.69, lng: 135.5, address: '오사카시, 오사카부, 일본' };
+
+    const prompt = buildSuggestPrompt(ws, 't1', '');
+    expect(prompt).toContain('여행지: 오사카시, 오사카부, 일본');
+
+    // No destination → no line at all, not an empty one.
+    expect(buildSuggestPrompt(scaffold(), 't1', '')).not.toContain('여행지:');
+  });
+
   it('says the board is empty rather than printing an empty list', () => {
     const prompt = buildSuggestPrompt(scaffold(), 't1', '');
     expect(prompt).toContain('보드가 아직 비어 있어요');
@@ -332,6 +343,16 @@ describe('buildAskPrompt', () => {
     expect(prompt).toContain('지금 계획 중인 여행: 오사카');
     expect(prompt).toContain('유니버설, 이치란');
     expect(prompt).toContain('질문: 비 오면 어디 가요?');
+  });
+
+  it('attaches the 목적지 so 「여기」 means somewhere (M12)', () => {
+    const ws = scaffold();
+    ws.trips.t1.destination = { lat: 34.69, lng: 135.5, address: '오사카시, 오사카부, 일본' };
+
+    const prompt = buildAskPrompt('환전은 어디서 해요?', ws, 't1');
+    expect(prompt).toContain('여행지: 오사카시, 오사카부, 일본');
+
+    expect(buildAskPrompt('환전은 어디서 해요?', scaffold(), 't1')).not.toContain('여행지:');
   });
 
   it('shows at most ten titles', () => {

@@ -285,6 +285,27 @@ describe('updateCard / updateColumn / updateTrip', () => {
     store().updateTrip(tripId, { title: '여행 2' });
     expect(ws().trips[tripId].title).toBe('여행 2');
   });
+
+  it('sets and clears a trip 목적지 (M12)', () => {
+    const tripId = store().addTrip('오사카');
+    expect(ws().trips[tripId].destination).toBeUndefined();
+
+    store().updateTrip(tripId, {
+      destination: { lat: 34.69, lng: 135.5, address: '오사카시, 오사카부, 일본' },
+    });
+    expect(ws().trips[tripId].destination).toEqual({
+      lat: 34.69,
+      lng: 135.5,
+      address: '오사카시, 오사카부, 일본',
+    });
+
+    // A destination is not part of the trip's identity — renaming keeps it.
+    store().updateTrip(tripId, { title: '오사카 3박' });
+    expect(ws().trips[tripId].destination?.lat).toBe(34.69);
+
+    store().updateTrip(tripId, { destination: undefined });
+    expect(ws().trips[tripId].destination).toBeUndefined();
+  });
 });
 
 /* ------------------------------------------------------------------ *

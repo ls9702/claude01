@@ -26,6 +26,16 @@ const NOMINATIM_FIXTURE = [
   },
 ];
 
+/** 「오사카」 → one hit in the middle of the city (M12). */
+const OSAKA_FIXTURE = [
+  {
+    place_id: 9,
+    lat: '34.69',
+    lon: '135.50',
+    display_name: '오사카시, 오사카부, 일본',
+  },
+];
+
 /** A transparent 1×1 png — enough for Leaflet to count as a loaded tile. */
 const TILE_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -49,6 +59,39 @@ async function stubNetwork(page: Page, searchBody: unknown = NOMINATIM_FIXTURE):
   await page.route(/tile\.openstreetmap\.org/, (route) =>
     route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }),
   );
+}
+
+/**
+ * Answers 오사카 with the city and every other query with the 시부야 pair.
+ *
+ * One M12 test has to set a 목적지 *and* then place a card 400km away from it,
+ * so a single fixture for the whole run cannot serve both halves.
+ */
+async function stubNetworkByQuery(page: Page): Promise<void> {
+  await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+    const query = new URL(route.request().url()).searchParams.get('q') ?? '';
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(query.includes('오사카') ? OSAKA_FIXTURE : NOMINATIM_FIXTURE),
+    });
+  });
+  await page.route(/tile\.openstreetmap\.org/, (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }),
+  );
+}
+
+/**
+ * The map's settled center, rounded to one decimal (~11km).
+ *
+ * Coarse on purpose: the test cares that the view sits over 오사카 rather than
+ * over 시부야, not which metre Leaflet's pixel maths landed on.
+ */
+async function mapCenter(page: Page): Promise<string> {
+  const root = page.getByTestId('map-root');
+  const lat = Number(await root.getAttribute('data-center-lat'));
+  const lng = Number(await root.getAttribute('data-center-lng'));
+  return `${lat.toFixed(1)},${lng.toFixed(1)}`;
 }
 
 /** Creates a trip from the 여행 tab and lands on its board. */
@@ -371,6 +414,98 @@ test('일자를 고르면 그날의 동선이 화살표로 그려진다', async 
   await page.getByTestId('map-route-all').click();
   await expect(page.getByTestId('route-stop')).toHaveCount(0);
   await expect(page.getByTestId('route-leg')).toHaveCount(0);
+});
+
+test('여행에 목적지를 정하면 지도가 그 근처에서 열린다', async ({ page }) => {
+  await stubNetworkByQuery(page);
+  await page.goto('/');
+
+  // 여행을 만들면서 목적지를 고른다.
+  await page.getByTestId('add-trip').click();
+  await page.getByTestId('trip-title-input').fill('가을 여행');
+  await expect(page.getByTestId('trip-destination')).toHaveAttribute('data-has', 'false');
+  await expect(page.getByTestId('trip-destination')).toHaveText('없음');
+  await expect(page.getByTestId('trip-destination-clear')).toHaveCount(0);
+
+  await page.getByTestId('trip-destination-search').click();
+  await expect(page.getByTestId('place-search')).toBeVisible();
+  await page.getByTestId('place-search-input').fill('일본 오사카');
+  await page.getByTestId('place-search-submit').click();
+  await expect(page.getByTestId('place-search-result')).toHaveCount(1);
+  await page.getByTestId('place-search-result').first().click();
+  await expect(page.getByTestId('place-search')).toHaveCount(0);
+
+  const destination = page.getByTestId('trip-destination');
+  await expect(destination).toHaveAttribute('data-has', 'true');
+  await expect(destination).toHaveAttribute('data-lat', '34.69');
+  await expect(destination).toHaveAttribute('data-lng', '135.5');
+  // 칩은 첫 쉼표 앞만 보여준다.
+  await expect(destination).toHaveText('오사카시');
+
+  await page.getByTestId('trip-submit').click();
+  await expect(page.getByTestId('trip-form')).toHaveCount(0);
+
+  // 여행 카드의 둘째 줄이 목적지를 함께 말한다.
+  const period = page.getByTestId('trip-card').filter({ hasText: '가을 여행' }).getByTestId('trip-period');
+  await expect(period).toHaveAttribute('data-destination', 'true');
+  await expect(period).toContainText('📍 오사카시');
+
+  await page.getByTestId('trip-card').filter({ hasText: '가을 여행' }).getByTestId('trip-open').click();
+  await expect(page).toHaveURL(/#\/board$/);
+
+  // 핀이 하나도 없어도 지도는 오사카 위에서 열린다 (세계 지도가 아니라).
+  await page.getByTestId('tab-map').click();
+  await expectLiveMap(page);
+  await expect(page.getByTestId('map-empty')).toBeVisible();
+  await expect.poll(() => mapCenter(page)).toBe('34.7,135.5');
+
+  // 핀을 찍을 때도 목적지에서 시작한다.
+  await page.getByTestId('tab-board').click();
+  await addCard(page, 4, '시부야 스크램블');
+  await openCard(page, '시부야 스크램블');
+  await page.getByTestId('card-location-pin').click();
+  await expect(page.getByTestId('pin-picker-map')).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByTestId('pin-picker-center')).toContainText('34.69');
+  await page.getByTestId('pin-picker-cancel').click();
+
+  // 위치가 생기면 핀이 이긴다 — 지도는 시부야로 옮겨간다.
+  await pickFirstSearchResult(page);
+  await page.getByTestId('card-submit').click();
+  await expect(page.getByTestId('card-form')).toHaveCount(0);
+
+  await page.getByTestId('tab-map').click();
+  await expectLiveMap(page);
+  await expect(page.getByTestId('map-marker')).toHaveCount(1);
+  await expect.poll(() => mapCenter(page)).toBe('35.7,139.7');
+});
+
+test('목적지를 지우면 여행 카드에서도 사라진다', async ({ page }) => {
+  await stubNetworkByQuery(page);
+  await page.goto('/');
+
+  await page.getByTestId('add-trip').click();
+  await page.getByTestId('trip-title-input').fill('오사카 3박');
+  await page.getByTestId('trip-destination-search').click();
+  // 검색창은 여행 이름으로 미리 채워져 있다.
+  await expect(page.getByTestId('place-search-input')).toHaveValue('오사카 3박');
+  await page.getByTestId('place-search-submit').click();
+  await page.getByTestId('place-search-result').first().click();
+  await page.getByTestId('trip-submit').click();
+
+  const card = page.getByTestId('trip-card').filter({ hasText: '오사카 3박' });
+  await expect(card.getByTestId('trip-period')).toContainText('📍 오사카시');
+
+  // 수정 시트는 저장된 목적지를 그대로 들고 열린다.
+  await card.getByTestId('trip-edit').click();
+  await expect(page.getByTestId('trip-destination')).toHaveAttribute('data-lat', '34.69');
+  await page.getByTestId('trip-destination-clear').click();
+  await expect(page.getByTestId('trip-destination')).toHaveText('없음');
+  await expect(page.getByTestId('trip-destination-clear')).toHaveCount(0);
+  await page.getByTestId('trip-submit').click();
+  await expect(page.getByTestId('trip-form')).toHaveCount(0);
+
+  await expect(card.getByTestId('trip-period')).toHaveAttribute('data-destination', 'false');
+  await expect(card.getByTestId('trip-period')).not.toContainText('📍');
 });
 
 test('검색이 실패하면 한국어 안내가 뜬다', async ({ page }) => {

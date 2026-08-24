@@ -7,11 +7,18 @@ import Icon from '../common/Icon';
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../common/formStyles';
 import MapModal from './MapModal';
 import MapReady from './MapReady';
-import { OsmTiles, SEOUL_CENTER, SEOUL_ZOOM } from './mapBase';
+import { DESTINATION_ZOOM, OsmTiles, SEOUL_CENTER, SEOUL_ZOOM } from './mapBase';
 
 interface PinPickerProps {
   /** The card's current location, if any — where the picker opens. */
   initial?: GeoPoint;
+  /**
+   * Where to open when the card has none: the trip's 목적지 (M12).
+   *
+   * A trip to 오사카 used to start every hand-dropped pin over Seoul, which is
+   * a pan across a continent before the first useful gesture.
+   */
+  fallback?: GeoPoint;
   onPick: (point: GeoPoint) => void;
   onClose: () => void;
 }
@@ -52,8 +59,11 @@ function CenterProbe({ onMove }: CenterProbeProps) {
  * reverse-geocoded address — one more Nominatim round trip per pin is not worth
  * it, and "35.6595, 139.7005" is honest about what the user actually picked.
  */
-export default function PinPicker({ initial, onPick, onClose }: PinPickerProps) {
-  const start: [number, number] = initial ? [initial.lat, initial.lng] : SEOUL_CENTER;
+export default function PinPicker({ initial, fallback, onPick, onClose }: PinPickerProps) {
+  // 카드 위치 → 여행 목적지 → 서울.
+  const opening = initial ?? fallback;
+  const start: [number, number] = opening ? [opening.lat, opening.lng] : SEOUL_CENTER;
+  const startZoom = initial ? REFINE_ZOOM : fallback ? DESTINATION_ZOOM : SEOUL_ZOOM;
   const [center, setCenter] = useState<{ lat: number; lng: number }>({
     lat: start[0],
     lng: start[1],
@@ -111,7 +121,7 @@ export default function PinPicker({ initial, onPick, onClose }: PinPickerProps) 
       >
         <MapContainer
           center={start}
-          zoom={initial ? REFINE_ZOOM : SEOUL_ZOOM}
+          zoom={startZoom}
           scrollWheelZoom
           className="h-full w-full"
         >

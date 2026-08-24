@@ -376,6 +376,7 @@ export default function BoardView() {
       {dialog?.kind === 'card-create' ? (
         <CardEditSheet
           columnName={dialog.column.name}
+          tripDestination={trip.destination}
           onSubmit={submitCard}
           onClose={() => setDialog(null)}
         />
@@ -386,6 +387,7 @@ export default function BoardView() {
           card={dialog.card}
           columnName={columnNameOf(dialog.card.columnId)}
           currency={trip.currency}
+          tripDestination={trip.destination}
           localCurrency={trip.localCurrency}
           fxRate={trip.fxRate}
           scheduledCount={scheduledCounts[dialog.card.id] ?? 0}

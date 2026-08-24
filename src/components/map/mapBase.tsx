@@ -18,6 +18,15 @@ export const WORLD_ZOOM = 2;
 export const SEOUL_CENTER: [number, number] = [37.5665, 126.978];
 export const SEOUL_ZOOM = 12;
 
+/**
+ * Zoom used when a trip's 목적지 is all we have to go on (M12).
+ *
+ * A destination is a *city*, not an address — Nominatim answers "일본 오사카"
+ * with one point in the middle of it. 11 frames roughly that city and its
+ * neighbours; the 15 of {@link FIT_MAX_ZOOM} would frame one block of it.
+ */
+export const DESTINATION_ZOOM = 11;
+
 /** Never zoom past this when fitting a single marker. */
 export const FIT_MAX_ZOOM = 15;
 

@@ -1,9 +1,13 @@
 import { useState } from 'react';
-import type { Trip } from '../../types/models';
+import type { GeoPoint, Trip } from '../../types/models';
+import { formatLatLng, shortPlace } from '../../utils/geo';
 import { CURRENCIES } from '../../utils/money';
+import PlaceSearch from '../map/PlaceSearch';
 import Sheet from '../common/Sheet';
 import Icon from '../common/Icon';
 import {
+  CHIP_BUTTON,
+  CHIP_BUTTON_DANGER,
   INPUT_CLASS,
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
@@ -18,6 +22,8 @@ export interface TripFormValues {
   localCurrency?: string;
   /** 기준통화 per 1 local unit. Absent (or ≤ 0) clears the pair. */
   fxRate?: number;
+  /** 목적지 (선택) — absent takes the trip off the map's default view (M12). */
+  destination?: GeoPoint;
 }
 
 interface TripFormDialogProps {
@@ -35,6 +41,9 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
   const [rate, setRate] = useState(trip?.fxRate != null ? String(trip.fxRate) : '');
   // Opens itself for a trip that already uses the pair, stays folded otherwise.
   const [localOpen, setLocalOpen] = useState(Boolean(trip?.localCurrency));
+  const [destination, setDestination] = useState<GeoPoint | undefined>(trip?.destination);
+  /** True while 장소 검색 is stacked on top of this sheet. */
+  const [searching, setSearching] = useState(false);
 
   const canSubmit = title.trim().length > 0;
   const parsedRate = Number(rate.trim().replace(/,/g, ''));
@@ -55,6 +64,7 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
       currency,
       localCurrency: pairIsSet ? localCurrency : undefined,
       fxRate: pairIsSet ? usableRate : undefined,
+      destination,
     });
   };
 
@@ -100,6 +110,49 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
             placeholder="예) 3월 오사카"
             className={INPUT_CLASS}
           />
+        </div>
+
+        <div>
+          <span className={LABEL_CLASS}>목적지 (선택)</span>
+          <p
+            data-testid="trip-destination"
+            data-has={Boolean(destination)}
+            data-lat={destination?.lat}
+            data-lng={destination?.lng}
+            title={destination?.address ?? ''}
+            className={`mt-2 break-words rounded-md bg-sunken px-3 py-2 text-label font-normal ${
+              destination ? 'text-ink' : 'text-ink-faint'
+            }`}
+          >
+            {destination
+              ? shortPlace(destination.address ?? formatLatLng(destination.lat, destination.lng))
+              : '없음'}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="trip-destination-search"
+              onClick={() => setSearching(true)}
+              className={CHIP_BUTTON}
+            >
+              <Icon name="search" size={16} />
+              검색
+            </button>
+            {destination ? (
+              <button
+                type="button"
+                data-testid="trip-destination-clear"
+                onClick={() => setDestination(undefined)}
+                className={CHIP_BUTTON_DANGER}
+              >
+                <Icon name="close" size={16} />
+                제거
+              </button>
+            ) : null}
+          </div>
+          <p className="mt-2 text-micro font-normal text-ink-faint">
+            지도를 열면 이 근처를 먼저 보여줘요.
+          </p>
         </div>
 
         <div>
@@ -195,6 +248,15 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
         {/* Lets Enter submit without showing a second button. */}
         <button type="submit" className="hidden" aria-hidden="true" tabIndex={-1} />
       </form>
+
+      {/* The same modal the card sheet uses — a 목적지 is just a GeoPoint. */}
+      {searching ? (
+        <PlaceSearch
+          initialQuery={title.trim()}
+          onPick={setDestination}
+          onClose={() => setSearching(false)}
+        />
+      ) : null}
     </Sheet>
   );
 }

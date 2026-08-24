@@ -27,6 +27,7 @@ import {
 import MapReady from './MapReady';
 import RouteLayer, { type RouteDrawing } from './RouteLayer';
 import {
+  DESTINATION_ZOOM,
   FIT_MAX_ZOOM,
   FIT_PAD,
   OsmTiles,
@@ -100,8 +101,18 @@ interface FitPinsProps {
   ready: boolean;
 }
 
-/** Frames every marker once per trip; falls back to a world view. */
-function FitPins({ points, fitKey, ready }: FitPinsProps) {
+interface FitViewProps extends FitPinsProps {
+  /**
+   * Where to sit when there is nothing to fit — the trip's 목적지 (M12).
+   *
+   * Pins always win: once a card is on the map the user is looking at their own
+   * plan, and a destination that framed it out would be a step backwards.
+   */
+  fallback?: { lat: number; lng: number };
+}
+
+/** Frames every marker once per trip; falls back to 목적지, then to the world. */
+function FitPins({ points, fallback, fitKey, ready }: FitViewProps) {
   const map = useMap();
   const fittedRef = useRef<string | null>(null);
 
@@ -110,12 +121,45 @@ function FitPins({ points, fitKey, ready }: FitPinsProps) {
     fittedRef.current = fitKey;
 
     if (points.length === 0) {
-      map.setView(WORLD_CENTER, WORLD_ZOOM, { animate: false });
+      if (fallback) map.setView([fallback.lat, fallback.lng], DESTINATION_ZOOM, { animate: false });
+      else map.setView(WORLD_CENTER, WORLD_ZOOM, { animate: false });
       return;
     }
     const bounds = latLngBounds(points.map((point) => [point.lat, point.lng]));
     map.fitBounds(bounds.pad(FIT_PAD), { animate: false, maxZoom: FIT_MAX_ZOOM });
-  }, [map, points, fitKey, ready]);
+  }, [map, points, fallback, fitKey, ready]);
+
+  return null;
+}
+
+interface CenterReportProps {
+  onCenter: (lat: number, lng: number) => void;
+}
+
+/**
+ * Publishes the map's settled center so the panel can wear it as data attrs.
+ *
+ * `moveend`, not `move`: this feeds a React state update, and re-rendering
+ * every pin on every frame of a pan is a cost the screen would show. Every
+ * automatic re-frame in this file is `animate: false`, which still ends in one
+ * `moveend` — so the attributes are exact for the case that matters.
+ */
+function CenterReport({ onCenter }: CenterReportProps) {
+  const map = useMap();
+
+  useEffect(() => {
+    const emit = () => {
+      const center = map.getCenter();
+      onCenter(center.lat, center.lng);
+    };
+    emit();
+    map.on('moveend', emit);
+    map.on('zoomend', emit);
+    return () => {
+      map.off('moveend', emit);
+      map.off('zoomend', emit);
+    };
+  }, [map, onCenter]);
 
   return null;
 }
@@ -201,6 +245,8 @@ export default function MapView() {
 
   /** Leaflet's measured viewport; `0 × 0` until the container is laid out. */
   const [size, setSize] = useState({ x: 0, y: 0 });
+  /** The map's settled center, mirrored onto `map-root` for tests (M12). */
+  const [center, setCenter] = useState<{ lat: number; lng: number } | null>(null);
   /** Column ids toggled off in the legend. */
   const [mutedColumns, setMutedColumns] = useState<readonly Id[]>([]);
   /** 경로 controls: which sheet is being read, and what is drawn from it. */
@@ -220,6 +266,12 @@ export default function MapView() {
 
   const onSize = useCallback((next: { x: number; y: number }) => {
     setSize((current) => (current.x === next.x && current.y === next.y ? current : next));
+  }, []);
+
+  const onCenter = useCallback((lat: number, lng: number) => {
+    setCenter((current) =>
+      current && current.lat === lat && current.lng === lng ? current : { lat, lng },
+    );
   }, []);
 
   const trip = activeTripId ? workspace.trips[activeTripId] : undefined;
@@ -258,6 +310,23 @@ export default function MapView() {
   );
 
   const fitPoints = useMemo(() => pins.map((pin) => pin.card.location!), [pins]);
+
+  /**
+   * The trip's 목적지, when it is a usable point (M12).
+   *
+   * Only consulted while the trip has no located card — see {@link FitPins}.
+   */
+  const destination = useMemo(() => {
+    const point = trip?.destination;
+    if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return undefined;
+    return { lat: point.lat, lng: point.lng };
+  }, [trip?.destination]);
+
+  /**
+   * Re-frame on a new trip *and* on a newly-picked 목적지: the second is the
+   * whole point of setting one, and the trip id alone would never change.
+   */
+  const fitKey = `${trip?.id ?? ''}:${destination ? `${destination.lat},${destination.lng}` : ''}`;
 
   /* --- 경로 (M6) ---------------------------------------------------- */
 
@@ -550,6 +619,10 @@ export default function MapView() {
         data-ready={ready}
         data-map-width={size.x}
         data-map-height={size.y}
+        // Rounded to ~110m: enough to tell 오사카 from 서울 without a test
+        // failing on the metre Leaflet's pixel maths lands on.
+        data-center-lat={center ? center.lat.toFixed(3) : undefined}
+        data-center-lng={center ? center.lng.toFixed(3) : undefined}
         className="relative isolate mx-4 mb-4 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-sunken"
       >
         <MapContainer
@@ -564,7 +637,8 @@ export default function MapView() {
           <ZoomControl position="topright" />
           <OsmTiles />
           <MapReady onSize={onSize} />
-          <FitPins points={fitPoints} fitKey={trip.id} ready={ready} />
+          <CenterReport onCenter={onCenter} />
+          <FitPins points={fitPoints} fallback={destination} fitKey={fitKey} ready={ready} />
           <FitRoute points={routePoints} fitKey={routeKey} ready={ready} />
 
           {visiblePins.map(({ card, column }) => (
