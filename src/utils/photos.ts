@@ -232,6 +232,25 @@ export async function preparePhoto(file: Blob): Promise<PreparedPhoto> {
  * Rollup + formatting (pure)
  * ------------------------------------------------------------------ */
 
+/**
+ * Every photo id the workspace still refers to.
+ *
+ * Lives here, in a module that imports nothing, because three very different
+ * things need the same answer: the GC (delete blobs nobody mentions), the
+ * uploader (upload blobs somebody does), and the backup writer. Two of those
+ * are in `stores/`, one in `sync/`, and hanging it off either would put a
+ * needless edge — in one case a cycle — between them.
+ */
+export function referencedPhotoIds(workspace: {
+  cards: Record<string, { photos?: { id: string }[] }>;
+}): Set<string> {
+  const ids = new Set<string>();
+  for (const card of Object.values(workspace.cards)) {
+    for (const photo of card.photos ?? []) ids.add(photo.id);
+  }
+  return ids;
+}
+
 /** How much of the device's storage the workspace's photos claim. */
 export interface PhotoUsage {
   /** Number of photos referenced by a surviving card. */

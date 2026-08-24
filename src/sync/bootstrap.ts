@@ -11,9 +11,22 @@
  * the fetch 404s and nothing changes there.
  *
  * The user's own choices always win over the file:
- *  - sync already configured on this device        → file's sync ignored
+ *  - sync configured **by hand** on this device    → file's sync ignored
  *  - user pressed 해제 (opt-out marker)             → file's sync never reapplies
  *  - AI toggle ever touched on this device         → file's aiEnabled ignored
+ *
+ * The one thing the file *keeps* control of is the address it handed out in
+ * the first place (M20): a device that was configured by the file follows the
+ * file when the file moves. See {@link decideBootstrapSync} for why that is
+ * worth the extra rule.
+ *
+ * A follow also re-uploads photos, as a side effect worth knowing about: the
+ * uploader's "already sent" set in `sync/photoSync` is keyed by server
+ * address, so a new address starts with an empty set and every referenced
+ * photo is PUT again. If the move was a rename in front of the same disk the
+ * files are already there and each PUT is an idempotent 200 — a few hundred KB
+ * of wasted upload, once, in exchange for not needing a way to ask a server
+ * what it already has.
  *
  * Deliberate trade-off, decided by the owner: the token in this file is
  * readable by anyone who can load the NAS page. Personal two-person
@@ -21,7 +34,8 @@
  */
 
 import { useAiStore, hasStoredAiSettings } from '../ai/aiSettings';
-import { isConfigured, normalizeBaseUrl, saveSettings } from './settings';
+import type { Millis } from '../types/models';
+import { isConfigured, loadSettings, normalizeBaseUrl, saveSettings } from './settings';
 import { restartSync } from './syncEngine';
 
 const APPLIED_KEY = 'trip-board/bootstrap';
@@ -69,13 +83,134 @@ export function parseBootstrapConfig(raw: unknown): BootstrapConfig | null {
   return out.sync || out.aiEnabled ? out : null;
 }
 
+/* ------------------------------------------------------------------ *
+ * The applied marker
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the bootstrap file last talked this device into.
+ *
+ * M14 wrote a bare timestamp here, which was enough to answer "did the file
+ * configure this device?" but not "which server did it point at?" — and that
+ * second question is the whole of M20's address follow-up. The value is now
+ * JSON; a legacy timestamp is still honoured as "applied, address unknown".
+ */
+export interface BootstrapApplied {
+  at: Millis;
+  /** The address that was applied, normalized. Absent in legacy markers. */
+  baseUrl?: string;
+}
+
+/**
+ * Reads the marker in either shape. `null` means the file never configured
+ * this device — which is also what a manual 저장 leaves behind, and the
+ * difference is load-bearing: a device the user set up by hand is never
+ * dragged somewhere else by the file.
+ */
+export function parseAppliedMarker(raw: string | null): BootstrapApplied | null {
+  if (raw == null || raw === '') return null;
+
+  // M14's format: `String(Date.now())`. Applied, but we cannot say to where.
+  const legacy = Number(raw);
+  if (Number.isFinite(legacy) && /^\d+$/.test(raw.trim())) return { at: legacy };
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const at = typeof record.at === 'number' && Number.isFinite(record.at) ? record.at : 0;
+    const baseUrl =
+      typeof record.baseUrl === 'string' && normalizeBaseUrl(record.baseUrl).length > 0
+        ? normalizeBaseUrl(record.baseUrl)
+        : undefined;
+    return baseUrl ? { at, baseUrl } : { at };
+  } catch {
+    // Unparseable but present. Something wrote it, so the device is not
+    // "untouched"; treat it as applied-with-unknown-address rather than
+    // silently promoting it to a manually-configured device.
+    return { at: 0 };
+  }
+}
+
+/** The marker for this device, or `null`. */
+export function readAppliedMarker(): BootstrapApplied | null {
+  try {
+    return parseAppliedMarker(storage()?.getItem(APPLIED_KEY) ?? null);
+  } catch {
+    return null;
+  }
+}
+
+/** Records that the file's `baseUrl` is what this device is now pointed at. */
+function writeAppliedMarker(baseUrl: string): void {
+  try {
+    storage()?.setItem(
+      APPLIED_KEY,
+      JSON.stringify({ at: Date.now(), baseUrl: normalizeBaseUrl(baseUrl) }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 /** True when this device's sync settings came from the bootstrap file. */
 export function isBootstrapApplied(): boolean {
-  try {
-    return storage()?.getItem(APPLIED_KEY) != null;
-  } catch {
-    return false;
-  }
+  return readAppliedMarker() !== null;
+}
+
+/* ------------------------------------------------------------------ *
+ * The follow rule
+ * ------------------------------------------------------------------ */
+
+/** What {@link applyBootstrapConfig} should do about the file's `sync` block. */
+export type BootstrapSyncAction =
+  /** Nothing configured here yet — take the file's settings. */
+  | 'apply'
+  /** Already configured *by the file*, and the file has since moved. */
+  | 'follow'
+  /** Leave this device alone. */
+  | 'skip';
+
+/** Everything the decision depends on, so the decision itself can be pure. */
+export interface BootstrapSyncInput {
+  /** `sync.baseUrl` from the file. */
+  fileBaseUrl: string;
+  /** Is sync configured on this device at all? */
+  configured: boolean;
+  /** Has the user pressed 해제? */
+  optedOut: boolean;
+  /** The applied marker, or `null` for a manually-configured device. */
+  applied: BootstrapApplied | null;
+  /** The address currently saved on this device. */
+  currentBaseUrl: string;
+}
+
+/**
+ * Should the file's server address win?
+ *
+ * The NAS address is the one setting that genuinely changes underneath people:
+ * a DDNS name is bought, a reverse proxy moves the app to a subpath, the port
+ * changes. Before M20 the second (non-technical) user's phone would simply
+ * stop syncing, with no way back short of typing a URL into a settings sheet
+ * they have never opened. So: **a device the file configured keeps following
+ * the file.** Nothing else does.
+ *
+ *  - no marker → the user typed this address in themselves. Never touched.
+ *  - opted out → 해제 means "not this server, not ever". Never touched.
+ *  - marker with an address → follow when the file names a different one.
+ *  - legacy marker (no address) → the marker cannot say what was applied, so
+ *    compare against what is actually saved instead. Same intent, one step
+ *    less certain, and it self-corrects: the follow writes a modern marker.
+ */
+export function decideBootstrapSync(input: BootstrapSyncInput): BootstrapSyncAction {
+  const target = normalizeBaseUrl(input.fileBaseUrl);
+  if (target.length === 0) return 'skip';
+  if (input.optedOut) return 'skip';
+  if (!input.configured) return 'apply';
+  if (!input.applied) return 'skip';
+
+  const reference = input.applied.baseUrl ?? normalizeBaseUrl(input.currentBaseUrl);
+  return target === reference ? 'skip' : 'follow';
 }
 
 /** Manual 저장 replaces the auto config — the note should disappear. */
@@ -128,15 +263,24 @@ export async function applyBootstrapConfig(): Promise<boolean> {
 
   let applied = false;
 
-  if (config.sync && !isConfigured() && !hasBootstrapOptOut()) {
-    saveSettings(config.sync);
-    try {
-      storage()?.setItem(APPLIED_KEY, String(Date.now()));
-    } catch {
-      /* ignore */
+  if (config.sync) {
+    const action = decideBootstrapSync({
+      fileBaseUrl: config.sync.baseUrl,
+      configured: isConfigured(),
+      optedOut: hasBootstrapOptOut(),
+      applied: readAppliedMarker(),
+      currentBaseUrl: loadSettings().baseUrl,
+    });
+
+    if (action !== 'skip') {
+      // `follow` and `apply` do exactly the same thing — the difference is
+      // only in what made them legal. Taking the whole `sync` block, token
+      // included: a moved server usually means a re-issued token too.
+      saveSettings(config.sync);
+      writeAppliedMarker(config.sync.baseUrl);
+      await restartSync();
+      applied = true;
     }
-    await restartSync();
-    applied = true;
   }
 
   // Only when the toggle has never been touched on this device — an explicit

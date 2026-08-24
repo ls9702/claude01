@@ -48,10 +48,16 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         navigateFallback: 'index.html',
-        // The sync and AI endpoints are APIs, not routes: never hand them the
-        // shell. `ai.php` is also never runtime-cached — an AI answer is a
-        // one-off, and a cached one would be a lie with a timestamp.
-        navigateFallbackDenylist: [/\/api\//, /data\.php/, /ai\.php/],
+        // The sync, AI and photo endpoints are APIs, not routes: never hand
+        // them the shell. `ai.php` is also never runtime-cached — an AI answer
+        // is a one-off, and a cached one would be a lie with a timestamp.
+        //
+        // `image.php` is not runtime-cached either, and that is not an
+        // oversight: its responses already carry `immutable, max-age=1y`, so
+        // the browser's own HTTP cache holds them for free. A workbox entry on
+        // top would be a second copy of every photo inside the service
+        // worker's storage — the one budget a phone actually runs out of.
+        navigateFallbackDenylist: [/\/api\//, /data\.php/, /ai\.php/, /image\.php/],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {

@@ -221,6 +221,8 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
 
   const usage = photoUsage(useWorkspaceStore((s) => s.workspace));
   const estimate = useStorageEstimate();
+  /** M20: photos ride to the NAS too, but only once there is a NAS. */
+  const photoSyncOn = isConfigured(stored);
 
   const aiEnabledToggle = useAiStore((s) => s.enabled);
   const aiAvailable = useAiStore((s) => s.available);
@@ -578,6 +580,15 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
               <span data-testid="photo-usage" data-bytes={usage.bytes} data-count={usage.count}>
                 {formatBytes(usage.bytes)} · {usage.count}장
               </span>
+              {/* Reads the *saved* address, not the typed one — same reason as
+                  `aiState` below: a half-typed URL must not change what this
+                  line claims about the server that is actually in use. */}
+              {photoSyncOn ? (
+                <span data-testid="photo-sync-note" className="text-ink-faint">
+                  {' '}
+                  · 서버 동기화 켜짐
+                </span>
+              ) : null}
             </Fact>
             {estimate ? (
               <Fact term="저장 공간">
@@ -587,6 +598,11 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
               </Fact>
             ) : null}
           </dl>
+          {photoSyncOn ? (
+            <p className="mt-2 text-micro font-normal text-ink-faint">
+              사진은 자동으로 서버에 보관돼 다른 기기에서 내려받아요.
+            </p>
+          ) : null}
           <div className="mt-4 flex gap-2">
             <button
               type="button"

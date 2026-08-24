@@ -42,7 +42,7 @@ File Station에서 `web` 공유 폴더 아래 `travel` 폴더 생성 → `trip-b
 web/travel/
 ├─ index.html, assets/, icons/, sw.js, manifest.webmanifest …
 └─ api/
-   ├─ data.php   ├─ ai.php
+   ├─ data.php   ├─ ai.php   ├─ image.php
    └─ config.php   ← 동기화 토큰이 이미 들어 있음
 ```
 
@@ -59,6 +59,7 @@ Web Station → **웹 서비스 포털**(또는 웹 서비스 → 생성) → **
 ## 6. 권한 + (선택) 데이터 위치 하드닝
 
 - `api/data/` 는 첫 저장 때 자동 생성됩니다. 실패하면 File Station에서 `web/travel/api` 폴더 속성 → 권한에 **http** 사용자 쓰기 권한 부여.
+- 카드 사진은 `api/data/photos/` 에 id 하나당 JPEG 한 장으로 쌓입니다(`image.php`가 첫 업로드 때 폴더를 만듭니다). 장당 500KB 안팎이니 공간만 넉넉하면 따로 설정할 건 없어요.
 - **선택(권장)**: 데이터를 웹 루트 밖으로 — File Station에서 `web` 밖에 폴더를 만들기 어렵다면 최소한 Web Station의 **기본 서버(default server)** 문서 루트가 `web` 전체를 서빙하지 않는지 확인하고, 가능하면 `config.php`의 `DATA_DIR`을 웹으로 서빙되지 않는 경로로 변경.
 
 ## 7. 동작 확인
@@ -66,6 +67,7 @@ Web Station → **웹 서비스 포털**(또는 웹 서비스 → 생성) → **
 브라우저에서:
 - `https://trip.863ad.co.kr` → 앱이 뜸 (자물쇠 아이콘 = 인증서 정상)
 - `https://trip.863ad.co.kr/api/data.php` → `{"error":"unauthorized"}` 가 뜨면 **정상** (토큰 없이 접근 차단 중)
+- `https://trip.863ad.co.kr/api/image.php?id=abcdef` → 마찬가지로 `{"error":"unauthorized"}` (사진도 토큰 없이는 못 봐요)
 
 ## 8. 앱 연결
 

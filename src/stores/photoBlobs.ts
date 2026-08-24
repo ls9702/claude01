@@ -43,6 +43,24 @@ const urlCache = new Map<Id, string>();
 const pending = new Map<Id, Promise<string | null>>();
 
 /**
+ * Where to look when a photo's bytes are not on this device (M20).
+ *
+ * `null` until `sync/photoSync` installs itself, and `null` forever on a
+ * local-only install. This module deliberately does not import the sync side:
+ * it knows IndexedDB and object URLs, and teaching it about server addresses,
+ * tokens and HTTP would both muddy that and close a module cycle (the uploader
+ * reads and writes blobs through here).
+ */
+let remoteSource: ((id: Id) => Promise<ArrayBuffer | null>) | null = null;
+
+/** Installs the "not on this device — can you fetch it?" fallback. */
+export function setRemotePhotoSource(
+  source: ((id: Id) => Promise<ArrayBuffer | null>) | null,
+): void {
+  remoteSource = source;
+}
+
+/**
  * Writes one photo's bytes.
  *
  * Reports the outcome to `persistHealth` — the 저장 실패 banner is about
@@ -108,6 +126,14 @@ export const cachedPhotoUrl = (id: Id): string | null => urlCache.get(id) ?? nul
  * Loads `id` and returns a session-cached object URL, or `null` when the blob
  * is missing — a backup restored long after its photos were swept, say. The
  * caller renders a placeholder tile for `null`; it is not an error state.
+ *
+ * A local miss is not the end of the search when sync is on (M20): the other
+ * phone took this photo, so the bytes may well be on the NAS. They are fetched
+ * once and **written into the local store on the way past**, which is what
+ * turns "the other phone's photo" into one of ours — the next reload renders
+ * it with no network at all. `fetchPhotoBlob` remembers a definitive 404 for
+ * the session, so a photo that is genuinely gone costs one request, not one
+ * per render.
  */
 export function loadPhotoUrl(id: Id): Promise<string | null> {
   const cached = urlCache.get(id);
@@ -117,7 +143,23 @@ export function loadPhotoUrl(id: Id): Promise<string | null> {
   if (inFlight) return inFlight;
 
   const promise = (async (): Promise<string | null> => {
-    const buf = await getPhotoBlob(id);
+    let buf = await getPhotoBlob(id);
+
+    if (!buf && remoteSource) {
+      const downloaded = await remoteSource(id);
+      if (downloaded) {
+        buf = downloaded;
+        // Failing to keep it is survivable — the render below still works, and
+        // `putPhotoBlob` has already raised the 저장 실패 banner if that is
+        // what happened.
+        try {
+          await putPhotoBlob(id, downloaded);
+        } catch {
+          /* already reported */
+        }
+      }
+    }
+
     if (!buf) return null;
     // Reconstructed here rather than stored — see the module doc.
     const url = URL.createObjectURL(new Blob([buf], { type: 'image/jpeg' }));

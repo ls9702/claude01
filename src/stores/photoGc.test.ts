@@ -20,10 +20,27 @@ vi.mock('./persistMiddleware', () => {
 
 const blobs = new Set<Id>();
 
+/**
+ * The GC reaches the server through `sync/photoSync` (M20), which installs a
+ * download fallback into the blob store at module scope — so the stub needs
+ * `setRemotePhotoSource` and `getPhotoBlob` even though the sweep itself never
+ * calls them.
+ */
 vi.mock('./photoBlobs', () => ({
   listPhotoBlobIds: async () => [...blobs],
   deletePhotoBlobs: async (ids: readonly Id[]) => {
     for (const id of ids) blobs.delete(id);
+  },
+  getPhotoBlob: async () => undefined,
+  setRemotePhotoSource: () => {},
+}));
+
+/** Ids the sweep asked the server to forget, in order. */
+const serverDeletes: Id[] = [];
+
+vi.mock('../sync/photoSync', () => ({
+  deleteServerPhotos: async (ids: readonly Id[]) => {
+    serverDeletes.push(...ids);
   },
 }));
 
@@ -52,6 +69,7 @@ function wsWith(photosByCard: Record<Id, Id[]>): Workspace {
 
 beforeEach(() => {
   blobs.clear();
+  serverDeletes.length = 0;
   resetPhotoGc();
   useWorkspaceStore.setState({ workspace: emptyWorkspace(), dirty: false });
 });
@@ -168,5 +186,28 @@ describe('sweepPhotoBlobs', () => {
     expect(await sweepPhotoBlobs(T(0))).toEqual([]);
     expect(await sweepPhotoBlobs(T(10_000))).toEqual([]);
     expect([...blobs].sort()).toEqual(['p1', 'p2']);
+    expect(serverDeletes).toEqual([]);
+  });
+
+  // M20 — the workspace is the shared truth, so a swept id is gone everywhere.
+  it('takes the swept ids off the server too, and only the swept ones', async () => {
+    blobs.add('kept');
+    blobs.add('orphan');
+    useWorkspaceStore.setState({ workspace: wsWith({ k1: ['kept'] }) });
+
+    await sweepPhotoBlobs(T(0));
+    expect(serverDeletes).toEqual([]);
+
+    await sweepPhotoBlobs(T(0) + PHOTO_GC_GRACE_MS);
+    expect(serverDeletes).toEqual(['orphan']);
+  });
+
+  it('does not touch the server for a photo an undo rescued', async () => {
+    blobs.add('p1');
+    await sweepPhotoBlobs(T(0));
+    useWorkspaceStore.setState({ workspace: wsWith({ k1: ['p1'] }) });
+
+    await sweepPhotoBlobs(T(0) + PHOTO_GC_GRACE_MS);
+    expect(serverDeletes).toEqual([]);
   });
 });

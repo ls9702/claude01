@@ -26,6 +26,10 @@ return [
      * Where the workspace and its rotating backups live. Keep it OUTSIDE the
      * web root if you can (e.g. '/volume1/trip-board-data') — then even a
      * misconfigured server cannot hand `data.json` out over plain HTTP.
+     *
+     * `image.php` also stores card photos here, one JPEG per id under a
+     * `photos/` subfolder it creates on the first upload. No extra setting —
+     * but budget the space: ~500KB per photo, 12 photos per card.
      */
     'DATA_DIR' => __DIR__ . '/data',
 

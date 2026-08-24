@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 
 /**
- * In-memory stand-in for `server/data.php` **and** `server/ai.php`, used by the
- * sync and AI e2e specs.
+ * In-memory stand-in for `server/data.php`, `server/ai.php` **and**
+ * `server/image.php`, used by the sync, AI and photo-sync e2e specs.
  *
  * It implements the *same* contracts, byte for byte, so the browser code under
  * test cannot tell the difference:
@@ -13,6 +13,9 @@ import type { AddressInfo } from 'node:net';
  *              PUT           → 200 {version, updatedAt} | 409 {version, …, data}
  *   /ai.php    GET  ?ping=1  → 200 {ok:true, ai:true|false}
  *              POST          → 200 <a canned Gemini generateContent body>
+ *   /image.php GET  ?id=     → 200 image/jpeg <bytes> | 404 {error}
+ *              PUT  ?id=     → 200 {ok:true}          | 413 {error}
+ *              DELETE ?id=   → 200 {ok:true}   (idempotent, as in the original)
  *   any        → 401 without a matching `X-Sync-Token`
  *
  * The AI half answers with **canned Gemini-shaped bodies**, not with Gemini:
@@ -62,7 +65,11 @@ export interface MockApi {
   aiCalls: () => MockAiCall[];
   /** What `GET /ai.php?ping=1` reports. Flip it to test the no-key path. */
   setAiAvailable: (available: boolean) => void;
-  /** Wipes the stored workspace and counters. */
+  /** How many photos `image.php` is currently holding. */
+  photoCount: () => number;
+  /** Is this photo id stored? */
+  hasPhoto: (id: string) => boolean;
+  /** Wipes the stored workspace, the photos and the counters. */
   reset: () => void;
   stop: () => Promise<void>;
 }
@@ -120,8 +127,14 @@ const CANNED_ANSWER =
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
-/** Reads a request body with the same 10 MB ceiling `data.php` enforces. */
-function readBody(req: IncomingMessage): Promise<string | null> {
+/** `image.php`'s own, much smaller ceiling. */
+const MAX_PHOTO_BYTES = 600 * 1024;
+
+/** Ids `image.php` will accept. Same pattern, so a bad id fails the same way. */
+const ID_PATTERN = /^[A-Za-z0-9_-]{6,64}$/;
+
+/** Reads a raw request body up to `limit`, or `null` when it overflows. */
+function readRaw(req: IncomingMessage, limit: number): Promise<Buffer | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -129,7 +142,7 @@ function readBody(req: IncomingMessage): Promise<string | null> {
 
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > limit) {
         aborted = true;
         resolve(null);
         req.destroy();
@@ -138,10 +151,16 @@ function readBody(req: IncomingMessage): Promise<string | null> {
       chunks.push(chunk);
     });
     req.on('end', () => {
-      if (!aborted) resolve(Buffer.concat(chunks).toString('utf8'));
+      if (!aborted) resolve(Buffer.concat(chunks));
     });
     req.on('error', () => resolve(null));
   });
+}
+
+/** Reads a request body with the same 10 MB ceiling `data.php` enforces. */
+async function readBody(req: IncomingMessage): Promise<string | null> {
+  const raw = await readRaw(req, MAX_BODY_BYTES);
+  return raw === null ? null : raw.toString('utf8');
 }
 
 /** Starts the mock on an ephemeral port. */
@@ -150,15 +169,21 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
   let conflicts = 0;
   let aiAvailable = true;
   let aiCalls: MockAiCall[] = [];
+  /** `image.php`'s disk: photo id → the JPEG bytes. */
+  const photos = new Map<string, Buffer>();
+
+  const CORS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'X-Sync-Token, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
+  } as const;
 
   const send = (res: ServerResponse, status: number, payload: unknown): void => {
     const body = JSON.stringify(payload);
     res.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'X-Sync-Token, Content-Type',
-      'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
+      ...CORS,
       'Content-Length': Buffer.byteLength(body),
     });
     res.end(body);
@@ -172,14 +197,72 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       return;
     }
     const isAi = url.pathname.endsWith('/ai.php');
-    if (!isAi && !url.pathname.endsWith('/data.php')) {
+    const isImage = url.pathname.endsWith('/image.php');
+    if (!isAi && !isImage && !url.pathname.endsWith('/data.php')) {
       send(res, 404, { error: 'not_found' });
       return;
     }
-    // Auth first, for both endpoints — `ai.php` guards its ping too, so an
-    // unauthenticated scan cannot learn whether a key is configured.
+    // Auth first, for every endpoint — `ai.php` guards its ping too, so an
+    // unauthenticated scan cannot learn whether a key is configured, and
+    // `image.php` guards everything so nobody browses the trip's photos.
     if (req.headers['x-sync-token'] !== token) {
       send(res, 401, { error: 'unauthorized' });
+      return;
+    }
+
+    /* --- image.php ---------------------------------------------------- */
+    if (isImage) {
+      const id = url.searchParams.get('id') ?? '';
+      if (!ID_PATTERN.test(id)) {
+        send(res, 400, { error: 'bad_request' });
+        return;
+      }
+
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const bytes = photos.get(id);
+        if (!bytes) {
+          send(res, 404, { error: 'not_found' });
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          // The header that matters: the PHP original marks a photo immutable
+          // for a year, and the browser under test caches it accordingly.
+          'Cache-Control': 'private, max-age=31536000, immutable',
+          ...CORS,
+          'Content-Length': bytes.length,
+        });
+        res.end(req.method === 'HEAD' ? undefined : bytes);
+        return;
+      }
+
+      if (req.method === 'PUT') {
+        void readRaw(req, MAX_PHOTO_BYTES).then((body) => {
+          if (body === null) {
+            send(res, 413, { error: 'payload_too_large' });
+            return;
+          }
+          if (body.length === 0) {
+            send(res, 400, { error: 'bad_request' });
+            return;
+          }
+          // Idempotent overwrite, exactly like the atomic rename in the
+          // original: an id's bytes never change, so a retry is a no-op.
+          photos.set(id, body);
+          send(res, 200, { ok: true });
+        });
+        return;
+      }
+
+      if (req.method === 'DELETE') {
+        // 200 whether or not it was there — two devices sweeping the same
+        // tombstone must not turn the loser into an error.
+        photos.delete(id);
+        send(res, 200, { ok: true });
+        return;
+      }
+
+      send(res, 405, { error: 'method_not_allowed' });
       return;
     }
 
@@ -311,11 +394,14 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     setAiAvailable: (available: boolean) => {
       aiAvailable = available;
     },
+    photoCount: () => photos.size,
+    hasPhoto: (id: string) => photos.has(id),
     reset: () => {
       stored = null;
       conflicts = 0;
       aiCalls = [];
       aiAvailable = true;
+      photos.clear();
     },
     stop: () =>
       new Promise<void>((resolve) => {

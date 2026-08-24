@@ -243,7 +243,12 @@ test('사진 포함 백업으로 내보내고, 지운 여행을 사진까지 되
   if (await ask.isVisible().catch(() => false)) {
     await page.getByTestId('confirm-accept').click();
   }
-  await expect(page.getByTestId('sync-notice')).toContainText('가져왔어요 — 여행 1개');
+  // Decoding a photo-bearing backup and writing its blobs takes longer than
+  // the 5s default under a loaded full-suite run — the same 15s the thumbnail
+  // assertions in this file already allow for the same reason.
+  await expect(page.getByTestId('sync-notice')).toContainText('가져왔어요 — 여행 1개', {
+    timeout: 15_000,
+  });
   await page.getByTestId('sheet-close').click();
 
   // --- 사진까지 돌아왔다 -----------------------------------------------

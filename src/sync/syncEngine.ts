@@ -25,6 +25,7 @@ import { useSyncStore } from '../stores/syncStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { SyncError, fetchAll, push } from './api';
 import { merge, workspaceEquals } from './merge';
+import { uploadPendingPhotos } from './photoSync';
 import { isConfigured, loadSettings, type SyncSettings } from './settings';
 
 /** How long the workspace has to stay quiet before we push it. */
@@ -145,6 +146,28 @@ async function pullMerge(settings: SyncSettings): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ *
+ * Photos ride along
+ * ------------------------------------------------------------------ */
+
+/**
+ * Hands the photo uploader its cue (M20).
+ *
+ * Only after a round trip *succeeded*: the workspace on the server is what
+ * gives those ids meaning, and uploading bytes for cards the NAS has not heard
+ * of yet would be work done in the wrong order. And only fire-and-forget —
+ * photos are large and slow, the sync queue is not the place to wait for them,
+ * and a photo that does not make it this time is retried on the next cycle
+ * (which is at most a tab focus away).
+ *
+ * Deliberately *not* awaited inside `enqueue`: holding the queue open for a
+ * 400KB upload would delay the next edit's push behind it.
+ */
+function uploadPhotosAfterSync(): void {
+  if (sync().status !== 'idle') return;
+  void uploadPendingPhotos();
+}
+
+/* ------------------------------------------------------------------ *
  * Public operations
  * ------------------------------------------------------------------ */
 
@@ -166,6 +189,7 @@ export function syncNow(): Promise<void> {
     } catch (err) {
       reportFailure(err);
     }
+    uploadPhotosAfterSync();
   });
 }
 
@@ -186,6 +210,7 @@ function pushNow(): Promise<void> {
     } catch (err) {
       reportFailure(err);
     }
+    uploadPhotosAfterSync();
   });
 }
 
