@@ -1,5 +1,6 @@
 import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { TAB_IDS, TAB_LABELS, useUiStore, type TabId } from '../../stores/uiStore';
+import AiAskButton from '../ai/AiAskButton';
 import BackupNudge from '../common/BackupNudge';
 import Icon, { type IconName } from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
@@ -77,6 +78,7 @@ export default function TabBar() {
         {isDesktop ? (
           <div className="ml-auto flex items-center gap-2">
             <BackupNudge />
+            <AiAskButton />
             <SyncStatusChip />
           </div>
         ) : null}

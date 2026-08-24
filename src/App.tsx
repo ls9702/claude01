@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import AppShell from './components/layout/AppShell';
 import UpdateToast from './components/common/UpdateToast';
+import { refreshAiCapability } from './ai/aiClient';
 import { schedulePhotoGc } from './stores/photoGc';
 import { pruneActiveIds } from './stores/uiStore';
 import { useWorkspaceStore } from './stores/workspaceStore';
@@ -38,6 +39,10 @@ export default function App() {
     // candidates (blobs a crash left behind mid-add), and the sweeper books
     // its own follow-up to collect them once the grace period is up (M10).
     schedulePhotoGc();
+    // One ping, once, to find out whether the server behind the sync URL can do
+    // AI at all (M11). It never throws and never blocks: an unconfigured device
+    // — every GitHub Pages visitor — simply stays without AI buttons.
+    void refreshAiCapability();
     return initSyncEngine();
   }, [hydrated]);
 

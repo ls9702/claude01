@@ -16,11 +16,19 @@ import { deleteWithUndo } from '../../stores/undoDelete';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
 import type { BoardColumn, Card } from '../../types/models';
+import { useAiEnabled } from '../../ai/aiSettings';
+import AiAskButton from '../ai/AiAskButton';
+import AiSuggestSheet from '../ai/AiSuggestSheet';
 import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
-import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../common/formStyles';
+import {
+  BTN_SIZE_SM,
+  PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+  withBtnSize,
+} from '../common/formStyles';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
 import ScheduleSheet from '../timeline/ScheduleSheet';
 import AddColumnPanel from './AddColumnPanel';
@@ -107,6 +115,10 @@ export default function BoardView() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const isDesktop = useIsDesktop();
+
+  /** AI 추천 (M11). Hidden entirely unless all three conditions hold. */
+  const aiOn = useAiEnabled();
+  const [aiSuggestOpen, setAiSuggestOpen] = useState(false);
 
   /** The horizontal scroller, and which way it still has room to go. */
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -247,11 +259,22 @@ export default function BoardView() {
             {trip.title}
           </p>
         </div>
-        {isDesktop ? null : (
-          <span className="ml-auto">
-            <SyncStatusChip variant="dot" />
-          </span>
-        )}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {aiOn ? (
+            <button
+              type="button"
+              data-testid="ai-suggest-open"
+              onClick={() => setAiSuggestOpen(true)}
+              className={withBtnSize(SECONDARY_BUTTON_CLASS, BTN_SIZE_SM)}
+            >
+              <Icon name="sparkle" size={16} />
+              AI 추천
+            </button>
+          ) : null}
+          {/* Desktop wears both of these in the top bar instead. */}
+          {isDesktop ? null : <AiAskButton />}
+          {isDesktop ? null : <SyncStatusChip variant="dot" />}
+        </div>
       </header>
 
       {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
@@ -407,6 +430,10 @@ export default function BoardView() {
           onCancel={() => setDialog(null)}
           testId="column-delete-confirm"
         />
+      ) : null}
+
+      {aiSuggestOpen && aiOn ? (
+        <AiSuggestSheet tripId={trip.id} onClose={() => setAiSuggestOpen(false)} />
       ) : null}
     </section>
   );

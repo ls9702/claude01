@@ -28,4 +28,15 @@ return [
      * misconfigured server cannot hand `data.json` out over plain HTTP.
      */
     'DATA_DIR' => __DIR__ . '/data',
+
+    /**
+     * Google AI Studio key for the AI 도우미 (M11), used only by `ai.php`.
+     *
+     * Leave it empty and everything else keeps working: `ai.php?ping=1` then
+     * answers `{"ok":true,"ai":false}` and the app hides its ✨ buttons. The
+     * key never reaches the browser — that is the entire point of `ai.php`.
+     *
+     *     https://aistudio.google.com/apikey
+     */
+    'GEMINI_API_KEY' => '',
 ];

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { refreshAiCapability } from '../../ai/aiClient';
+import { useAiStore } from '../../ai/aiSettings';
 import { SYNC_STATUS_LABELS, useSyncStore } from '../../stores/syncStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { fetchMeta } from '../../sync/api';
@@ -11,7 +13,13 @@ import {
   readBackupFile,
 } from '../../sync/exportImport';
 import { formatBytes, photoUsage } from '../../utils/photos';
-import { clearSettings, loadSettings, normalizeBaseUrl, saveSettings } from '../../sync/settings';
+import {
+  clearSettings,
+  isConfigured,
+  loadSettings,
+  normalizeBaseUrl,
+  saveSettings,
+} from '../../sync/settings';
 import { restartSync, syncNow } from '../../sync/syncEngine';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from './Icon';
@@ -42,6 +50,23 @@ interface Notice {
   tone: 'ok' | 'bad';
   text: string;
 }
+
+/**
+ * Why the AI 도우미 is or is not usable right now (M11).
+ *
+ * Three separate things have to line up — a toggle, a server address, a key on
+ * that server — and each of them fails differently. One line that says which
+ * of the three is missing beats a disabled switch with no explanation.
+ */
+type AiStatusState = 'off' | 'unconfigured' | 'checking' | 'no-key' | 'ready';
+
+const AI_STATUS_TEXT: Record<AiStatusState, string> = {
+  off: 'AI 기능을 켜면 보드·일정에 AI 버튼이 나타나요',
+  unconfigured: '동기화(NAS) 연결 후 사용할 수 있어요',
+  checking: '서버를 확인하는 중이에요…',
+  'no-key': '서버에 AI 키가 설정되지 않았어요',
+  ready: '사용 준비 완료',
+};
 
 /** `2026-03-07 19:04` — enough to tell "just now" from "yesterday". */
 function formatSyncedAt(at?: number): string {
@@ -114,12 +139,39 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const usage = photoUsage(useWorkspaceStore((s) => s.workspace));
   const estimate = useStorageEstimate();
 
+  const aiEnabledToggle = useAiStore((s) => s.enabled);
+  const aiAvailable = useAiStore((s) => s.available);
+  const aiChecked = useAiStore((s) => s.checked);
+  const setAiEnabled = useAiStore((s) => s.setEnabled);
+
   const status = useSyncStore((s) => s.status);
   const lastSyncedAt = useSyncStore((s) => s.lastSyncedAt);
   const lastError = useSyncStore((s) => s.lastError);
   const serverVersion = useSyncStore((s) => s.serverVersion);
 
   const configured = normalizeBaseUrl(baseUrl).length > 0;
+
+  /**
+   * Deliberately reads the *saved* settings rather than the typed ones: the
+   * capability ping went to the saved server, so a half-typed address must not
+   * make the line claim that server has no key.
+   */
+  const aiState: AiStatusState = !aiEnabledToggle
+    ? 'off'
+    : !isConfigured()
+      ? 'unconfigured'
+      : aiAvailable
+        ? 'ready'
+        : aiChecked
+          ? 'no-key'
+          : 'checking';
+
+  /** Flipping it on is also the cheapest moment to re-ask the server. */
+  const handleAiToggle = (): void => {
+    const next = !aiEnabledToggle;
+    setAiEnabled(next);
+    if (next) void refreshAiCapability();
+  };
 
   void backupRevision; // re-read the stamp on every render (see the state above)
   const backupState = loadBackupState();
@@ -155,6 +207,9 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
     guard(async () => {
       saveSettings({ baseUrl, token });
       await restartSync();
+      // A new server is a new answer to "does this thing have a Gemini key?"
+      // — including when the answer goes back to no (M11).
+      await refreshAiCapability();
       return { tone: 'ok', text: '저장했어요' };
     });
 
@@ -164,6 +219,7 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
       setBaseUrl('');
       setToken('');
       await restartSync();
+      await refreshAiCapability();
       return { tone: 'ok', text: '동기화를 껐어요' };
     });
 
@@ -367,6 +423,50 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
         >
           지금 동기화
         </button>
+
+        {/* AI 도우미 (M11). One switch and one line saying what it will take to
+            make it work — the buttons themselves live on 보드 and 일정. */}
+        <div className="border-t border-line pt-6">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className={SECTION_TITLE_CLASS}>AI 도우미</h3>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={aiEnabledToggle}
+              aria-label="AI 도우미"
+              data-testid="ai-toggle"
+              data-on={aiEnabledToggle ? 'true' : 'false'}
+              onClick={handleAiToggle}
+              className={[
+                'relative h-6 w-11 shrink-0 rounded-full transition-colors duration-[140ms]',
+                'ease-quick outline-none focus-visible:ring-2 focus-visible:ring-line-strong',
+                aiEnabledToggle ? 'bg-inverse' : 'bg-line',
+              ].join(' ')}
+            >
+              <span
+                aria-hidden="true"
+                className={[
+                  'absolute top-1 h-4 w-4 rounded-full bg-surface shadow-raise',
+                  'transition-[left] duration-[140ms] ease-quick',
+                  aiEnabledToggle ? 'left-6' : 'left-1',
+                ].join(' ')}
+              />
+            </button>
+          </div>
+          <p
+            data-testid="ai-status"
+            data-state={aiState}
+            className={`mt-2 text-micro font-normal ${
+              aiState === 'ready' ? 'text-ok' : 'text-ink-faint'
+            }`}
+          >
+            {AI_STATUS_TEXT[aiState]}
+          </p>
+          <p className="mt-2 text-micro font-normal text-ink-faint">
+            질문과 일정 요약이 NAS를 거쳐 Google Gemini로 보내져요. API 키는 서버의
+            config.php에만 있고 이 기기에는 저장되지 않아요.
+          </p>
+        </div>
 
         <div className="border-t border-line pt-6">
           <h3 className={SECTION_TITLE_CLASS}>백업</h3>

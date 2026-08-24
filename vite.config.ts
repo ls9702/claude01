@@ -48,8 +48,10 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         navigateFallback: 'index.html',
-        // The sync endpoint is an API, not a route: never hand it the shell.
-        navigateFallbackDenylist: [/\/api\//, /data\.php/],
+        // The sync and AI endpoints are APIs, not routes: never hand them the
+        // shell. `ai.php` is also never runtime-cached — an AI answer is a
+        // one-off, and a cached one would be a lie with a timestamp.
+        navigateFallbackDenylist: [/\/api\//, /data\.php/, /ai\.php/],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {

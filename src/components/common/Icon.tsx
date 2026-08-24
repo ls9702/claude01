@@ -37,7 +37,8 @@ export type IconName =
   | 'comment'
   | 'camera'
   | 'route'
-  | 'drag';
+  | 'drag'
+  | 'sparkle';
 
 /** `name` → the path data drawn inside a `0 0 24 24` box. */
 const PATHS: Record<IconName, string> = {
@@ -72,6 +73,11 @@ const PATHS: Record<IconName, string> = {
     'M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1ZM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z',
   route: 'M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 9v3a4 4 0 0 1-4 4h-4a4 4 0 0 0-4 3',
   drag: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
+  // AI 도우미 (M11). Two four-point stars rather than the usual ✨ emoji: the
+  // rest of the chrome is stroked line art, and an emoji here would be the one
+  // glyph in the set that ignores `currentColor`.
+  sparkle:
+    'M10 3l1.9 5.1L17 10l-5.1 1.9L10 17l-1.9-5.1L3 10l5.1-1.9L10 3ZM18 14l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9L18 14Z',
 };
 
 interface IconProps {

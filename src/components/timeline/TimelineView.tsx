@@ -23,6 +23,9 @@ import { daySpend, emptySpend, sheetSpend, type SpendTotals } from '../../utils/
 import { formatTimeRange, minToY } from '../../utils/time';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
+import { useAiEnabled } from '../../ai/aiSettings';
+import AiAskButton from '../ai/AiAskButton';
+import AiReviewSheet from '../ai/AiReviewSheet';
 import BackupNudge from '../common/BackupNudge';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
@@ -235,6 +238,20 @@ export default function TimelineView() {
     [sheet, workspace],
   );
 
+  /**
+   * AI 검토 (M11) — offered only when there is a plan to review.
+   *
+   * An empty sheet would produce a prompt that says "(비어 있음)" six times and
+   * an answer about nothing, so the button is not there at all until at least
+   * one card has been placed.
+   */
+  const aiOn = useAiEnabled();
+  const [aiReviewOpen, setAiReviewOpen] = useState(false);
+  const sheetHasEntries = useMemo(
+    () => (sheet ? sheet.dayOrder.some((dayId) => (entriesByDay[dayId]?.length ?? 0) > 0) : false),
+    [sheet, entriesByDay],
+  );
+
   /** dayId → straight-line 이동 갭 between its consecutive located stops (M7b). */
   const gapsByDay = useMemo<Record<Id, DayGap[]>>(() => {
     const byDay: Record<Id, DayGap[]> = {};
@@ -411,7 +428,19 @@ export default function TimelineView() {
           </p>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {isDesktop ? null : <AiAskButton />}
           {isDesktop ? null : <SyncStatusChip variant="dot" />}
+          {aiOn && sheet && sheetHasEntries ? (
+            <button
+              type="button"
+              data-testid="ai-review-open"
+              onClick={() => setAiReviewOpen(true)}
+              className={SECONDARY_BUTTON_CLASS}
+            >
+              <Icon name="sparkle" size={16} />
+              AI 검토
+            </button>
+          ) : null}
           <button
             type="button"
             data-testid="timeline-add-day"
@@ -802,6 +831,10 @@ export default function TimelineView() {
           onCancel={() => setDialog(null)}
           testId="sheet-delete-confirm"
         />
+      ) : null}
+
+      {aiReviewOpen && aiOn && sheet ? (
+        <AiReviewSheet sheetId={sheet.id} onClose={() => setAiReviewOpen(false)} />
       ) : null}
     </section>
   );
