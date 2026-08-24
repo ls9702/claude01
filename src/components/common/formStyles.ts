@@ -100,6 +100,20 @@ export const DANGER_SOLID_BUTTON_CLASS =
  */
 export const SQUARE_BUTTON_CLASS = `${withoutPadX(SECONDARY_BUTTON_CLASS)} w-11 shrink-0`;
 
+/**
+ * 좁은 화면에서 라벨을 접고 정사각 아이콘으로 줄어드는 액션 버튼 (M18).
+ *
+ * 화면 제목은 **줄바꿈되지 않는다**. 그래서 한 줄이 모자라면 양보하는 쪽은
+ * 언제나 버튼이다 — 「일정」이 「일 / 정」으로 쪼개진 실기기 스크린샷이 이
+ * 레시피가 생긴 이유다.
+ *
+ * `sm` 아래에서 44×44 정사각(터치 타깃 유지), `sm` 위에서 라벨이 돌아온다.
+ * 라벨을 감출 때 `aria-label`은 호출부의 **의무**다: 아이콘만 남은 버튼은
+ * 스크린리더에게 이름이 없는 버튼이다.
+ */
+export const COMPACT_ACTION_BUTTON_CLASS =
+  `${withoutPadX(SECONDARY_BUTTON_CLASS)} w-11 shrink-0 sm:w-auto sm:px-4`;
+
 /** 아이콘 전용 버튼(닫기, ⋯, 스크롤 화살표). 터치 44px는 호출부에서 확보한다. */
 export const ICON_BUTTON_CLASS =
   'inline-grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-faint ' +

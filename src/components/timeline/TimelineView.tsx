@@ -5,6 +5,7 @@ import { useNowTick } from '../../hooks/useNowTick';
 import { deleteWithUndo } from '../../stores/undoDelete';
 import { useUndoStore } from '../../stores/undoStore';
 import { useUiStore } from '../../stores/uiStore';
+import { useTimelineChromeStore } from '../../stores/timelineChrome';
 import { FIRST_SHEET_NAME, useWorkspaceStore } from '../../stores/workspaceStore';
 import type {
   BoardColumn,
@@ -44,6 +45,7 @@ import SyncStatusChip from '../common/SyncStatusChip';
 import {
   CHIP_BUTTON,
   CHIP_NOW,
+  COMPACT_ACTION_BUTTON_CLASS,
   GHOST_BUTTON_CLASS,
   POPOVER_CLASS,
   POPOVER_ROW_DANGER_CLASS,
@@ -91,7 +93,7 @@ function TripPrompt() {
       className="mx-auto flex w-full max-w-md shrink-0 flex-col items-center gap-4 px-6 pb-16 pt-12 text-center"
     >
       <Icon name="calendar" size={24} className="text-ink-faint" />
-      <h1 className="text-title text-ink">일정</h1>
+      <h1 className="shrink-0 whitespace-nowrap text-title text-ink">일정</h1>
       <p className="text-label font-normal text-ink-muted">
         {trips.length > 0
           ? '어떤 여행의 시간표를 열까요?'
@@ -153,6 +155,19 @@ export default function TimelineView() {
   const offer = useUndoStore((s) => s.offer);
 
   const isDesktop = useIsDesktop();
+
+  /**
+   * 상단 크롬 접기 (M18) — **모바일 전용**.
+   *
+   * `isDesktop`으로 한 번 더 걸러서, ≥lg에서는 저장된 값이 무엇이든 접히지
+   * 않는다. 데스크톱은 폭이 남고 레일까지 띄우는 화면이라 접을 이유가 없고,
+   * 폰에서 접어 둔 것이 노트북 화면을 바꾸면 그건 기억이 아니라 사고다.
+   */
+  const chromeCollapsed = useTimelineChromeStore((s) => s.collapsed);
+  const toggleChrome = useTimelineChromeStore((s) => s.toggle);
+  const expandChrome = useTimelineChromeStore((s) => s.expand);
+  const collapsed = !isDesktop && chromeCollapsed;
+
   const [dialog, setDialog] = useState<Dialog>(null);
   const [pageIndex, setPageIndex] = useState(0);
   /** The pager's own ⋯ menu — mobile only; desktop keeps it on the day header. */
@@ -492,6 +507,58 @@ export default function TimelineView() {
     });
   };
 
+  /**
+   * 헤더 오른쪽 액션 묶음 — 펼침/접힘 두 줄이 **같은 버튼들**을 쓴다.
+   *
+   * 접었다고 해서 할 수 있는 일이 줄어들면 그건 접기가 아니라 숨기기다.
+   */
+  const headerActions = (
+    <div className="ml-auto flex shrink-0 items-center gap-1 lg:gap-2">
+      {isDesktop ? null : <AiAskButton />}
+      {isDesktop ? null : <SyncStatusChip variant="dot" />}
+      {aiOn && sheet && sheetHasEntries ? (
+        <button
+          type="button"
+          data-testid="ai-review-open"
+          onClick={() => setAiReviewOpen(true)}
+          // 아이콘만 남는 폭에서도 이름이 있는 버튼이어야 한다.
+          aria-label="AI 검토"
+          title="AI 검토"
+          className={COMPACT_ACTION_BUTTON_CLASS}
+        >
+          <Icon name="sparkle" size={16} />
+          <span className="hidden sm:inline">AI 검토</span>
+        </button>
+      ) : null}
+      <button
+        type="button"
+        data-testid="timeline-add-day"
+        onClick={addDayToSheet}
+        aria-label="일자 추가"
+        title="일자 추가"
+        className={COMPACT_ACTION_BUTTON_CLASS}
+      >
+        <Icon name="plus" size={16} />
+        <span className="hidden sm:inline">일자 추가</span>
+      </button>
+      {/* 접기 토글은 모바일에만 존재한다 — 데스크톱에는 접을 것이 없다. */}
+      {isDesktop ? null : (
+        <button
+          type="button"
+          data-testid="timeline-chrome-toggle"
+          data-collapsed={collapsed ? 'true' : 'false'}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? '상단 메뉴 펼치기' : '상단 메뉴 접기'}
+          title={collapsed ? '상단 메뉴 펼치기' : '상단 메뉴 접기'}
+          onClick={toggleChrome}
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-ink-muted transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink"
+        >
+          <Icon name={collapsed ? 'chevron-down' : 'chevron-up'} size={20} />
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <section
       data-testid="view-timeline"
@@ -501,42 +568,91 @@ export default function TimelineView() {
       // `calc(100dvh - 21rem)` guesses, and no white band under it (§4.4-2).
       className="flex min-h-0 flex-1 flex-col"
     >
-      <header className="flex shrink-0 items-center gap-3 px-4 pb-4 pt-6">
-        <div className="min-w-0">
-          <h1 id="view-timeline-title" className="text-display text-ink">
-            일정
-          </h1>
-          <p
-            data-testid="timeline-trip-title"
-            className="mt-1 min-w-0 truncate text-label text-ink-muted"
-          >
-            {trip.title}
-          </p>
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {isDesktop ? null : <AiAskButton />}
-          {isDesktop ? null : <SyncStatusChip variant="dot" />}
-          {aiOn && sheet && sheetHasEntries ? (
-            <button
-              type="button"
-              data-testid="ai-review-open"
-              onClick={() => setAiReviewOpen(true)}
-              className={SECONDARY_BUTTON_CLASS}
+      {/*
+        M18 — 폰에서 그리드에 닿기까지 다섯 줄이 서 있었다. 이 헤더는 그중 첫
+        줄이고, 두 가지를 고친다.
+
+        1. **제목은 줄바꿈되지 않는다.** 「일정」이 「일 / 정」으로 쪼개진 것은
+           h1이 옆의 버튼 두 개에 밀려 글자 하나 폭으로 짜부라졌기 때문이다.
+           `shrink-0 whitespace-nowrap`으로 h1을 양보 대상에서 빼고, 대신
+           버튼이 `sm` 아래에서 아이콘으로 줄어든다.
+        2. **모바일은 한 줄이다.** 제목 아래 두 번째 줄에 있던 여행 이름이
+           같은 줄로 올라온다(`items-center` 한 줄 정렬). 데스크톱은 폭이
+           남으므로 M18 이전의 두 줄 블록 그대로다.
+      */}
+      <header
+        data-testid="timeline-header"
+        data-collapsed={collapsed ? 'true' : 'false'}
+        className={
+          isDesktop
+            ? 'flex shrink-0 items-center gap-3 px-4 pb-4 pt-6'
+            : 'flex shrink-0 items-center gap-2 px-4 pb-1 pt-2'
+        }
+      >
+        {isDesktop ? (
+          <div className="min-w-0">
+            <h1
+              id="view-timeline-title"
+              className="shrink-0 whitespace-nowrap text-display text-ink"
             >
-              <Icon name="sparkle" size={16} />
-              AI 검토
-            </button>
-          ) : null}
-          <button
-            type="button"
-            data-testid="timeline-add-day"
-            onClick={addDayToSheet}
-            className={SECONDARY_BUTTON_CLASS}
-          >
-            <Icon name="plus" size={16} />
-            일자 추가
-          </button>
-        </div>
+              일정
+            </h1>
+            <p
+              data-testid="timeline-trip-title"
+              className="mt-1 min-w-0 truncate text-label text-ink-muted"
+            >
+              {trip.title}
+            </p>
+          </div>
+        ) : collapsed ? (
+          <>
+            {/* 접힌 줄에서 「일정」은 화면 아래 탭 바가 이미 말하고 있다. 이
+                줄이 답해야 하는 질문은 「지금 어느 시트인가」 하나뿐이라,
+                제목은 이름만 남기고 자리를 내준다. */}
+            <h1 id="view-timeline-title" className="sr-only">
+              일정
+            </h1>
+            {sheet ? (
+              <button
+                type="button"
+                data-testid="timeline-chrome-sheet"
+                onClick={expandChrome}
+                // 접혀 있어도 시트 전환은 두 탭 안이어야 한다: 이름을 누르면
+                // 탭 줄이 그대로 돌아온다.
+                aria-label={`${sheet.name} — 상단 메뉴 펼치기`}
+                className="flex h-11 min-w-0 items-center gap-1 rounded-full px-2 text-title text-ink transition-colors duration-[140ms] ease-quick hover:bg-sunken"
+              >
+                <Icon name="calendar" size={16} className="shrink-0 text-ink-faint" />
+                <span data-testid="timeline-sheet-name" className="min-w-0 truncate">
+                  {sheet.name}
+                </span>
+              </button>
+            ) : (
+              <span className="text-title text-ink">일정</span>
+            )}
+          </>
+        ) : (
+          <>
+            <h1
+              id="view-timeline-title"
+              className="shrink-0 whitespace-nowrap text-display text-ink"
+            >
+              일정
+            </h1>
+            {/* 여행 이름은 `sm` 아래에서 물러난다.
+                390px에서 이 자리에 남는 폭은 25px 남짓이고, 「오사카 여행」이
+                「오…」로 잘리면 그건 정보가 아니라 얼룩이다. 어느 여행인지는
+                방금 연 여행 탭과 보드 탭이 둘 다 이름으로 말하고 있고, 이 화면이
+                답해야 할 질문은 「오늘 몇 시에 뭘 하나」다 (M9 §3.3 · M18 §4). */}
+            <p
+              data-testid="timeline-trip-title"
+              className="hidden min-w-0 flex-1 truncate text-label text-ink-muted sm:block"
+            >
+              {trip.title}
+            </p>
+          </>
+        )}
+        {headerActions}
       </header>
 
       {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
@@ -544,21 +660,27 @@ export default function TimelineView() {
       {isDesktop ? null : <BackupNudge variant="banner" className="mx-4 mb-4" />}
 
       {/* Row 1 is sheets and nothing else; the 오늘 and 지출 chips moved down
-          into the pager, which is where the day they describe lives. */}
-      <div className="shrink-0 pb-2">
-        <SheetTabs
-          sheets={sheets}
-          activeSheetId={sheet?.id}
-          onSelect={setActiveSheet}
-          onCreate={() => setDialog({ kind: 'sheet-create' })}
-          onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
-          onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
-          onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
-          // The sheet's 지출 칩 used to ride here. M16-A's summary bar states the
-          // same two numbers one row down and never scrolls away, so keeping the
-          // chip would have been the same fact twice on adjacent lines.
-        />
-      </div>
+          into the pager, which is where the day they describe lives.
+
+          M18: this is the first of the two rows 접기 takes away. The active
+          sheet's name survives in the slim header row above, so nothing is
+          lost — only the ability to *switch* is, and that is one tap back. */}
+      {collapsed ? null : (
+        <div className="shrink-0 pb-1 lg:pb-2">
+          <SheetTabs
+            sheets={sheets}
+            activeSheetId={sheet?.id}
+            onSelect={setActiveSheet}
+            onCreate={() => setDialog({ kind: 'sheet-create' })}
+            onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
+            onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
+            onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
+            // The sheet's 지출 칩 used to ride here. M16-A's summary bar states the
+            // same two numbers one row down and never scrolls away, so keeping the
+            // chip would have been the same fact twice on adjacent lines.
+          />
+        </div>
+      )}
 
       {/* Desktop's 오늘 칩. The row only exists when there is a 오늘 to jump to;
           an empty 36px strip above the grid is 36px of nothing (S7). */}
@@ -625,6 +747,10 @@ export default function TimelineView() {
           {/* M16-A: money at a glance, pinned above everything the grid does.
               Full-bleed and `h-10` so it costs exactly one hairline-bounded row
               — see SpendSummaryBar for why it is not a floating card. */}
+          {/* M18: the second of the two rows 접기 takes away. The numbers are
+              a *glance*, not navigation — and the same two are one tap away in
+              the pager's 지출 칩 and in 카테고리별. */}
+          {collapsed ? null : (
           <SpendSummaryBar
             sheetTotals={sheetTotals}
             // Desktop scrolls many columns at once, so "the visible day" is only
@@ -643,6 +769,7 @@ export default function TimelineView() {
             unplaced={unplaced}
             currency={trip.currency}
           />
+          )}
 
           {/* Mobile row 2: the pager *is* the day header. Title, date, money,
               오늘, and the ⋯ menu all live here, so the sticky header inside
@@ -650,7 +777,10 @@ export default function TimelineView() {
           {!isDesktop ? (
             <div
               data-testid="day-pager"
-              className="mx-4 mb-2 flex h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface px-1 shadow-raise"
+              // M18 §3 — 40px. 요약 바와 같은 한 줄 예산이다: 안에 든 것은
+              // 32px 원형 타깃과 24px 칩뿐이라 44px 껍데기는 순전히 여백이었고,
+              // 그 4px는 그리드가 쓰는 편이 낫다.
+              className="mx-4 mb-1 flex h-10 shrink-0 items-center gap-1 rounded-md border border-line bg-surface px-1 shadow-raise"
             >
               <button
                 type="button"
@@ -663,7 +793,11 @@ export default function TimelineView() {
                 <Icon name="chevron-left" size={20} />
               </button>
 
-              <span className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden">
+              {/* M18 §4 — `items-baseline`이던 자리다. 13px 제목과 11px 날짜를
+                  베이스라인에 맞추면 그 둘이 이룬 상자가 줄 높이보다 커져서,
+                  줄 안에서 2px 위로 뜬 채 좌우의 32px 원형 버튼들과 어긋났다.
+                  같은 줄에 선 것들은 같은 중심선을 쓴다. */}
+              <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
                 <span
                   data-testid="day-pager-label"
                   className="min-w-0 truncate text-label font-semibold text-ink"

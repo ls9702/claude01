@@ -118,11 +118,19 @@ body {
   overflow-wrap: break-word;
 }
 
+/* 폼 요소가 페이지 폰트를 물려받는 일은 Tailwind preflight가 이미 `@layer base`
+   에서 한다. 여기서 `font: inherit`를 한 번 더 적으면 — 이 블록은 **레이어 밖**
+   이라 `@layer utilities`를 통째로 이긴다 — 버튼 위의 `text-micro`·`text-label`
+   ·`font-semibold`가 전부 죽는다.
+
+   그게 M18 실기기 스크린샷의 정체였다: 「카테고리별」이 11px 칩이 아니라 15px
+   본문으로, 「AI 검토」가 semibold가 아니라 regular로 그려지고 있었다. 같은 줄
+   안에서 span은 11px인데 button만 15px이니 줄이 어긋나 보이는 게 당연했다.
+   그래서 이 규칙은 레이어 밖에 남되, 유틸리티와 싸우지 않는 것만 남긴다. */
 button,
 input,
 select,
 textarea {
-  font: inherit;
   -webkit-tap-highlight-color: transparent;
 }
 

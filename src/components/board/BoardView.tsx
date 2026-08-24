@@ -61,7 +61,7 @@ function TripPrompt() {
       className="mx-auto flex w-full max-w-md shrink-0 flex-col items-center gap-4 px-6 pb-16 pt-12 text-center"
     >
       <Icon name="board" size={24} className="text-ink-faint" />
-      <h1 className="text-title text-ink">보드</h1>
+      <h1 className="shrink-0 whitespace-nowrap text-title text-ink">보드</h1>
       <p className="text-label font-normal text-ink-muted">
         {trips.length > 0
           ? '어떤 여행의 보드를 열까요?'
@@ -262,7 +262,11 @@ export default function BoardView() {
     <section data-testid="view-board" aria-labelledby="view-board-title" className="shrink-0">
       <header className="flex items-center gap-3 px-4 pb-4 pt-6">
         <div className="min-w-0">
-          <h1 id="view-board-title" className="text-display text-ink">
+          <h1
+            id="view-board-title"
+            // 제목은 줄바꿈되지 않는다 (M18 §1) — 좁아지면 옆의 버튼이 양보한다.
+            className="shrink-0 whitespace-nowrap text-display text-ink"
+          >
             보드
           </h1>
           <p data-testid="board-trip-title" className="mt-1 min-w-0 truncate text-label text-ink-muted">

@@ -151,7 +151,11 @@ export default function TripListView() {
           the two-line block beside it (M9 §4.1-5). */}
       <header className="mb-6 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 id="view-trips-title" className="text-display text-ink">
+          <h1
+            id="view-trips-title"
+            // 제목은 줄바꿈되지 않는다 (M18 §1).
+            className="shrink-0 whitespace-nowrap text-display text-ink"
+          >
             여행
           </h1>
           <p className="mt-1 text-label text-ink-muted">

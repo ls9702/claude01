@@ -37,7 +37,7 @@ function Fact({
   strong?: boolean;
 }) {
   return (
-    <span className="inline-flex shrink-0 items-baseline gap-1">
+    <span className="inline-flex shrink-0 items-center gap-1">
       <span className="text-micro text-ink-faint">{label}</span>
       <span
         className={`text-micro tabular-nums ${strong ? 'font-semibold text-ink' : 'text-ink-muted'}`}
@@ -103,9 +103,9 @@ export default function SpendSummaryBar({
         data-testid="spend-summary-sheet"
         data-spent={sheetTotals.spent}
         data-budget={sheetTotals.budget}
-        className="flex min-w-0 items-baseline gap-2 overflow-hidden"
+        className="flex min-w-0 items-center gap-2 overflow-hidden"
       >
-        <Icon name="receipt" size={16} className="shrink-0 self-center text-ink-faint" />
+        <Icon name="receipt" size={16} className="shrink-0 text-ink-faint" />
         <span className="min-w-0 truncate text-micro text-ink-faint">시트 전체</span>
         <Fact label="지출" amount={sheetTotals.spent} currency={currency} strong />
         {/* Below `sm` the row is out of space and something has to go. The
@@ -129,7 +129,7 @@ export default function SpendSummaryBar({
             data-day-id={day.id}
             data-spent={day.totals.spent}
             data-budget={day.totals.budget}
-            className="flex shrink-0 items-baseline gap-2"
+            className="flex shrink-0 items-center gap-2"
           >
             <span className="shrink-0 text-micro text-ink-faint">{day.label}</span>
             <Fact label="지출" amount={day.totals.spent} currency={currency} strong />

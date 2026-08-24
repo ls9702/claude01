@@ -43,7 +43,7 @@ export default function ProfilePicker({ onCancel, onChosen }: ProfilePickerProps
       className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-8 bg-surface px-6"
     >
       <div className="text-center">
-        <h1 className="text-display text-ink">누구세요?</h1>
+        <h1 className="shrink-0 whitespace-nowrap text-display text-ink">누구세요?</h1>
         <p className="mt-2 text-label font-normal text-ink-muted">
           이 기기에서 사용할 프로필을 선택하세요
         </p>

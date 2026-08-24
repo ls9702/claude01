@@ -57,7 +57,7 @@ function TripPrompt() {
       className="mx-auto flex w-full max-w-md shrink-0 flex-col items-center gap-4 px-6 pb-16 pt-12 text-center"
     >
       <Icon name="map" size={24} className="text-ink-faint" />
-      <h1 className="text-title text-ink">지도</h1>
+      <h1 className="shrink-0 whitespace-nowrap text-title text-ink">지도</h1>
       <p className="text-label font-normal text-ink-muted">
         {trips.length > 0 ? '어떤 여행의 지도를 열까요?' : '먼저 여행을 만들면 지도가 열려요.'}
       </p>
@@ -527,7 +527,11 @@ export default function MapView() {
     >
       <header className="flex shrink-0 items-center gap-3 px-4 pb-4 pt-6">
         <div className="min-w-0">
-          <h1 id="view-map-title" className="text-display text-ink">
+          <h1
+            id="view-map-title"
+            // 제목은 줄바꿈되지 않는다 (M18 §1).
+            className="shrink-0 whitespace-nowrap text-display text-ink"
+          >
             지도
           </h1>
           <p data-testid="map-trip-title" className="mt-1 min-w-0 truncate text-label text-ink-muted">
@@ -535,7 +539,11 @@ export default function MapView() {
           </p>
         </div>
         {isDesktop ? null : (
-          <span className="ml-auto">
+          // M18 §4 — 여기는 `<span className="ml-auto">` 하나였다. 안에 든
+          // 프로필 칩과 동기화 점은 둘 다 `grid`(=블록)이라, inline 상자 안에서
+          // 위아래로 쌓여 헤더가 두 줄이 됐다. 보드·일정 헤더는 처음부터 flex
+          // 줄로 감싸고 있었고, 이 화면만 빠져 있었다.
+          <span className="ml-auto flex shrink-0 items-center gap-1">
             <SyncStatusChip variant="dot" />
           </span>
         )}
