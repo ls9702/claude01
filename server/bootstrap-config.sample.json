@@ -1,0 +1,7 @@
+{
+  "sync": {
+    "baseUrl": "https://your-nas.synology.me:8443/api",
+    "token": "same-token-as-config-php"
+  },
+  "aiEnabled": true
+}

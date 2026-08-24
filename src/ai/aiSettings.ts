@@ -38,6 +38,21 @@ function storage(): Storage | null {
   }
 }
 
+/**
+ * True when the toggle has ever been saved on this device — lets the M14
+ * bootstrap distinguish "never touched" (may default on) from an explicit
+ * OFF (must be respected forever).
+ */
+export function hasStoredAiSettings(): boolean {
+  const store = storage();
+  if (!store) return false;
+  try {
+    return store.getItem(AI_KEY) != null;
+  } catch {
+    return false;
+  }
+}
+
 /** Reads the stored toggle, falling back to off for anything unexpected. */
 export function loadAiSettings(): AiSettings {
   const store = storage();

@@ -6,6 +6,7 @@ import { SEEN_THROTTLE_MS, useProfileStore } from './profile/profile';
 import { schedulePhotoGc } from './stores/photoGc';
 import { pruneActiveIds } from './stores/uiStore';
 import { useWorkspaceStore } from './stores/workspaceStore';
+import { applyBootstrapConfig } from './sync/bootstrap';
 import { initSyncEngine } from './sync/syncEngine';
 
 /**
@@ -68,10 +69,14 @@ export default function App() {
     // candidates (blobs a crash left behind mid-add), and the sweeper books
     // its own follow-up to collect them once the grace period is up (M10).
     schedulePhotoGc();
-    // One ping, once, to find out whether the server behind the sync URL can do
-    // AI at all (M11). It never throws and never blocks: an unconfigured device
-    // — every GitHub Pages visitor — simply stays without AI buttons.
-    void refreshAiCapability();
+    // Zero-config bootstrap first (M14): a NAS deployment may ship a
+    // bootstrap-config.json that configures sync + AI for a fresh device.
+    // Only THEN ping for AI capability (M11), so the very first load of a
+    // fresh device ends with the correct statuses. Neither ever throws, and
+    // GitHub Pages (no file, nothing configured) is untouched by both.
+    void applyBootstrapConfig().finally(() => {
+      void refreshAiCapability();
+    });
     return initSyncEngine();
   }, [hydrated]);
 

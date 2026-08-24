@@ -7,6 +7,7 @@ blob-report
 .playwright
 coverage
 server/config.php
+bootstrap-config.json
 server/data/
 *.local
 .DS_Store

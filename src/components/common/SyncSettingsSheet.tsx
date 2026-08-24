@@ -22,6 +22,11 @@ import {
   normalizeBaseUrl,
   saveSettings,
 } from '../../sync/settings';
+import {
+  clearBootstrapApplied,
+  isBootstrapApplied,
+  markBootstrapOptOut,
+} from '../../sync/bootstrap';
 import { restartSync, syncNow } from '../../sync/syncEngine';
 import Avatar from './Avatar';
 import ConfirmDialog from './ConfirmDialog';
@@ -208,6 +213,10 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const [backupRevision, setBackupRevision] = useState(0);
   /** A picked backup waiting on the 복원 / 건너뛰기 question (B11). */
   const [restoreAsk, setRestoreAsk] = useState<{ file: File; count: number } | null>(null);
+  // M14: the note lives in state so 저장/해제 can hide it without a re-mount.
+  const [bootstrapNote, setBootstrapNote] = useState(
+    () => isBootstrapApplied() && isConfigured(),
+  );
   const fileInput = useRef<HTMLInputElement>(null);
 
   const usage = photoUsage(useWorkspaceStore((s) => s.workspace));
@@ -280,6 +289,9 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const handleSave = () =>
     guard(async () => {
       saveSettings({ baseUrl, token });
+      // A manual save supersedes the auto-applied server config (M14).
+      clearBootstrapApplied();
+      setBootstrapNote(false);
       await restartSync();
       // A new server is a new answer to "does this thing have a Gemini key?"
       // — including when the answer goes back to no (M11).
@@ -290,6 +302,10 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const handleClear = () =>
     guard(async () => {
       clearSettings();
+      // 해제 is a decision: the bootstrap file must not re-connect this device
+      // on the next reload (M14).
+      markBootstrapOptOut();
+      setBootstrapNote(false);
       setBaseUrl('');
       setToken('');
       await restartSync();
@@ -420,6 +436,12 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
             {SYNC_STATUS_LABELS[status]}
           </span>
         </div>
+
+        {bootstrapNote && (
+          <p data-testid="bootstrap-note" className="text-micro font-normal text-ink-faint">
+            이 서버의 기본 설정이 자동 적용됐어요
+          </p>
+        )}
 
         <div>
           <label className={LABEL_CLASS} htmlFor="sync-base-url">
