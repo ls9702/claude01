@@ -39,4 +39,10 @@ return [
      *     https://aistudio.google.com/apikey
      */
     'GEMINI_API_KEY' => '',
+
+    /**
+     * Optional: which Gemini model ai.php calls. Leave it out to use the
+     * default (gemini-2.5-flash). Set e.g. 'gemini-2.5-pro' if you prefer.
+     */
+    // 'GEMINI_MODEL' => 'gemini-2.5-flash',
 ];

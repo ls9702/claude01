@@ -279,7 +279,21 @@ export async function callAi(kind: AiKind, request: AiRequest): Promise<AiResult
     throw new AiError('auth', AI_MESSAGES.auth, response.status);
   }
   if (!response.ok) {
-    throw new AiError('server', `${AI_MESSAGES.server} (HTTP ${response.status})`, response.status);
+    // ai.php's 5xx carries a `detail` naming the real upstream cause (e.g. a
+    // rejected API key). Surfacing it turns "HTTP 502" from a dead end into a
+    // fixable message; swallow any body-read failure and fall back to the code.
+    let detail = '';
+    try {
+      const body = (await response.json()) as { detail?: unknown } | null;
+      if (typeof body?.detail === 'string') detail = body.detail.slice(0, 200);
+    } catch {
+      /* body unreadable — keep the generic message */
+    }
+    throw new AiError(
+      'server',
+      `${AI_MESSAGES.server} (HTTP ${response.status}${detail ? ` · ${detail}` : ''})`,
+      response.status,
+    );
   }
 
   let payload: unknown;

@@ -119,6 +119,16 @@ export default function BoardView() {
   /** AI 추천 (M11). Hidden entirely unless all three conditions hold. */
   const aiOn = useAiEnabled();
   const [aiSuggestOpen, setAiSuggestOpen] = useState(false);
+  // 질문 시트의 「카드로 만들기」 원샷 핸드오프 (M17): 프리필을 집어 들고
+  // 즉시 비운 뒤 AI 추천 시트를 연다.
+  const aiSuggestPrefill = useUiStore((s) => s.aiSuggestPrefill);
+  const [prefill, setPrefill] = useState('');
+  useEffect(() => {
+    if (!aiSuggestPrefill || !aiOn) return;
+    setPrefill(aiSuggestPrefill);
+    setAiSuggestOpen(true);
+    useUiStore.getState().clearAiSuggestPrefill();
+  }, [aiSuggestPrefill, aiOn]);
 
   /** The horizontal scroller, and which way it still has room to go. */
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -435,7 +445,14 @@ export default function BoardView() {
       ) : null}
 
       {aiSuggestOpen && aiOn ? (
-        <AiSuggestSheet tripId={trip.id} onClose={() => setAiSuggestOpen(false)} />
+        <AiSuggestSheet
+          tripId={trip.id}
+          initialWish={prefill}
+          onClose={() => {
+            setAiSuggestOpen(false);
+            setPrefill('');
+          }}
+        />
       ) : null}
     </section>
   );

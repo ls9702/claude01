@@ -1,11 +1,17 @@
 import { useState } from 'react';
 import { callAi, type AiCitation } from '../../ai/aiClient';
 import { ASK_SYSTEM, buildAskPrompt } from '../../ai/prompts';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Id } from '../../types/models';
 import Icon from '../common/Icon';
 import Sheet from '../common/Sheet';
-import { INPUT_CLASS, PRIMARY_BUTTON_CLASS, withoutMarginTop } from '../common/formStyles';
+import {
+  INPUT_CLASS,
+  PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+  withoutMarginTop,
+} from '../common/formStyles';
 
 /** One question and its answer. Lives in state for as long as the sheet does. */
 interface Turn {
@@ -77,6 +83,21 @@ export default function AiAskSheet({ tripId, onClose }: { tripId?: Id; onClose: 
             />
             검색 기반
           </label>
+          <button
+            type="button"
+            data-testid="ai-ask-to-suggest"
+            onClick={() => {
+              // 「오사카성 이벤트로 만들어 줘」 류의 생성 요청은 답변이 아니라
+              // 카드가 목적 — 입력을 그대로 AI 추천 흐름에 넘긴다 (M17).
+              useUiStore.getState().requestAiSuggest(question.trim());
+              onClose();
+            }}
+            disabled={busy || question.trim() === ''}
+            className={`${SECONDARY_BUTTON_CLASS} ml-auto shrink-0`}
+            title="입력한 내용으로 카드 제안을 받아 보드에 추가해요"
+          >
+            카드로 만들기
+          </button>
           <button
             type="button"
             data-testid="ai-ask-submit"

@@ -57,7 +57,8 @@ const RATE_LIMIT_PER_MIN = 20;
 const UPSTREAM_TIMEOUT_S = 30;
 
 /** The model every kind of request goes to. */
-const GEMINI_MODEL = 'gemini-2.0-flash';
+/** Fallback model — override per deployment with config.php's GEMINI_MODEL. */
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 /** How much of an upstream error body is worth repeating to the client. */
 const DETAIL_CHARS = 400;
@@ -257,9 +258,12 @@ if ($encoded === false) {
     fail(400, 'bad_request', '요청을 JSON으로 만들 수 없어요.');
 }
 
+$model = isset($config['GEMINI_MODEL']) && trim((string) $config['GEMINI_MODEL']) !== ''
+    ? trim((string) $config['GEMINI_MODEL'])
+    : GEMINI_MODEL;
 $url = sprintf(
     'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s',
-    GEMINI_MODEL,
+    rawurlencode($model),
     rawurlencode($apiKey)
 );
 

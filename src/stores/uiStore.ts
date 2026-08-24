@@ -33,10 +33,18 @@ export interface UiState {
    * this is a one-shot handoff rather than a piece of state.
    */
   focusCardId?: string;
+  /**
+   * Same one-shot handoff pattern for the AI 추천 sheet — the 질문 시트's
+   * 「카드로 만들기」 sends the typed text here, the 보드 opens AI 추천 with it
+   * prefilled and clears the field (M17).
+   */
+  aiSuggestPrefill?: string;
   setTab: (tab: TabId) => void;
   setActiveTrip: (tripId?: string) => void;
   setActiveSheet: (sheetId?: string) => void;
   focusCard: (cardId?: string) => void;
+  requestAiSuggest: (prefill: string) => void;
+  clearAiSuggestPrefill: () => void;
 }
 
 const restored = loadActiveIds();
@@ -53,6 +61,8 @@ export const useUiStore = create<UiState>()((set) => ({
     set({ activeTripId: tripId, activeSheetId: undefined, focusCardId: undefined }),
   setActiveSheet: (sheetId) => set({ activeSheetId: sheetId }),
   focusCard: (cardId) => set({ focusCardId: cardId }),
+  requestAiSuggest: (prefill) => set({ aiSuggestPrefill: prefill, activeTab: 'board' }),
+  clearAiSuggestPrefill: () => set({ aiSuggestPrefill: undefined }),
 }));
 
 useUiStore.subscribe((state) =>

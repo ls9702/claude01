@@ -63,11 +63,19 @@ export function matchColumn(
  * is frozen at M0's six maps, and a suggestion the user did not press 추가 on
  * is not data — it is a thing the model said once.
  */
-export default function AiSuggestSheet({ tripId, onClose }: { tripId: Id; onClose: () => void }) {
+export default function AiSuggestSheet({
+  tripId,
+  onClose,
+  initialWish = '',
+}: {
+  tripId: Id;
+  onClose: () => void;
+  initialWish?: string;
+}) {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const addCard = useWorkspaceStore((s) => s.addCard);
 
-  const [wish, setWish] = useState('');
+  const [wish, setWish] = useState(initialWish);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<AiSuggestion[] | null>(null);
