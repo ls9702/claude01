@@ -17,6 +17,7 @@
  */
 
 import type { BoardColumn, Id, TimelineEntry, Workspace } from '../types/models';
+import { windowedDayEntries } from './dayWindow';
 
 /** Icon that marks a board column as the trip's 이동수단 category. */
 export const TRANSPORT_ICON = '🚗';
@@ -166,9 +167,46 @@ export function dayRoute(workspace: Workspace, dayId: Id): DayRoute {
   const entries = Object.values(workspace.entries)
     .filter((entry) => entry.dayId === dayId)
     .sort(byStart);
+  return routeOfEntries(workspace, day.tripId, entries);
+}
+
+/**
+ * The route of one **window** day — 05시부터 다음 날 05시까지 (M16-B).
+ *
+ * 지도 1일차 must be the same set of stops as 일정표 1일차, or the two tabs are
+ * describing different trips. The 새벽 이동 that closes a night therefore hangs
+ * off the *previous* day's chain of arrows, which is where the user drew it.
+ *
+ * The ordering is the window's, not the clock's: `23:40 → 00:20` is two stops
+ * in that order, which `byStart` alone would have reversed.
+ */
+export function dayRouteWindowed(
+  workspace: Workspace,
+  dayId: Id,
+  dayOrder: readonly Id[],
+): DayRoute {
+  const day = workspace.days[dayId];
+  if (!day) return emptyRoute();
+
+  const entries = windowedDayEntries(workspace, dayId, dayOrder).map((row) => row.entry);
+  return routeOfEntries(workspace, day.tripId, entries);
+}
+
+/**
+ * The stop/leg walk itself, over an **already ordered** entry list.
+ *
+ * Shared by {@link dayRoute} and {@link dayRouteWindowed} so the two can never
+ * drift apart: the only thing that separates them is which entries they get and
+ * in what order.
+ */
+function routeOfEntries(
+  workspace: Workspace,
+  tripId: Id,
+  entries: readonly TimelineEntry[],
+): DayRoute {
   if (entries.length === 0) return emptyRoute();
 
-  const transportId = transportColumnId(workspace, day.tripId);
+  const transportId = transportColumnId(workspace, tripId);
 
   /** Stop index inside `entries`, so the gaps can be scanned for a ride. */
   const stops: RouteStop[] = [];

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { emptyWorkspace, type Card, type Id, type Workspace } from '../types/models';
-import { currentAndNext, nowMin, todayDayId, todayIso } from './today';
+import {
+  currentAndNext,
+  currentAndNextWindowed,
+  nowMin,
+  todayDayId,
+  todayIso,
+  todayWindowIso,
+} from './today';
 
 const AT = 1_760_000_000_000;
 
@@ -175,5 +182,80 @@ describe('currentAndNext', () => {
   it('is empty for an empty day, and survives a garbled clock', () => {
     expect(currentAndNext([], CARDS, 600)).toEqual({});
     expect(currentAndNext(entries, CARDS, Number.NaN).next?.id).toBe('e1');
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M16-B — 하루 시작 05시
+ * ------------------------------------------------------------------ */
+
+describe('todayWindowIso', () => {
+  it('05시 이후는 달력 날짜 그대로다', () => {
+    expect(todayWindowIso(new Date(2026, 4, 4, 5, 0))).toBe('2026-05-04');
+    expect(todayWindowIso(new Date(2026, 4, 4, 10, 30))).toBe('2026-05-04');
+    expect(todayWindowIso(new Date(2026, 4, 4, 23, 59))).toBe('2026-05-04');
+  });
+
+  it('새벽 2시는 전날 밤이다', () => {
+    expect(todayWindowIso(new Date(2026, 4, 4, 2, 0))).toBe('2026-05-03');
+    expect(todayWindowIso(new Date(2026, 4, 4, 4, 59))).toBe('2026-05-03');
+    expect(todayWindowIso(new Date(2026, 4, 4, 0, 0))).toBe('2026-05-03');
+  });
+
+  it('달을 넘어가도 어제는 어제다', () => {
+    expect(todayWindowIso(new Date(2026, 4, 1, 3, 0))).toBe('2026-04-30');
+    expect(todayWindowIso(new Date(2026, 0, 1, 3, 0))).toBe('2025-12-31');
+  });
+
+  it('잘못된 날짜는 빈 문자열', () => {
+    expect(todayWindowIso(new Date(Number.NaN))).toBe('');
+  });
+});
+
+describe('todayDayId — 02시', () => {
+  it('새벽 2시에는 어제 칸이 오늘로 잡힌다', () => {
+    const ws = scaffold(['2026-05-03', '2026-05-04', '2026-05-05']);
+    const at2am = new Date(2026, 4, 4, 2, 0);
+    expect(todayDayId(ws, 's1', todayWindowIso(at2am))).toBe('d1');
+    // 같은 시각의 달력 날짜로 물으면 2일차가 나온다 — 그래서 창을 쓴다.
+    expect(todayDayId(ws, 's1', todayIso(at2am))).toBe('d2');
+  });
+});
+
+describe('currentAndNextWindowed', () => {
+  const ORDER: Id[] = ['d1', 'd2'];
+  /** 2일차 새벽 항목 — 창 기준으로는 1일차 밤에 속한다. */
+  const dawn = (id: Id, cardId: Id, startMin: number, durationMin = 60) => ({
+    ...entry(id, cardId, startMin, durationMin),
+    dayId: 'd2',
+  });
+
+  it('01:30에는 23:00 일정이 지금이고 02:00 일정이 다음이다', () => {
+    const entries = [entry('e1', 'k1', 1380, 240), dawn('e2', 'k2', 120)];
+    const result = currentAndNextWindowed(entries, CARDS, ORDER, 90);
+    expect(result.current?.id).toBe('e1');
+    expect(result.next?.id).toBe('e2');
+    expect(result.gapMin).toBe(30);
+  });
+
+  it('자정을 건너뛰는 순서로 정렬한다', () => {
+    const entries = [dawn('e-late', 'k2', 60), entry('e-early', 'k1', 600)];
+    const result = currentAndNextWindowed(entries, CARDS, ORDER, 540); // 09:00
+    expect(result.next?.id).toBe('e-early');
+  });
+
+  it('창이 열리기 전(첫날 새벽)의 일정은 이미 지나간 것으로 본다', () => {
+    // 1일차 02:00 — 앞 일자가 없어 1일차 맨 위에 고정되지만, 05:30에는 과거다.
+    const entries = [entry('e-dawn', 'k1', 120)];
+    const result = currentAndNextWindowed(entries, CARDS, ORDER, 330);
+    expect(result.current).toBeUndefined();
+    expect(result.next).toBeUndefined();
+  });
+
+  it('카드가 지워진 항목은 건너뛴다', () => {
+    const entries = [entry('e1', 'gone', 600), entry('e2', 'k1', 660)];
+    const result = currentAndNextWindowed(entries, CARDS, ORDER, 610);
+    expect(result.current).toBeUndefined();
+    expect(result.next?.id).toBe('e2');
   });
 });

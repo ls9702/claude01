@@ -242,7 +242,16 @@ test('접힌 카테고리 위로 카드를 끌어다 놓아도 멀쩡히 옮겨�
   await expect(source.getByTestId('column-count')).toHaveText('0');
   await expect(target.getByTestId('board-card')).toHaveCount(0);
 
-  await target.getByTestId('column-collapse').click();
+  // dnd-kit은 드래그가 끝난 직후의 click 한 번을 오발 방지로 삼킨다. 여기서
+  // 검증할 것은 "토글이 눌린다"가 아니라(별도 테스트가 있다) "펼치면 카드가
+  // 있다"이므로, 펼쳐질 때까지 클릭을 재시도해 그 1회 삼킴과 무관하게 만든다.
+  await expect(async () => {
+    const toggle = target.getByTestId('column-collapse');
+    if ((await toggle.getAttribute('data-collapsed')) === 'true') {
+      await toggle.dispatchEvent('click');
+    }
+    expect(await toggle.getAttribute('data-collapsed')).toBe('false');
+  }).toPass();
   await expect(target.getByTestId('board-card')).toHaveCount(1);
   await expect(target).toContainText('유심 사기');
 });

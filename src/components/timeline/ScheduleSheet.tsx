@@ -5,6 +5,7 @@ import { FIRST_SHEET_NAME, useWorkspaceStore } from '../../stores/workspaceStore
 import type { Card, Day, Id, Sheet as SheetModel } from '../../types/models';
 import {
   DAY_MIN,
+  DAY_START_MIN,
   MIN_ENTRY_MIN,
   SNAP_MIN,
   formatClock,
@@ -23,6 +24,7 @@ import {
   SQUARE_BUTTON_CLASS,
 } from '../common/formStyles';
 import { dayTitle } from '../../timeline/dayLabel';
+import { dropTarget } from '../../timeline/dayWindow';
 
 /** Opening time offered when a card is scheduled from the board. */
 const DEFAULT_START_MIN = 600; // 10:00
@@ -47,6 +49,7 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
   const scheduleCard = useWorkspaceStore((s) => s.scheduleCard);
   const deleteEntry = useWorkspaceStore((s) => s.deleteEntry);
   const offer = useUndoStore((s) => s.offer);
+  const notify = useUndoStore((s) => s.notify);
 
   const trip = workspace.trips[card.tripId];
 
@@ -100,9 +103,30 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
     if (created) setDayId(created);
   };
 
+  /**
+   * 「N일차 + 02:00」은 N일차의 **밤**이다 (M16-B).
+   *
+   * 1일차 = 1일차 05시 ~ 2일차 05시이므로, 고른 일자에 05시 이전 시각을 붙이면
+   * 그것이 가리키는 달력 날짜는 그 다음 날이다. `dropTarget`이 그리드에서 하는
+   * 변환과 똑같은 변환을, 여기서는 픽셀 대신 고른 시각에 적용한다.
+   *
+   * 마지막 일자에는 다음 날이 없다 → 그 시각은 이 시트로 표현할 수 없으므로
+   * `null`을 돌려 배치를 거절한다.
+   */
+  const placement = (): { dayId: Id; startMin: number } | null => {
+    if (!selectedDayId) return null;
+    if (startMin >= DAY_START_MIN) return { dayId: selectedDayId, startMin };
+    return dropTarget(selectedDayId, startMin + DAY_MIN - DAY_START_MIN, activeSheet?.dayOrder ?? []);
+  };
+
   const submit = () => {
-    if (!selectedDayId) return;
-    const entryId = scheduleCard(card.id, selectedDayId, startMin, durationMin);
+    const target = placement();
+    if (!target) {
+      notify('다음 일자가 없어요');
+      onClose();
+      return;
+    }
+    const entryId = scheduleCard(card.id, target.dayId, target.startMin, durationMin);
     if (entryId) offer(`'${card.title}' 배치됨`, () => deleteEntry(entryId));
     onClose();
   };

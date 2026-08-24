@@ -5,6 +5,7 @@ import { DND_DAY, dayDroppableId } from '../../dnd/planDnd';
 import type { BoardColumn, Card, Day, Id, TimelineEntry } from '../../types/models';
 import type { DayGap } from '../../timeline/gap';
 import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
+import { clockToOffset, type WindowedEntry } from '../../timeline/dayWindow';
 import { formatDistanceKm } from '../../timeline/route';
 import {
   DAY_COLUMN_PX,
@@ -14,7 +15,7 @@ import {
   laneMap,
 } from '../../timeline/layout';
 import type { SpendTotals } from '../../utils/spend';
-import { formatClock, minToY } from '../../utils/time';
+import { DAY_START_MIN, formatClock, minToY } from '../../utils/time';
 import Icon from '../common/Icon';
 import { POPOVER_CLASS, POPOVER_ROW_DANGER_CLASS } from '../common/formStyles';
 import EntryBlock from './EntryBlock';
@@ -25,7 +26,13 @@ interface DayColumnProps {
   day: Day;
   /** Position inside the sheet's `dayOrder`, for the `N일차` fallback. */
   index: number;
-  entries: readonly TimelineEntry[];
+  /**
+   * The entries this column **draws** — the ones whose effective 05시 day is
+   * this one, each with the placement that says where (M16-B). Not the same set
+   * as "entries whose `dayId` is this day": 새벽 entries of the next day are in
+   * here, and this day's own 새벽 entries are usually in the previous column.
+   */
+  entries: readonly WindowedEntry[];
   cards: Record<Id, Card>;
   columns: Record<Id, BoardColumn>;
   /** 예산/지출 of this day's cards (M6); the header chip. */
@@ -46,11 +53,13 @@ interface DayColumnProps {
 }
 
 /**
- * One day of the sheet: a sticky header plus the 00:00–24:00 grid.
+ * One day of the sheet: a sticky header plus the 05:00 → 05:00 grid (M16-B).
  *
  * The **grid is a single droppable** — entries inside it are draggable but not
- * droppable, so a drop always resolves to this day and the exact minute comes
- * from the pointer's Y offset inside this element.
+ * droppable, so a drop always resolves to this *visual* day and the exact
+ * minute comes from the pointer's Y offset inside this element. Below the
+ * 24:00 line that offset resolves to the **next** calendar day; `dropTarget`
+ * in `PlanDndContext` owns that translation, not this component.
  */
 export default function DayColumn({
   day,
@@ -92,9 +101,20 @@ export default function DayColumn({
     return () => window.removeEventListener('pointerdown', onDown);
   }, [menuOpen]);
 
-  const lanes = laneMap(entries);
-  const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+  // Lanes are packed over the **drawn** spans, not the stored ones: two 새벽
+  // entries pinned to the same top edge overlap on screen even though their
+  // clock times do not, and they have to end up side by side to stay tappable.
+  const lanes = laneMap(
+    entries.map((row) => ({
+      id: row.entry.id,
+      startMin: row.placement.offsetMin,
+      durationMin: row.placement.drawMin,
+    })),
+  );
+  const rowById = new Map(entries.map((row) => [row.entry.id, row]));
   const showNow = nowMin !== undefined && Number.isFinite(nowMin);
+  /** The red line lives in window space too — 02:00 is near the bottom. */
+  const nowOffset = showNow ? clockToOffset(nowMin as number) : 0;
 
   return (
     <section
@@ -186,26 +206,30 @@ export default function DayColumn({
         }`}
         style={{ height: DAY_HEIGHT_PX }}
       >
-        {HOURS.map((hour) => (
+        {/* Hour lines, in window offsets. The heavier rule falls on 06/12/18
+            and on **24:00** — the midnight boundary is the one line in this
+            column that changes which calendar day you are looking at. */}
+        {HOURS.map((offset) => (
           <div
-            key={hour}
+            key={offset}
             aria-hidden="true"
             className={
-              hour % 6 === 0
+              (DAY_START_MIN + offset) % 360 === 0
                 ? 'absolute inset-x-0 border-t border-line-strong/60'
                 : 'absolute inset-x-0 border-t border-line/70'
             }
-            style={{ top: minToY(hour * 60, PX_PER_MIN) }}
+            style={{ top: minToY(offset, PX_PER_MIN) }}
           />
         ))}
 
-        {entries.map((entry) => {
+        {entries.map(({ entry, placement }) => {
           const card = cards[entry.cardId];
           const column = card ? columns[card.columnId] : undefined;
           return (
             <EntryBlock
               key={entry.id}
               entry={entry}
+              placement={placement}
               card={card}
               color={column?.color ?? 'slate'}
               icon={column?.icon ?? '📌'}
@@ -226,9 +250,11 @@ export default function DayColumn({
             above it, where it covered the previous block's time. `right-6`
             keeps it clear of the screen edge and of the now-line's clock. */}
         {(gaps ?? []).map((gap) => {
-          const after = entryById.get(gap.afterEntryId);
+          const after = rowById.get(gap.afterEntryId);
           if (!after) return null;
-          const endMin = after.startMin + after.durationMin;
+          // Window offsets, like everything else drawn here: an end that spills
+          // past the 24:00 line still hangs its chip where the block ends.
+          const endMin = after.placement.rawOffsetMin + after.entry.durationMin;
           const spaced = gap.gapMin > 0;
           const topMin = spaced ? endMin + gap.gapMin / 2 : endMin;
           const distance = formatDistanceKm(gap.distanceKm);
@@ -269,8 +295,9 @@ export default function DayColumn({
           <div
             data-testid="now-line"
             data-min={Math.round(nowMin as number)}
+            data-offset-min={Math.round(nowOffset)}
             aria-hidden="true"
-            style={{ top: minToY(nowMin as number, PX_PER_MIN) }}
+            style={{ top: minToY(nowOffset, PX_PER_MIN) }}
             className="pointer-events-none absolute inset-x-0 z-30 flex items-center"
           >
             <span className="rounded-full bg-now px-2 py-px text-micro leading-none text-surface tabular-nums">

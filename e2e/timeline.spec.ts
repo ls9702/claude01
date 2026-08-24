@@ -11,6 +11,13 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Grid geometry — must match `src/timeline/layout.ts`. */
 const PX_PER_MIN = 0.9;
+/**
+ * The grid's window starts at 05:00 (M16-B), so a wall-clock minute sits at
+ * `clock - DAY_START_MIN` pixels-worth from the top of a day column.
+ */
+const DAY_START_MIN = 300;
+/** `INITIAL_SCROLL_MIN` — offset into the window, i.e. 08:00 at the top. */
+const INITIAL_SCROLL_MIN = 180;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -113,7 +120,9 @@ test('여행을 열면 일정 탭에 시트가 생기고 일자를 추가할 수
   await page.getByTestId('timeline-add-day-empty').click();
   await expect(page.getByTestId('timeline-day')).toHaveCount(1);
   await expect(page.getByTestId('timeline-day-title').first()).toHaveText('1일차');
-  await expect(page.getByTestId('time-axis')).toContainText('06:00');
+  // The axis runs 05:00 → 24:00 → 04:00 now (M16-B).
+  await expect(page.getByTestId('time-axis')).toContainText('05:00');
+  await expect(page.getByTestId('time-axis')).toContainText('24:00');
   // Desktop keeps the board rail beside the grid inside one drag context.
   await expect(page.getByTestId('timeline-rail')).toBeVisible();
 
@@ -137,14 +146,15 @@ test('보드 레일의 카드를 하루 칸으로 끌어다 10시쯤에 배치�
   const cardBox = await railCard.boundingBox();
   if (!gridBox || !cardBox) throw new Error('드래그 대상의 위치를 찾지 못했어요');
 
-  // The grid opens scrolled to 06:00, so 10:00 is on screen without scrolling.
+  // The grid opens scrolled to 08:00, so 10:00 is on screen without scrolling.
   const scrollTop = await page
     .getByTestId('timeline-scroller')
     .evaluate((element) => element.scrollTop);
-  expect(Math.round(scrollTop)).toBe(Math.round(360 * PX_PER_MIN));
+  expect(Math.round(scrollTop)).toBe(Math.round(INITIAL_SCROLL_MIN * PX_PER_MIN));
 
-  // `boundingBox()` is already viewport-relative, so minute 0 is `gridBox.y`.
-  const targetY = gridBox.y + 600 * PX_PER_MIN;
+  // `boundingBox()` is already viewport-relative, so the top of the column is
+  // `gridBox.y` — and that top is **05:00**, not midnight.
+  const targetY = gridBox.y + (600 - DAY_START_MIN) * PX_PER_MIN;
 
   await dragMouse(
     page,

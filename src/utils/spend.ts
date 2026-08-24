@@ -12,6 +12,7 @@
  */
 
 import type { Card, Id, Workspace } from '../types/models';
+import { visualPlacement } from '../timeline/dayWindow';
 
 /** 예산 / 지출 pair, in the trip's currency. */
 export interface SpendTotals {
@@ -72,6 +73,31 @@ export function daySpend(workspace: Workspace, dayId: Id): SpendTotals {
 }
 
 /**
+ * 예산/지출 of one **window** day — 05시부터 다음 날 05시까지 (M16-B).
+ *
+ * Same de-duplication as {@link daySpend}; the only difference is membership.
+ * An entry at 02:00 of 4일차 is money spent on the night of 3일차, so it counts
+ * there — which is what the user sees on the grid, and the two must not
+ * disagree. Every day-level surface (일자 칩, 요약 바) uses this one;
+ * {@link daySpend} is kept for callers that really do mean the calendar day.
+ *
+ * Shifting the window never moves money **across** a sheet — an entry only ever
+ * hops to the *previous day of the same sheet* — so {@link sheetSpend} and
+ * {@link tripSpend} are untouched by M16 and still balance.
+ */
+export function daySpendWindowed(
+  workspace: Workspace,
+  dayId: Id,
+  dayOrder: readonly Id[],
+): SpendTotals {
+  const cardIds = new Set<Id>();
+  for (const entry of Object.values(workspace.entries)) {
+    if (visualPlacement(entry, dayOrder).renderDayId === dayId) cardIds.add(entry.cardId);
+  }
+  return totalOf(workspace, cardIds);
+}
+
+/**
  * 예산/지출 of a whole sheet: over the unique cards scheduled anywhere in it.
  * Summing {@link daySpend} over the sheet's days would double-count a card
  * placed on two of them, so the de-duplication happens across the sheet.
@@ -91,6 +117,54 @@ export function sheetSpend(workspace: Workspace, sheetId: Id): SpendTotals {
     if (dayIds.has(entry.dayId)) cardIds.add(entry.cardId);
   }
   return totalOf(workspace, cardIds);
+}
+
+/**
+ * The unique cards {@link sheetSpend} counted, as ids.
+ *
+ * Exported so the 요약 바's 카테고리별 breakdown splits **exactly** the set the
+ * sheet total is made of: a category list that does not add up to the number
+ * above it is worse than no list.
+ */
+export function sheetCardIds(workspace: Workspace, sheetId: Id): Id[] {
+  const sheet = workspace.sheets[sheetId];
+  if (!sheet) return [];
+
+  const dayIds = new Set<Id>(sheet.dayOrder);
+  for (const day of Object.values(workspace.days)) {
+    if (day.sheetId === sheetId) dayIds.add(day.id);
+  }
+
+  const cardIds = new Set<Id>();
+  for (const entry of Object.values(workspace.entries)) {
+    if (dayIds.has(entry.dayId) && workspace.cards[entry.cardId]) cardIds.add(entry.cardId);
+  }
+  return [...cardIds];
+}
+
+/**
+ * 예산/지출 of one sheet, split by the board column each card sits in (M16-A).
+ *
+ * Keyed by `columnId`; a column with no counted card is simply absent, so the
+ * caller can render "every category that has something" without filtering.
+ * Day windows are irrelevant here — the scope is the whole sheet, and no
+ * window shift ever moves a card out of it.
+ */
+export function sheetSpendByColumn(
+  workspace: Workspace,
+  sheetId: Id,
+): Record<Id, SpendTotals> {
+  const byColumn: Record<Id, SpendTotals> = {};
+  for (const cardId of sheetCardIds(workspace, sheetId)) {
+    const card = workspace.cards[cardId];
+    if (!card) continue;
+    const totals = (byColumn[card.columnId] ??= emptySpend());
+    if (typeof card.budget === 'number' && Number.isFinite(card.budget)) {
+      totals.budget += card.budget;
+    }
+    totals.spent += cardSpent(card);
+  }
+  return byColumn;
 }
 
 /**

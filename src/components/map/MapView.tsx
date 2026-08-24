@@ -7,7 +7,7 @@ import { loadRouteChoice, saveRouteChoice, storedDayId } from '../../stores/mapR
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { BoardColumn, Card, Day, Id, Sheet as SheetModel } from '../../types/models';
-import { dayRoute } from '../../timeline/route';
+import { dayRouteWindowed } from '../../timeline/route';
 import { colorClasses } from '../../utils/colors';
 import { formatBudget } from '../../utils/money';
 import { cardCommentCount, cardSpent } from '../../utils/spend';
@@ -361,6 +361,9 @@ export default function MapView() {
     sheets.find((sheet) => sheet.id === activeSheetId) ??
     sheets[0];
 
+  /** The window mapping's axis — which day comes before which (M16-B). */
+  const routeDayOrder = useMemo<Id[]>(() => routeSheet?.dayOrder ?? [], [routeSheet?.dayOrder]);
+
   const routeDays = useMemo<Day[]>(
     () =>
       (routeSheet?.dayOrder ?? [])
@@ -388,10 +391,12 @@ export default function MapView() {
           selection.kind === 'all'
             ? ROUTE_DAY_HEX[routeDays.indexOf(day) % ROUTE_DAY_HEX.length]
             : ROUTE_HEX,
-        route: dayRoute(workspace, day.id),
+        // 지도 1일차 == 일정표 1일차: the same 05시 window decides membership,
+        // so a 새벽 이동 closes the previous night's chain of arrows (M16-B).
+        route: dayRouteWindowed(workspace, day.id, routeDayOrder),
       }))
       .filter((drawing) => drawing.route.stops.length > 0);
-  }, [selection, routeDays, workspace]);
+  }, [selection, routeDays, routeDayOrder, workspace]);
 
   /**
    * Does this trip have anything to draw at all?
@@ -400,8 +405,8 @@ export default function MapView() {
    * scheduled; before that the control would open on a mode with nothing in it.
    */
   const hasRoutableDay = useMemo(
-    () => routeDays.some((day) => dayRoute(workspace, day.id).stops.length > 0),
-    [routeDays, workspace],
+    () => routeDays.some((day) => dayRouteWindowed(workspace, day.id, routeDayOrder).stops.length > 0),
+    [routeDays, routeDayOrder, workspace],
   );
 
   /** The cards the *selected day* passes through — everything else dims. */

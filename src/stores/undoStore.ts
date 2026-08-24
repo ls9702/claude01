@@ -23,8 +23,14 @@ export interface UndoAction {
   token: number;
   /** Korean sentence shown in the toast, e.g. `'일정에 배치됨'`. */
   message: string;
-  /** Reverses the action. Runs at most once. */
-  undo: () => void;
+  /**
+   * Reverses the action. Runs at most once.
+   *
+   * `null` makes the toast a **notice**: same strip, same lifetime, no 실행
+   * 취소 button — for the times the app has to say why nothing happened
+   * ('다음 일자가 없어요'). An undo button that undoes a non-event is a lie.
+   */
+  undo: (() => void) | null;
   /** How long the toast keeps this offer alive. */
   durationMs: number;
 }
@@ -36,6 +42,8 @@ export interface UndoState {
    * `durationMs` defaults to {@link UNDO_DEFAULT_MS}.
    */
   offer: (message: string, undo: () => void, durationMs?: number) => void;
+  /** Says `message` with no 실행 취소 button — see {@link UndoAction.undo}. */
+  notify: (message: string, durationMs?: number) => void;
   /** Runs the pending undo and clears the slot. */
   runUndo: () => void;
   /** Drops the pending undo without running it (timeout / dismiss). */
@@ -50,10 +58,13 @@ export const useUndoStore = create<UndoState>()((set, get) => ({
   offer: (message, undo, durationMs = UNDO_DEFAULT_MS) =>
     set({ current: { token: nextToken++, message, undo, durationMs } }),
 
+  notify: (message, durationMs = UNDO_DEFAULT_MS) =>
+    set({ current: { token: nextToken++, message, undo: null, durationMs } }),
+
   runUndo: () => {
     const pending = get().current;
     set({ current: null });
-    pending?.undo();
+    pending?.undo?.();
   },
 
   clear: () => set({ current: null }),

@@ -28,6 +28,10 @@ const NOW_MIN = 630;
 
 /** Grid constant mirrored from `src/timeline/layout.ts`. */
 const PX_PER_MIN = 0.9;
+/** 하루의 시작 (M16-B) — the grid's window opens here, so offset 0 is 05:00. */
+const DAY_START_MIN = 300;
+/** `INITIAL_SCROLL_MIN` — offset into the window, i.e. 08:00 at the top. */
+const INITIAL_SCROLL_MIN = 180;
 
 /** 난바 → 우메다, about 4km apart: far enough to be 시간이 부족해요. */
 const FAR_APART = [
@@ -149,11 +153,14 @@ test('오늘이 있는 시트를 열면 오늘 칸·현재 시각선·지금/다
   await expect(nowLine).toHaveAttribute('data-min', String(NOW_MIN));
   await expect(todayColumn.getByTestId('now-line')).toHaveCount(1);
 
-  // …and the grid opened an hour before it, not on 06:00.
+  // …and the grid opened an hour before it, not on the window's default.
+  // The scroller measures window offsets, so 10:30 is `630 - 300` from the top.
   const scrollTop = await page
     .getByTestId('timeline-scroller')
     .evaluate((element) => element.scrollTop);
-  expect(Math.round(scrollTop)).toBe(Math.round((NOW_MIN - 60) * PX_PER_MIN));
+  expect(Math.round(scrollTop)).toBe(
+    Math.round((NOW_MIN - DAY_START_MIN - 60) * PX_PER_MIN),
+  );
 
   // 지금 / 다음 read the two seeded entries.
   const bar = page.getByTestId('now-bar');
@@ -199,11 +206,11 @@ test('오늘이 없는 시트에는 오늘 칩도 현재 시각선도 없다', a
   await expect(page.getByTestId('now-line')).toHaveCount(0);
   await expect(page.getByTestId('now-bar')).toHaveCount(0);
 
-  // …and the grid still opens on 06:00.
+  // …and the grid still opens on its default — 08:00 of the 05시 window.
   const scrollTop = await page
     .getByTestId('timeline-scroller')
     .evaluate((element) => element.scrollTop);
-  expect(Math.round(scrollTop)).toBe(Math.round(360 * PX_PER_MIN));
+  expect(Math.round(scrollTop)).toBe(Math.round(INITIAL_SCROLL_MIN * PX_PER_MIN));
 });
 
 test('결산이 총지출·카테고리·Top 5를 보여주고 카드로 이어진다', async ({ page }) => {

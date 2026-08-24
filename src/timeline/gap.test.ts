@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyWorkspace, type GeoPoint, type Id, type Workspace } from '../types/models';
-import { dayGaps } from './gap';
+import { dayGaps, dayGapsWindowed } from './gap';
+import { dayRouteWindowed } from './route';
 
 const AT = 1_760_000_000_000;
 
@@ -204,5 +205,85 @@ describe('dayGaps', () => {
     expect(dayGaps(ws, 'd1')).toEqual([]);
     expect(dayGaps(ws, 'nope')).toEqual([]);
     expect(dayGaps(scaffold(), 'd1')).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M16-B — 하루 시작 05시
+ * ------------------------------------------------------------------ */
+
+describe('dayGapsWindowed / dayRouteWindowed', () => {
+  const ORDER: Id[] = ['d1', 'd2'];
+
+  /** Adds a second day so the window has somewhere to fold 새벽 into. */
+  function withSecondDay(ws: Workspace): Workspace {
+    ws.days.d2 = {
+      id: 'd2',
+      tripId: 't1',
+      sheetId: 's1',
+      label: '2일차',
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    ws.sheets.s1.dayOrder = [...ORDER];
+    return ws;
+  }
+
+  /** Places `cardId` on `d2` — a 새벽 hour, i.e. the previous night's window. */
+  function placeOnD2(
+    ws: Workspace,
+    entryId: Id,
+    cardId: Id,
+    startMin: number,
+    durationMin = 60,
+  ): void {
+    ws.entries[entryId] = {
+      id: entryId,
+      tripId: 't1',
+      cardId,
+      dayId: 'd2',
+      startMin,
+      durationMin,
+      createdAt: AT,
+      updatedAt: AT,
+    };
+  }
+
+  it('자정을 건너는 두 정거장이 한 창의 이웃이 된다', () => {
+    const ws = withSecondDay(scaffold());
+    addCard(ws, 'k-night', 'c-see', NAMBA);
+    addCard(ws, 'k-dawn', 'c-see', UMEDA);
+    place(ws, 'e1', 'k-night', 1380, 40); // 1일차 23:00–23:40
+    placeOnD2(ws, 'e2', 'k-dawn', 20); // 2일차 00:20
+
+    const route = dayRouteWindowed(ws, 'd1', ORDER);
+    expect(route.stops.map((stop) => stop.cardId)).toEqual(['k-night', 'k-dawn']);
+
+    const gaps = dayGapsWindowed(ws, 'd1', ORDER);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].afterEntryId).toBe('e1');
+    // 23:40 → 00:20 은 40분이다. 달력 기준이었다면 -1400분(겹침)이 나왔을 것이다.
+    expect(gaps[0].gapMin).toBe(40);
+    expect(gaps[0].impossible).toBe(false);
+  });
+
+  it('창 기준으로 붙어 있으면 시간이 부족하다고 말한다', () => {
+    const ws = withSecondDay(scaffold());
+    addCard(ws, 'k-night', 'c-see', NAMBA);
+    addCard(ws, 'k-dawn', 'c-see', UMEDA);
+    place(ws, 'e1', 'k-night', 1380, 60); // 23:00–24:00
+    placeOnD2(ws, 'e2', 'k-dawn', 0); // 00:00 — 이동 시간 0분
+
+    const gaps = dayGapsWindowed(ws, 'd1', ORDER);
+    expect(gaps[0].gapMin).toBe(0);
+    expect(gaps[0].impossible).toBe(true);
+  });
+
+  it('새벽 정거장은 다음 날 창에서는 보이지 않는다', () => {
+    const ws = withSecondDay(scaffold());
+    addCard(ws, 'k-dawn', 'c-see', UMEDA);
+    placeOnD2(ws, 'e1', 'k-dawn', 60); // 2일차 01:00
+    expect(dayRouteWindowed(ws, 'd2', ORDER).stops).toHaveLength(0);
+    expect(dayRouteWindowed(ws, 'd1', ORDER).stops).toHaveLength(1);
   });
 });

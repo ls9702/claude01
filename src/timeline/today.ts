@@ -14,6 +14,7 @@
 
 import type { Card, Id, TimelineEntry, Workspace } from '../types/models';
 import { isIsoDate } from '../utils/flights';
+import { DAY_START_MIN, clockToOffset, visualPlacement } from './dayWindow';
 import { byStart } from './route';
 
 const two = (value: number): string => String(value).padStart(2, '0');
@@ -22,6 +23,25 @@ const two = (value: number): string => String(value).padStart(2, '0');
 export function todayIso(date: Date): string {
   if (Number.isNaN(date.getTime())) return '';
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+}
+
+/**
+ * A `Date` → the `YYYY-MM-DD` of the **day window** it is inside (M16-B).
+ *
+ * 새벽 2시는 전날 밤이다. Before 05:00 the calendar has already turned over but
+ * the day has not, so the window the user is living in is yesterday's — and
+ * that is the column 오늘 must select, the column the now line belongs in, and
+ * the day 지금/다음 must read.
+ *
+ * Only the 일정 tab uses this. {@link todayIso} stays the plain calendar day for
+ * everything that really means a date (여행 목록의 D-day, 결산 기간).
+ */
+export function todayWindowIso(date: Date): string {
+  if (Number.isNaN(date.getTime())) return '';
+  if (nowMin(date) >= DAY_START_MIN) return todayIso(date);
+  const yesterday = new Date(date.getTime());
+  yesterday.setDate(yesterday.getDate() - 1);
+  return todayIso(yesterday);
 }
 
 /** A `Date` → minutes from local midnight (`09:30` → `570`). */
@@ -92,6 +112,45 @@ export function currentAndNext(
   if (next) {
     result.next = next;
     result.gapMin = Math.max(next.startMin - now, 0);
+  }
+  return result;
+}
+
+/**
+ * 지금 / 다음 over a **window** day — 05시부터 다음 날 05시까지 (M16-B).
+ *
+ * The same two rules as {@link currentAndNext}, moved into window space: at
+ * 01:30 the 지금 is the 23:00 entry that has not finished yet, and the 다음 is
+ * the 02:00 one — neither of which the clock-space comparison could see, since
+ * `23:00 <= 90` is false and `120 > 90` would have been true for the wrong
+ * reason (a different calendar day).
+ *
+ * `entries` are the entries whose **effective** day is the visual day on
+ * screen; `nowClockMin` is the wall clock, unchanged.
+ */
+export function currentAndNextWindowed(
+  entries: readonly TimelineEntry[],
+  cards: Record<Id, Card>,
+  dayOrder: readonly Id[],
+  nowClockMin: number,
+): NowNext {
+  const now = clockToOffset(Number.isFinite(nowClockMin) ? nowClockMin : 0);
+
+  const live = entries
+    .filter((entry) => Boolean(cards[entry.cardId]))
+    .map((entry) => ({ entry, at: visualPlacement(entry, dayOrder).rawOffsetMin }))
+    .sort((a, b) => a.at - b.at || byStart(a.entry, b.entry));
+
+  const current = live.find(
+    (row) => row.at <= now && now < row.at + Math.max(row.entry.durationMin, 1),
+  );
+  const next = live.find((row) => row.at > now);
+
+  const result: NowNext = {};
+  if (current) result.current = current.entry;
+  if (next) {
+    result.next = next.entry;
+    result.gapMin = Math.max(next.at - now, 0);
   }
   return result;
 }

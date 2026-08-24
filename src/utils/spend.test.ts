@@ -4,9 +4,12 @@ import {
   cardCommentCount,
   cardSpent,
   daySpend,
+  daySpendWindowed,
   emptySpend,
   hasSpend,
+  sheetCardIds,
   sheetSpend,
+  sheetSpendByColumn,
   tripCardIds,
   tripSpend,
   unplacedSpend,
@@ -360,5 +363,90 @@ describe('unplacedSpend (B14)', () => {
 
   it('is empty for an unknown trip', () => {
     expect(unplacedSpend(scaffold(), 'nope')).toEqual({ budget: 0, spent: 0, count: 0 });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M16-B — 하루 시작 05시
+ * ------------------------------------------------------------------ */
+
+describe('daySpendWindowed', () => {
+  const ORDER = ['d1', 'd2'];
+
+  it('새벽 지출은 전날 창에 붙는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k-night', { budget: 10_000, expenses: [8_000] });
+    // 2일차 02:00 — 사용자가 보기엔 1일차 밤의 라멘이다.
+    place(ws, 'e1', 'k-night', 'd2', 120);
+
+    expect(daySpendWindowed(ws, 'd1', ORDER)).toEqual({ budget: 10_000, spent: 8_000 });
+    expect(daySpendWindowed(ws, 'd2', ORDER)).toEqual({ budget: 0, spent: 0 });
+    // 달력 기준 함수는 예전 그대로다.
+    expect(daySpend(ws, 'd2')).toEqual({ budget: 10_000, spent: 8_000 });
+  });
+
+  it('05:00 정각은 제 날에 남는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k-dawn', { expenses: [5_000] });
+    place(ws, 'e1', 'k-dawn', 'd2', 300);
+    expect(daySpendWindowed(ws, 'd2', ORDER).spent).toBe(5_000);
+    expect(daySpendWindowed(ws, 'd1', ORDER).spent).toBe(0);
+  });
+
+  it('첫날 새벽은 갈 곳이 없어 첫날에 남는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k-dawn', { expenses: [3_000] });
+    place(ws, 'e1', 'k-dawn', 'd1', 120);
+    expect(daySpendWindowed(ws, 'd1', ORDER).spent).toBe(3_000);
+  });
+
+  it('한 카드를 한 창에 두 번 놓아도 한 번만 센다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 20_000, expenses: [15_000] });
+    place(ws, 'e1', 'k1', 'd1', 600); // 1일차 10:00
+    place(ws, 'e2', 'k1', 'd2', 60); // 2일차 01:00 → 같은 창
+    expect(daySpendWindowed(ws, 'd1', ORDER)).toEqual({ budget: 20_000, spent: 15_000 });
+  });
+
+  it('창이 옮겨져도 시트 합계는 그대로다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 10_000, expenses: [8_000] });
+    place(ws, 'e1', 'k1', 'd2', 120);
+    expect(sheetSpend(ws, 's1')).toEqual({ budget: 10_000, spent: 8_000 });
+    const windowed = ORDER.map((dayId) => daySpendWindowed(ws, dayId, ORDER));
+    expect(windowed.reduce((sum, totals) => sum + totals.spent, 0)).toBe(8_000);
+  });
+});
+
+describe('sheetSpendByColumn', () => {
+  it('카테고리별로 나누고, 합은 시트 합계와 같다', () => {
+    const ws = scaffold();
+    ws.columns.c2 = {
+      id: 'c2',
+      tripId: 't1',
+      name: '먹거리',
+      color: 'amber',
+      icon: '🍜',
+      cardOrder: [],
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    addCard(ws, 'k1', { budget: 20_000, expenses: [18_000] });
+    const k2 = addCard(ws, 'k2', { budget: 15_000, expenses: [9_000] });
+    k2.columnId = 'c2';
+    place(ws, 'e1', 'k1', 'd1');
+    place(ws, 'e2', 'k2', 'd1');
+
+    const byColumn = sheetSpendByColumn(ws, 's1');
+    expect(byColumn.c1).toEqual({ budget: 20_000, spent: 18_000 });
+    expect(byColumn.c2).toEqual({ budget: 15_000, spent: 9_000 });
+    expect(byColumn.c1.spent + byColumn.c2.spent).toBe(sheetSpend(ws, 's1').spent);
+  });
+
+  it('배치되지 않은 카드의 카테고리는 아예 나오지 않는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 30_000 });
+    expect(sheetSpendByColumn(ws, 's1')).toEqual({});
+    expect(sheetCardIds(ws, 's1')).toEqual([]);
   });
 });

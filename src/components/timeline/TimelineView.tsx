@@ -16,10 +16,23 @@ import type {
 } from '../../types/models';
 import { AXIS_PX, HEADER_PX, INITIAL_SCROLL_MIN, PX_PER_MIN } from '../../timeline/layout';
 import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
-import { dayGaps, type DayGap } from '../../timeline/gap';
+import {
+  clockToOffset,
+  effectiveDayId,
+  windowedEntriesByDay,
+  type WindowedEntry,
+} from '../../timeline/dayWindow';
+import { dayGapsWindowed, type DayGap } from '../../timeline/gap';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
-import { currentAndNext, nowMin, todayDayId, todayIso } from '../../timeline/today';
-import { daySpend, emptySpend, sheetSpend, type SpendTotals } from '../../utils/spend';
+import { currentAndNextWindowed, nowMin, todayDayId, todayWindowIso } from '../../timeline/today';
+import {
+  daySpendWindowed,
+  emptySpend,
+  sheetSpend,
+  sheetSpendByColumn,
+  unplacedSpend,
+  type SpendTotals,
+} from '../../utils/spend';
 import { formatTimeRange, minToY } from '../../utils/time';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
@@ -47,6 +60,7 @@ import ScheduleSheet from './ScheduleSheet';
 import SheetRenameDialog from './SheetRenameDialog';
 import SheetTabs from './SheetTabs';
 import SheetWizard from './SheetWizard';
+import SpendSummaryBar, { categoryRows } from './SpendSummaryBar';
 import TimeAxis from './TimeAxis';
 import UnscheduledTray from './UnscheduledTray';
 
@@ -115,7 +129,7 @@ function TripPrompt() {
 }
 
 /**
- * The 일정 tab: a 00:00–24:00 grid of day columns fed by the board.
+ * The 일정 tab: a 05:00 → 05:00 grid of day columns fed by the board (M16-B).
  *
  * Desktop (≥1024px) puts a board rail beside the grid inside **one**
  * `PlanDndContext`, so a card can be dragged straight from the rail onto a
@@ -152,7 +166,12 @@ export default function TimelineView() {
 
   /** 오늘 모드's clock: one `Date` per minute, paused while the tab is hidden. */
   const now = useNowTick();
-  const today = todayIso(now);
+  /**
+   * The **window** day (M16-B), not the calendar one: at 새벽 2시 the day the
+   * user is living in is still yesterday's, and that is the column 오늘 has to
+   * point at.
+   */
+  const today = todayWindowIso(now);
   const minuteNow = nowMin(now);
 
   const trip = activeTripId ? workspace.trips[activeTripId] : undefined;
@@ -210,7 +229,16 @@ export default function TimelineView() {
     return map;
   }, [columns, workspace.cards]);
 
-  /** dayId → its entries, sorted by start time. */
+  /** The active sheet's day ids — the axis every window mapping turns on. */
+  const dayOrder = useMemo<Id[]>(() => sheet?.dayOrder ?? [], [sheet?.dayOrder]);
+
+  /**
+   * dayId → the entries **stored on** that calendar day, sorted by start time.
+   *
+   * Still calendar-keyed on purpose: it answers "what disappears if I delete
+   * this day row" (the 일자 삭제 confirm) and "does this sheet hold anything at
+   * all" — both of which are questions about the data, not about the grid.
+   */
   const entriesByDay = useMemo(() => {
     const byDay: Record<Id, TimelineEntry[]> = {};
     for (const entry of Object.values(workspace.entries)) {
@@ -222,16 +250,31 @@ export default function TimelineView() {
   }, [workspace.entries, trip]);
 
   /**
+   * dayId → the entries that day column **draws**, with their placements
+   * (M16-B): its own from 05:00 on, plus the next day's 새벽 hours.
+   */
+  const windowedByDay = useMemo<Record<Id, WindowedEntry[]>>(() => {
+    const tripEntries = Object.values(workspace.entries).filter(
+      (entry) => !trip || entry.tripId === trip.id,
+    );
+    return windowedEntriesByDay(tripEntries, dayOrder);
+  }, [workspace.entries, trip, dayOrder]);
+
+  /**
    * dayId → 예산/지출 of that day, and the sheet's own totals (M6).
    *
    * Both count **cards**, not placements — see `utils/spend.ts`; the sheet
    * total is therefore not the sum of its days when one card spans two of them.
+   *
+   * The day figures are **windowed** (M16-B) so the chip agrees with the column
+   * under it; the sheet figure is not, because a window shift never moves money
+   * out of a sheet.
    */
   const spendByDay = useMemo<Record<Id, SpendTotals>>(() => {
     const byDay: Record<Id, SpendTotals> = {};
-    for (const day of days) byDay[day.id] = daySpend(workspace, day.id);
+    for (const day of days) byDay[day.id] = daySpendWindowed(workspace, day.id, dayOrder);
     return byDay;
-  }, [days, workspace]);
+  }, [days, workspace, dayOrder]);
 
   const sheetTotals = useMemo<SpendTotals>(
     () => (sheet ? sheetSpend(workspace, sheet.id) : emptySpend()),
@@ -252,12 +295,16 @@ export default function TimelineView() {
     [sheet, entriesByDay],
   );
 
-  /** dayId → straight-line 이동 갭 between its consecutive located stops (M7b). */
+  /**
+   * dayId → straight-line 이동 갭 between its consecutive located stops (M7b),
+   * over the **windowed** sequence of the column (M16-B) — so the last hop of a
+   * night is measured from 23:40 to 00:20, not across a calendar boundary.
+   */
   const gapsByDay = useMemo<Record<Id, DayGap[]>>(() => {
     const byDay: Record<Id, DayGap[]> = {};
-    for (const day of days) byDay[day.id] = dayGaps(workspace, day.id);
+    for (const day of days) byDay[day.id] = dayGapsWindowed(workspace, day.id, dayOrder);
     return byDay;
-  }, [days, workspace]);
+  }, [days, workspace, dayOrder]);
 
   /**
    * 오늘 모드 (M7b): the day of the **active sheet** whose date is today, if any.
@@ -272,9 +319,29 @@ export default function TimelineView() {
   const nowNext = useMemo(
     () =>
       todayId
-        ? currentAndNext(entriesByDay[todayId] ?? [], workspace.cards, minuteNow)
+        ? currentAndNextWindowed(
+            (windowedByDay[todayId] ?? []).map((row) => row.entry),
+            workspace.cards,
+            dayOrder,
+            minuteNow,
+          )
         : {},
-    [todayId, entriesByDay, workspace.cards, minuteNow],
+    [todayId, windowedByDay, workspace.cards, dayOrder, minuteNow],
+  );
+
+  /**
+   * 카테고리별 breakdown for the summary bar, plus what it leaves out (M16-A).
+   *
+   * Sheet scope, because that is the scope of the number it hangs under.
+   */
+  const categories = useMemo(
+    () => (sheet ? categoryRows(columns, sheetSpendByColumn(workspace, sheet.id)) : []),
+    [sheet, columns, workspace],
+  );
+
+  const unplaced = useMemo(
+    () => unplacedSpend(workspace, trip?.id ?? ''),
+    [workspace, trip?.id],
   );
 
   /** cardId → total entries (badge) and their per-sheet split (popover). */
@@ -313,11 +380,14 @@ export default function TimelineView() {
     return () => window.removeEventListener('pointerdown', onDown);
   }, [dayMenuOpen]);
 
-  /** Puts `minute` an hour below the top of the grid (never above midnight). */
-  const scrollToMinute = useCallback((minute: number) => {
+  /**
+   * Scrolls the grid to `offsetMin` — minutes from the **top of the window**
+   * (05:00), not a wall-clock minute (M16-B). Never above the window's start.
+   */
+  const scrollToOffset = useCallback((offsetMin: number) => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    scroller.scrollTop = minToY(Math.max(minute, 0), PX_PER_MIN);
+    scroller.scrollTop = minToY(Math.max(offsetMin, 0), PX_PER_MIN);
   }, []);
 
   /** Desktop: brings one day column into the horizontally scrolling grid. */
@@ -330,20 +400,25 @@ export default function TimelineView() {
     if (column) scroller.scrollLeft = Math.max(column.offsetLeft - AXIS_PX, 0);
   }, []);
 
-  /** Selects today's day and parks the grid an hour before the current minute. */
+  /**
+   * Selects today's day and parks the grid an hour before the current minute.
+   *
+   * `minute` is the wall clock; the scroller wants a window offset, and at
+   * 새벽 2시 those two are 1140 minutes apart.
+   */
   const jumpToToday = useCallback(
     (dayId: Id, minute: number) => {
       const index = days.findIndex((day) => day.id === dayId);
       if (index >= 0) setPageIndex(index);
-      scrollToMinute(minute - 60);
+      scrollToOffset(clockToOffset(minute) - 60);
       revealDay(dayId);
     },
-    [days, scrollToMinute, revealDay],
+    [days, scrollToOffset, revealDay],
   );
 
   /**
    * First paint of a trip+sheet: open on **today** when the sheet holds it,
-   * otherwise on 06:00 — nobody plans from 00:00.
+   * otherwise on {@link INITIAL_SCROLL_MIN} (08:00) — nobody plans from 05시.
    *
    * Guarded by `positionedRef` so it lands exactly once per sheet: after that
    * the grid belongs to the user, and a minute tick must never yank it back.
@@ -355,13 +430,21 @@ export default function TimelineView() {
     positionedRef.current = key;
 
     if (todayId) jumpToToday(todayId, minuteNow);
-    else scrollToMinute(INITIAL_SCROLL_MIN);
-  }, [trip?.id, sheet, days.length, todayId, minuteNow, jumpToToday, scrollToMinute]);
+    else scrollToOffset(INITIAL_SCROLL_MIN);
+  }, [trip?.id, sheet, days.length, todayId, minuteNow, jumpToToday, scrollToOffset]);
 
   if (!trip) return <TripPrompt />;
 
   const visibleDays = isDesktop ? days : days.slice(safePage, safePage + 1);
   const currentDay = days[safePage];
+  /**
+   * The day the 요약 바's second half describes (M16-A): the pager's day on
+   * mobile, and on desktop only 오늘 — where many columns are on screen at once,
+   * "현재 보이는 일자" has no single answer worth asserting.
+   */
+  const summaryDay = isDesktop
+    ? (todayId ? days.find((day) => day.id === todayId) : undefined)
+    : currentDay;
   const nothingPlaced = Object.values(entriesByDay).every((list) => list.length === 0);
   const dialogEntry = dialog?.kind === 'entry' ? workspace.entries[dialog.entry.id] : undefined;
   const quickSpendCard =
@@ -468,31 +551,26 @@ export default function TimelineView() {
           onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
           onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
           onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
-          // The sheet's own total belongs on the sheet's own row; the pager
-          // below is about one day and has no room to spare.
-          trailing={
-            isDesktop ? undefined : (
-              <SpendChip totals={sheetTotals} currency={trip.currency} testId="sheet-spend" />
-            )
-          }
+          // The sheet's 지출 칩 used to ride here. M16-A's summary bar states the
+          // same two numbers one row down and never scrolls away, so keeping the
+          // chip would have been the same fact twice on adjacent lines.
         />
       </div>
 
-      {isDesktop ? (
+      {/* Desktop's 오늘 칩. The row only exists when there is a 오늘 to jump to;
+          an empty 36px strip above the grid is 36px of nothing (S7). */}
+      {isDesktop && todayId ? (
         <div className="flex shrink-0 items-center gap-2 px-4 pb-2">
-          {todayId ? (
-            <button
-              type="button"
-              data-testid="today-chip"
-              data-day-id={todayId}
-              data-active={currentDay?.id === todayId ? 'true' : 'false'}
-              onClick={() => jumpToToday(todayId, minuteNow)}
-              className={currentDay?.id === todayId ? CHIP_NOW : CHIP_BUTTON}
-            >
-              오늘
-            </button>
-          ) : null}
-          <SpendChip totals={sheetTotals} currency={trip.currency} testId="sheet-spend" />
+          <button
+            type="button"
+            data-testid="today-chip"
+            data-day-id={todayId}
+            data-active={currentDay?.id === todayId ? 'true' : 'false'}
+            onClick={() => jumpToToday(todayId, minuteNow)}
+            className={currentDay?.id === todayId ? CHIP_NOW : CHIP_BUTTON}
+          >
+            오늘
+          </button>
         </div>
       ) : null}
 
@@ -504,8 +582,8 @@ export default function TimelineView() {
           <Icon name="calendar" size={24} className="text-ink-faint" />
           <p className="text-title text-ink">첫 일자를 추가해보세요</p>
           <p className="mx-auto max-w-[22rem] text-label font-normal text-ink-muted">
-            일자를 만들면 00시부터 24시까지의 시간표가 열리고, 보드의 카드를 끌어다 놓을 수
-            있어요.
+            일자를 만들면 05시부터 다음 날 05시까지의 시간표가 열리고, 보드의 카드를 끌어다
+            놓을 수 있어요.
           </p>
           {/* Two honest ways forward, plus a way to throw the shell away when
               the trip already has a real sheet next to this one (M9 §4.4-5). */}
@@ -541,6 +619,28 @@ export default function TimelineView() {
         </div>
       ) : (
         <>
+          {/* M16-A: money at a glance, pinned above everything the grid does.
+              Full-bleed and `h-10` so it costs exactly one hairline-bounded row
+              — see SpendSummaryBar for why it is not a floating card. */}
+          <SpendSummaryBar
+            sheetTotals={sheetTotals}
+            // Desktop scrolls many columns at once, so "the visible day" is only
+            // an honest phrase when 오늘 is one of them; otherwise the bar says
+            // nothing rather than guessing which column the eye is on.
+            day={
+              summaryDay
+                ? {
+                    id: summaryDay.id,
+                    label: dayTitle(summaryDay, days.indexOf(summaryDay)),
+                    totals: spendByDay[summaryDay.id] ?? emptySpend(),
+                  }
+                : undefined
+            }
+            categories={categories}
+            unplaced={unplaced}
+            currency={trip.currency}
+          />
+
           {/* Mobile row 2: the pager *is* the day header. Title, date, money,
               오늘, and the ⋯ menu all live here, so the sticky header inside
               the column can fold away to `sr-only` (M9 §4.4-2 / §4.4-4). */}
@@ -699,7 +799,7 @@ export default function TimelineView() {
                         key={day.id}
                         day={day}
                         index={index}
-                        entries={entriesByDay[day.id] ?? []}
+                        entries={windowedByDay[day.id] ?? []}
                         cards={workspace.cards}
                         columns={workspace.columns}
                         spend={spendByDay[day.id] ?? emptySpend()}
@@ -737,8 +837,11 @@ export default function TimelineView() {
           currency={trip.currency}
           localCurrency={trip.localCurrency}
           fxRate={trip.fxRate}
+          // The day the entry is *shown* on (M16-B): a 02:00 entry is 「1일차
+          // 새벽 2시」 to the user, even though its row is the 2nd date.
           dayTitle={(() => {
-            const index = days.findIndex((day) => day.id === dialogEntry.dayId);
+            const shownId = effectiveDayId(dialogEntry, dayOrder);
+            const index = days.findIndex((day) => day.id === shownId);
             return index >= 0 ? dayTitle(days[index], index) : '';
           })()}
           onClose={() => setDialog(null)}

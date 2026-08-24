@@ -34,6 +34,25 @@ export function formatClock(minFromMidnight: number): string {
 /** Minutes in one timeline day. A day column spans `0 … DAY_MIN`. */
 export const DAY_MIN = 1440;
 
+/**
+ * 하루의 시작 — 05:00 (M16).
+ *
+ * 「1일차 = 1일차 05시부터 2일차 05시까지」. The *data* never learns about this:
+ * `TimelineEntry.startMin` stays `0 … 1440` relative to the entry's own
+ * calendar day, exactly as it was in M2a, and `schemaVersion` does not move.
+ * What changes is the **window** the grid draws and the aggregations count in:
+ * a day column now renders the 1440 minutes that start at `DAY_START_MIN` of
+ * its own date, so 새벽 1시 sits at the bottom of the previous night's column
+ * instead of at the top of a column nobody has woken up in yet.
+ *
+ * It lives here, in the lowest layer, because both the grid
+ * (`timeline/layout.ts`, the components) and the money/route aggregations
+ * (`utils/spend.ts`, `timeline/route.ts`) have to agree on it, and neither of
+ * those may import the other. See `src/timeline/dayWindow.ts` for the mapping
+ * built on top of it.
+ */
+export const DAY_START_MIN = 300;
+
 /** Every start time and every duration lands on this grid. */
 export const SNAP_MIN = 15;
 

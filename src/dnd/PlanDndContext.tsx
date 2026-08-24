@@ -23,7 +23,8 @@ import {
 } from '@dnd-kit/core';
 import { useUndoStore } from '../stores/undoStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
-import type { BoardColumn, Id, Trip } from '../types/models';
+import type { BoardColumn, Id, Trip, Workspace } from '../types/models';
+import { dropTarget, type DropTarget } from '../timeline/dayWindow';
 import { DAY_COLUMN_PX, PX_PER_MIN } from '../timeline/layout';
 import { yToMin } from '../utils/time';
 import { CardSurface } from '../components/board/CardItem';
@@ -41,7 +42,7 @@ const DayGridContext = createContext<Register | null>(null);
 
 /**
  * Ref callback a {@link import('../components/timeline/DayColumn')} attaches to
- * its 00:00–24:00 grid element, so a drop can be turned into a start time.
+ * its 05:00–05:00 grid element, so a drop can be turned into a start time.
  */
 export function useRegisterDayGrid(dayId: Id): (element: HTMLElement | null) => void {
   const register = useContext(DayGridContext);
@@ -77,6 +78,31 @@ const planCollisionDetection: CollisionDetection = (args) => {
   return hits.length > 0 ? hits : closestCorners(args);
 };
 
+/**
+ * Which minute of which **calendar** day the pointer is over (M16-B).
+ *
+ * A column draws 05:00 → next-day 05:00, so a Y below its 24:00 line is a time
+ * on the day after `visualDayId`. {@link dropTarget} owns that arithmetic; this
+ * only has to find the sheet whose `dayOrder` says which day comes next, which
+ * is the day row's own sheet.
+ *
+ * `null` means the pointer was in the last column's 새벽 zone — minutes of a
+ * date the sheet does not have. The caller refuses the drop instead of quietly
+ * parking the entry somewhere else.
+ */
+function resolveDrop(
+  workspace: Workspace,
+  visualDayId: Id,
+  yMin: number,
+): DropTarget | null {
+  const day = workspace.days[visualDayId];
+  const dayOrder = day ? (workspace.sheets[day.sheetId]?.dayOrder ?? [visualDayId]) : [visualDayId];
+  return dropTarget(visualDayId, yMin, dayOrder);
+}
+
+/** Said when a drop lands past the last day's midnight and has nowhere to go. */
+const NO_NEXT_DAY = '다음 일자가 없어요';
+
 /* ------------------------------------------------------------------ *
  * Context
  * ------------------------------------------------------------------ */
@@ -107,6 +133,7 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
   const moveEntry = useWorkspaceStore((s) => s.moveEntry);
   const deleteEntry = useWorkspaceStore((s) => s.deleteEntry);
   const offer = useUndoStore((s) => s.offer);
+  const notify = useUndoStore((s) => s.notify);
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const grids = useRef(new Map<Id, HTMLElement | null>());
@@ -176,10 +203,17 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
       const grid = dayId ? grids.current.get(dayId) : undefined;
       if (!entry || !dayId || !grid || clientY == null) return;
       const top = clientY - (grabOffset ?? 0) - grid.getBoundingClientRect().top;
+      const target = resolveDrop(workspace, dayId, yToMin(top, PX_PER_MIN));
+      // Past the last day's midnight there is no day to move it to; say so and
+      // leave the entry where it was rather than inventing a placement.
+      if (!target) {
+        notify(NO_NEXT_DAY);
+        return;
+      }
       // Where it was, before the drop — the drag itself is the only record of
       // it, and a finger that slipped deserves the same way back as a tap.
       const from = { dayId: entry.dayId, startMin: entry.startMin };
-      moveEntry(entryId, dayId, yToMin(top, PX_PER_MIN));
+      moveEntry(entryId, target.dayId, target.startMin);
 
       // `moveEntry` treats "dropped where it started" as nothing at all; only
       // an actual change is worth a toast.
@@ -193,8 +227,16 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
     if (dayId) {
       const grid = grids.current.get(dayId);
       if (!grid || clientY == null) return;
-      const startMin = yToMin(clientY - grid.getBoundingClientRect().top, PX_PER_MIN);
-      const created = scheduleCard(active, dayId, startMin);
+      const target = resolveDrop(
+        workspace,
+        dayId,
+        yToMin(clientY - grid.getBoundingClientRect().top, PX_PER_MIN),
+      );
+      if (!target) {
+        notify(NO_NEXT_DAY);
+        return;
+      }
+      const created = scheduleCard(active, target.dayId, target.startMin);
       if (created) {
         const title = workspace.cards[active]?.title ?? '카드';
         offer(`'${title}' 배치됨`, () => deleteEntry(created));

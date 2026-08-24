@@ -13,7 +13,15 @@
  */
 
 import type { Id, TimelineEntry, Workspace } from '../types/models';
-import { byStart, dayRoute, haversineKm, type RouteStop } from './route';
+import { windowedDayEntries } from './dayWindow';
+import {
+  byStart,
+  dayRoute,
+  dayRouteWindowed,
+  haversineKm,
+  type DayRoute,
+  type RouteStop,
+} from './route';
 
 /** One hop between two located stops of a day. */
 export interface DayGap {
@@ -45,19 +53,56 @@ export const IMPOSSIBLE_KM = 1;
  * a day with one stop, or a day whose every leg carries a ride → `[]`.
  */
 export function dayGaps(workspace: Workspace, dayId: Id): DayGap[] {
-  const route = dayRoute(workspace, dayId);
-  if (route.legs.length === 0) return [];
-
-  /**
-   * `dayRoute` built its stops by walking the day's entries in `byStart` order
-   * and keeping the located ones, so walking that same list with a cursor maps
-   * every stop back onto the exact entry that produced it — including the case
-   * where one card is placed on the day twice.
-   */
   const entries = Object.values(workspace.entries)
     .filter((entry) => entry.dayId === dayId)
     .sort(byStart);
+  // Calendar semantics: an entry's own `startMin` is its position on the day.
+  return gapsOf(dayRoute(workspace, dayId), entries, (entry) => entry.startMin);
+}
 
+/**
+ * The same gaps over a **window** day — 05시부터 다음 날 05시까지 (M16-B).
+ *
+ * The minute arithmetic moves into window space with the stops: `23:40 +
+ * 40분 → 00:20` is a zero-minute gap on one night, where the calendar version
+ * would have computed `20 - 1460 = -1440분` and called it an overlap.
+ */
+export function dayGapsWindowed(
+  workspace: Workspace,
+  dayId: Id,
+  dayOrder: readonly Id[],
+): DayGap[] {
+  const rows = windowedDayEntries(workspace, dayId, dayOrder);
+  const offsets = new Map<Id, number>(
+    rows.map((row) => [row.entry.id, row.placement.rawOffsetMin]),
+  );
+  return gapsOf(
+    dayRouteWindowed(workspace, dayId, dayOrder),
+    rows.map((row) => row.entry),
+    (entry) => offsets.get(entry.id) ?? entry.startMin,
+  );
+}
+
+/**
+ * Turns a route plus the ordered entry list that produced it into gap rows.
+ *
+ * `positionOf` is what makes the two flavours differ: clock minutes for the
+ * calendar day, window offsets for the 05시 window. Everything else — the stop
+ * → entry mapping and the 이동수단 skip — is identical, and stays written once.
+ */
+function gapsOf(
+  route: DayRoute,
+  entries: readonly TimelineEntry[],
+  positionOf: (entry: TimelineEntry) => number,
+): DayGap[] {
+  if (route.legs.length === 0) return [];
+
+  /**
+   * The route built its stops by walking this exact list in this exact order
+   * and keeping the located ones, so walking it again with a cursor maps every
+   * stop back onto the entry that produced it — including the case where one
+   * card is placed on the day twice.
+   */
   const entryOfStop = new Map<RouteStop, TimelineEntry>();
   let cursor = 0;
   for (const stop of route.stops) {
@@ -81,7 +126,7 @@ export function dayGaps(workspace: Workspace, dayId: Id): DayGap[] {
     if (!from || !to) continue;
 
     const distanceKm = haversineKm(leg.from, leg.to);
-    const gapMin = to.startMin - (from.startMin + from.durationMin);
+    const gapMin = positionOf(to) - (positionOf(from) + from.durationMin);
     gaps.push({
       afterEntryId: from.id,
       distanceKm,

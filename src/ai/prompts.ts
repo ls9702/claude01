@@ -20,8 +20,9 @@
 
 import type { GeoPoint, Id, Workspace } from '../types/models';
 import { dayTitle } from '../timeline/dayLabel';
-import { dayGaps } from '../timeline/gap';
-import { byStart, formatDistanceKm } from '../timeline/route';
+import { windowedDayEntries } from '../timeline/dayWindow';
+import { dayGapsWindowed } from '../timeline/gap';
+import { formatDistanceKm } from '../timeline/route';
 import { sheetSpend } from '../utils/spend';
 import { formatBudget } from '../utils/money';
 import { formatDuration, formatTimeRange } from '../utils/time';
@@ -247,9 +248,9 @@ export function buildReviewPrompt(workspace: Workspace, sheetId: Id | undefined)
     const day = workspace.days[dayId];
     if (!day) continue;
 
-    const entries = Object.values(workspace.entries)
-      .filter((entry) => entry.dayId === dayId)
-      .sort(byStart);
+    // The 05시 window, same as the grid and the map (M16-B): the AI reviews
+    // the day the user sees, 새벽 일정 included at the end of it.
+    const entries = windowedDayEntries(workspace, dayId, sheet.dayOrder).map((row) => row.entry);
 
     lines.push(`[${dayTitle(day, index)}${day.date ? ` · ${day.date}` : ''}]`);
     if (entries.length === 0) {
@@ -259,7 +260,9 @@ export function buildReviewPrompt(workspace: Workspace, sheetId: Id | undefined)
 
     // Gaps are keyed by the *earlier* entry, so one lookup per row places the
     // 이동 line directly under the stop it leaves from.
-    const gaps = new Map(dayGaps(workspace, dayId).map((gap) => [gap.afterEntryId, gap]));
+    const gaps = new Map(
+      dayGapsWindowed(workspace, dayId, sheet.dayOrder).map((gap) => [gap.afterEntryId, gap]),
+    );
 
     for (const entry of entries) {
       const card = workspace.cards[entry.cardId];

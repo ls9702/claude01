@@ -41,14 +41,18 @@ export default function UndoToast() {
         <span data-testid="undo-message" className="min-w-0 flex-1 truncate">
           {current.message}
         </span>
-        <button
-          type="button"
-          data-testid="undo-action"
-          onClick={runUndo}
-          className="shrink-0 rounded-xs px-2 py-1 text-label font-semibold text-surface underline decoration-surface/40 underline-offset-4 hover:decoration-surface"
-        >
-          실행 취소
-        </button>
+        {/* A notice (`undo: null`) is the same strip without the button — see
+            `undoStore.notify`. */}
+        {current.undo ? (
+          <button
+            type="button"
+            data-testid="undo-action"
+            onClick={runUndo}
+            className="shrink-0 rounded-xs px-2 py-1 text-label font-semibold text-surface underline decoration-surface/40 underline-offset-4 hover:decoration-surface"
+          >
+            실행 취소
+          </button>
+        ) : null}
       </div>
     </div>,
     document.body,

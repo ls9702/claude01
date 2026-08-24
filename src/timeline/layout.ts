@@ -30,8 +30,16 @@ export const PX_PER_MIN = 0.9;
 /** Height of a full day column in CSS pixels (`1440 × PX_PER_MIN`). */
 export const DAY_HEIGHT_PX = 1440 * PX_PER_MIN;
 
-/** Where the grid is scrolled on first paint — 06:00, not midnight. */
-export const INITIAL_SCROLL_MIN = 360;
+/**
+ * Where the grid is scrolled on first paint, as an **offset into the day
+ * window** (M16-B) — not a wall-clock minute.
+ *
+ * The window opens at 05:00, so `180` parks 08:00 at the top of the scroller:
+ * an hour of 새벽 stays reachable by a small scroll up, and the morning the
+ * user actually plans from is the first thing on screen. (Before M16 this was
+ * `360` = 06:00, when offset and clock were the same number.)
+ */
+export const INITIAL_SCROLL_MIN = 180;
 
 /** Width of one day column on desktop, in CSS pixels. */
 export const DAY_COLUMN_PX = 224;

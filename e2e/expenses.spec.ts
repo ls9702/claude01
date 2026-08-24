@@ -150,9 +150,10 @@ test('일정표가 일자별·시트별 지출 합계를 보여준다', async ({
   await expect(page.getByTestId('view-timeline')).toBeVisible();
   await page.getByTestId('timeline-add-day-empty').click();
   await expect(page.getByTestId('timeline-day')).toHaveCount(1);
-  // Nothing scheduled yet → no money chip at all.
+  // Nothing scheduled yet → no money chip at all. The 요약 바 is always there
+  // (M16-A) and honestly says zero.
   await expect(page.getByTestId('day-spend')).toHaveCount(0);
-  await expect(page.getByTestId('sheet-spend')).toHaveCount(0);
+  await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-spent', '0');
 
   // …placed through the card sheet (the touch path).
   await page.getByTestId('tab-board').click();
@@ -174,9 +175,13 @@ test('일정표가 일자별·시트별 지출 합계를 보여준다', async ({
   await expect(page.getByTestId('day-spend-spent')).toContainText('지출 15,000원');
   await dayChip.click();
 
-  const sheetChip = page.getByTestId('sheet-spend');
-  await expect(sheetChip).toHaveAttribute('data-spent', '15000');
-  await expect(sheetChip).toHaveAttribute('data-budget', '20000');
+  // 시트 전체는 이제 상단 고정 요약 바가 말한다 (M16-A).
+  const sheetSummary = page.getByTestId('spend-summary-sheet');
+  await expect(sheetSummary).toHaveAttribute('data-spent', '15000');
+  await expect(sheetSummary).toHaveAttribute('data-budget', '20000');
+  // 이 시트에는 날짜가 없어 '오늘'이 없다 → 데스크톱 요약 바는 일자 칸을 생략한다
+  // (여러 칸이 한 화면에 있는데 '현재 보이는 일자'를 하나로 고를 수 없어서다).
+  await expect(page.getByTestId('spend-summary-day')).toHaveCount(0);
 
   // The entry sheet carries the card's *live* ledger (M7b) — the same numbers,
   // and a receipt can be recorded without walking back to the board.
@@ -204,5 +209,5 @@ test('일정표가 일자별·시트별 지출 합계를 보여준다', async ({
 
   await page.getByTestId('tab-timeline').click();
   await expect(page.getByTestId('day-spend')).toHaveAttribute('data-spent', '12000');
-  await expect(page.getByTestId('sheet-spend')).toHaveAttribute('data-spent', '12000');
+  await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-spent', '12000');
 });
