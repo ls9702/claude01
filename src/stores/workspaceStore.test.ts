@@ -1233,6 +1233,71 @@ describe('markSeen (M13)', () => {
   });
 });
 
+describe('markRead (M24)', () => {
+  const KEY = 'memo:t1:song';
+
+  it('읽은 지점을 남기고 dirty로 만든다', () => {
+    store().markRead(KEY, 1_000);
+
+    expect(ws().seenBy![KEY]).toBe(1_000);
+    expect(store().dirty).toBe(true);
+  });
+
+  it('앞으로만 간다 — 더 작은 값은 워크스페이스를 건드리지 않는다', () => {
+    store().markRead(KEY, 2_000);
+    useWorkspaceStore.setState({ dirty: false });
+    const before = ws();
+
+    store().markRead(KEY, 1_000);
+
+    expect(ws()).toBe(before);
+    expect(ws().seenBy![KEY]).toBe(2_000);
+    // 이게 없으면 스레드를 보는 내내 쓸데없는 푸시가 튀어 나간다.
+    expect(store().dirty).toBe(false);
+  });
+
+  it('같은 값을 다시 찍어도 아무 일도 없다', () => {
+    store().markRead(KEY, 2_000);
+    useWorkspaceStore.setState({ dirty: false });
+    const before = ws();
+
+    store().markRead(KEY, 2_000);
+
+    expect(ws()).toBe(before);
+    expect(store().dirty).toBe(false);
+  });
+
+  it('더 큰 값은 덮어쓴다', () => {
+    store().markRead(KEY, 1_000);
+    store().markRead(KEY, 3_000);
+    expect(ws().seenBy![KEY]).toBe(3_000);
+  });
+
+  it('빈 키와 쓸 수 없는 시각은 아무 것도 하지 않는다', () => {
+    const before = ws();
+    store().markRead('', 1_000);
+    store().markRead('   ', 1_000);
+    store().markRead(KEY, 0);
+    store().markRead(KEY, -1);
+    store().markRead(KEY, Number.NaN);
+
+    expect(ws()).toBe(before);
+    expect(ws().seenBy).toBeUndefined();
+  });
+
+  it('M13의 프로필 키와 이름공간이 갈린다 — 서로를 덮지 않는다', () => {
+    store().markSeen('song');
+    const seenAt = ws().seenBy!.song;
+
+    store().markRead('memo:t1:song', 1_000);
+    store().markRead('card:k1:song', 2_000);
+
+    expect(ws().seenBy!.song).toBe(seenAt);
+    expect(ws().seenBy!['memo:t1:song']).toBe(1_000);
+    expect(ws().seenBy!['card:k1:song']).toBe(2_000);
+  });
+});
+
 describe('addMemoMessage / removeMemoMessage (M21)', () => {
   const photo = (id: string) => ({ id, w: 1_600, h: 1_200, bytes: 240_000, createdAt: 1 });
 

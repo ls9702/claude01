@@ -1,5 +1,6 @@
-import { useState, type KeyboardEvent } from 'react';
-import { isProfileId } from '../../profile/profile';
+import { useEffect, useState, type KeyboardEvent } from 'react';
+import { isProfileId, useProfileStore } from '../../profile/profile';
+import { cardReadKey, latestCommentStamp } from '../../read/readState';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, Id } from '../../types/models';
 import { MAX_AMOUNT, formatBudget, formatLocalAmount, isValidExpenseAmount } from '../../utils/money';
@@ -234,11 +235,27 @@ export default function CardLedger({
   const removeExpense = useWorkspaceStore((s) => s.removeExpense);
   const addComment = useWorkspaceStore((s) => s.addComment);
   const removeComment = useWorkspaceStore((s) => s.removeComment);
+  const markRead = useWorkspaceStore((s) => s.markRead);
+  const profileId = useProfileStore((s) => s.profileId);
 
   const [comment, setComment] = useState('');
 
   const expenses = live?.expenses ?? [];
   const comments = live?.comments ?? [];
+
+  /**
+   * 이 카드의 코멘트를 어디까지 봤는지 남긴다 (M24) — 보드의 NEW 표시를 끄는 쪽.
+   *
+   * 시트가 열려 있는 동안 이 컴포넌트가 곧 「카드를 보고 있다」이므로, 보드에서
+   * 열든 오늘 모드의 엔트리 상세에서 열든 한 자리에서 끝난다. 코멘트가 없는
+   * 카드는 찍지 않는다: 읽을 것이 없는 카드의 키는 `seenBy`에 자리만 차지한다.
+   */
+  useEffect(() => {
+    // 코멘트를 감춘 자리(지출만 받는 변종)에서는 읽은 것이 없다.
+    if (!showComments || !profileId) return;
+    const at = latestCommentStamp(live);
+    if (at > 0) markRead(cardReadKey(card.id, profileId), at);
+  }, [card.id, live, markRead, profileId, showComments]);
   const total = cardSpent(live);
   const canAddComment = comment.trim().length > 0;
 

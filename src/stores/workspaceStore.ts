@@ -410,6 +410,25 @@ export interface WorkspaceState {
    */
   markSeen: (profileId: string) => void;
 
+  /**
+   * Records that a person has read up to `at` (M24) — the 안 읽음 배지의 반대편.
+   *
+   * Shares {@link Workspace.seenBy} with {@link markSeen} through namespaced
+   * keys (`memo:<tripId>:<profileId>`, `card:<cardId>:<profileId>` — see
+   * `read/readState`), so person-level read state rides the existing per-key
+   * greatest-wins merge with no schema change at all.
+   *
+   * **Only ever advances.** An unread badge is watched by an effect that fires
+   * on every render of the thread; a mutation that re-stamped the same value
+   * would make the workspace dirty — and bounce a pointless push off the
+   * server — every time a message arrived. So a stamp that is not newer than
+   * the one already there changes nothing.
+   *
+   * No-op for a blank key or a non-positive `at`. Unlike {@link markSeen} the
+   * caller owns nothing: the guard *is* the throttle.
+   */
+  markRead: (key: string, at: Millis) => void;
+
   /** Creates a trip plus the five seeded columns. Returns the new trip id. */
   addTrip: (title: string, currency?: string) => Id;
   /** Renames / re-currencies a trip. No-op for an unknown id. */
@@ -631,6 +650,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             const id = profileId.trim();
             if (id === '') return null;
             draft.seenBy = { ...(draft.seenBy ?? {}), [id]: now };
+            return true;
+          });
+        },
+
+        markRead: (key, at) => {
+          run((draft) => {
+            const id = key.trim();
+            if (id === '') return null;
+            if (!Number.isFinite(at) || at <= 0) return null;
+            const current = draft.seenBy?.[id];
+            if (current !== undefined && current >= at) return null;
+            draft.seenBy = { ...(draft.seenBy ?? {}), [id]: at };
             return true;
           });
         },

@@ -11,7 +11,7 @@ import { cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
 import Avatar from '../common/Avatar';
 import Icon, { type IconName } from '../common/Icon';
-import { CHIP_MONEY, CHIP_NEUTRAL, POPOVER_CLASS } from '../common/formStyles';
+import { CHIP_MONEY, CHIP_NEUTRAL, POPOVER_CLASS, UNREAD_BADGE_CLASS } from '../common/formStyles';
 
 interface CardSurfaceProps {
   card: Card;
@@ -33,6 +33,12 @@ interface CardSurfaceProps {
   scheduleBreakdown?: readonly SheetScheduleCount[];
   /** Tray variant: title + one chip, no memo — a drag source needs no more. */
   terse?: boolean;
+  /**
+   * The other person has commented since this device's profile last opened the
+   * card (M24) — draws the NEW dot. Skipped in the tray for the same reason
+   * the author avatar is: a drag source is not a place one reads.
+   */
+  hasNewComments?: boolean;
 }
 
 /** How many chips a card may show before the rest fold into `＋N`. */
@@ -55,6 +61,7 @@ export function CardSurface({
   scheduledCount = 0,
   scheduleBreakdown,
   terse = false,
+  hasNewComments = false,
 }: CardSurfaceProps) {
   const colors = colorClasses(color);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -136,6 +143,18 @@ export function CardSurface({
         <h3 className="min-w-0 flex-1 break-words text-label font-semibold text-ink">
           {card.title}
         </h3>
+        {/* 상대의 새 코멘트 (M24). 칩 줄이 아니라 제목 줄에 붙는다: 칩은
+            우선순위대로 잘려 ＋N으로 접히는 줄이고, 「새 것이 있다」는 접히면
+            안 되는 소식이다. 그래서 아바타·일정 배지와 같은 라벨 지대에 선다. */}
+        {hasNewComments && !terse ? (
+          <span
+            data-testid="card-new-comments"
+            title="상대가 남긴 새 코멘트가 있어요"
+            className={`${UNREAD_BADGE_CLASS} mt-px`}
+          >
+            NEW
+          </span>
+        ) : null}
         {/* Who put this idea up (M13). First in the right-hand group and
             18px across: it is a *label*, not a control, so it must not read
             louder than the 일정 badge next to it — and it is skipped in the
@@ -243,6 +262,8 @@ interface CardItemProps {
   scheduledCount?: number;
   /** Per-sheet split behind the badge's popover. */
   scheduleBreakdown?: readonly SheetScheduleCount[];
+  /** Draws the NEW dot (M24) — see {@link CardSurfaceProps.hasNewComments}. */
+  hasNewComments?: boolean;
   onOpen: (card: Card) => void;
 }
 
@@ -262,6 +283,7 @@ export default function CardItem({
   color,
   scheduledCount = 0,
   scheduleBreakdown,
+  hasNewComments = false,
   onOpen,
 }: CardItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -297,6 +319,7 @@ export default function CardItem({
         color={color}
         scheduledCount={scheduledCount}
         scheduleBreakdown={scheduleBreakdown}
+        hasNewComments={hasNewComments}
       />
     </div>
   );

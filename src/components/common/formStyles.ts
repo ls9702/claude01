@@ -129,8 +129,27 @@ export const CHIP_BASE =
 export const CHIP_NEUTRAL = `${CHIP_BASE} bg-sunken text-ink-muted`;
 /** 지출 전용 — 앰버 wash. 예산은 중립이다. */
 export const CHIP_MONEY = `${CHIP_BASE} bg-warn-wash text-warn-ink`;
-/** 오늘/지금 전용 — 화면에서 코랄은 이것과 now-line 둘뿐. */
+/** 오늘/지금 전용 — 화면에서 코랄은 이것과 now-line, 그리고 안 읽음 표시뿐. */
 export const CHIP_NOW = `${CHIP_BASE} bg-now text-surface`;
+
+/* ── 안 읽음 (M24) ───────────────────────────────────── */
+
+/**
+ * 코랄의 세 번째(이자 마지막) 쓰임 — 안 읽은 것이 있다는 표시.
+ *
+ * M9는 코랄을 「지금」 하나에만 허락했다. 여기에 하나를 더하는 이유는 안 읽은
+ * 메시지가 정확히 같은 성질이기 때문이다: 화면에서 **지금 나를 기다리는** 유일한
+ * 것이고, 눈이 가야만 제 일을 한다. 중립 칩으로 그리면 배지가 배지로 읽히지
+ * 않고, 새 색을 하나 들이면 팔레트가 넷이 된다.
+ */
+
+/** 개수를 말하는 배지 — 탭의 안 읽은 메모 수. `9+`에서 멈춘다. */
+export const UNREAD_BADGE_CLASS =
+  'inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 ' +
+  'bg-now text-micro tabular-nums text-surface';
+
+/** 개수 없이 「새 것이 있다」만 말하는 점 — 보드 카드, 여행 목록. */
+export const UNREAD_DOT_CLASS = 'inline-block h-2 w-2 shrink-0 rounded-full bg-now';
 
 /** 누를 수 있는 칩(필터·세그먼트). 터치 타깃 h-9. */
 const CHIP_PRESSABLE = `${withoutPadX(withoutHeight(CHIP_BASE))} h-9 px-3 lg:h-8`;

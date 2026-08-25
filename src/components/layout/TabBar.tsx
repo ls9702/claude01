@@ -1,9 +1,14 @@
+import { useMemo } from 'react';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
+import { useProfileStore } from '../../profile/profile';
+import { unreadMemos } from '../../read/readState';
 import { TAB_IDS, TAB_LABELS, useUiStore, type TabId } from '../../stores/uiStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import AiAskButton from '../ai/AiAskButton';
 import BackupNudge from '../common/BackupNudge';
 import Icon, { type IconName } from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
+import { UNREAD_BADGE_CLASS } from '../common/formStyles';
 
 const TAB_ICONS: Record<TabId, IconName> = {
   trips: 'luggage',
@@ -21,11 +26,20 @@ const TAB_ICONS: Record<TabId, IconName> = {
  * the sync indicator are not tabs, so
  * on desktop they live in a utility zone pushed to the right, and on mobile the
  * app shell renders them above the active view instead.
+ *
+ * The one thing a tab is allowed to carry is news about itself: 메모 wears the
+ * count of lines the other person wrote and this person has not read (M24).
+ * It rides *inside* the tab's own button, so the row is still five cells and
+ * five `role="tab"`s.
  */
 export default function TabBar() {
   const activeTab = useUiStore((s) => s.activeTab);
   const setTab = useUiStore((s) => s.setTab);
   const isDesktop = useIsDesktop();
+
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  const profileId = useProfileStore((s) => s.profileId);
+  const unread = useMemo(() => unreadMemos(workspace, profileId).total, [workspace, profileId]);
 
   return (
     <nav
@@ -71,6 +85,18 @@ export default function TabBar() {
               <Icon name={TAB_ICONS[tab]} size={24} className="lg:hidden" />
               <Icon name={TAB_ICONS[tab]} size={16} className="hidden lg:block" />
               <span>{TAB_LABELS[tab]}</span>
+              {/* 아래쪽 바에서는 아이콘 어깨 위에(절대), 위쪽 바에서는 라벨
+                  뒤에(정적) 붙는다 — 같은 배지 하나가 두 배치를 다 산다. */}
+              {tab === 'memo' && unread > 0 ? (
+                <span
+                  data-testid="memo-tab-badge"
+                  data-count={unread}
+                  title={`안 읽은 메모 ${unread}개`}
+                  className={`${UNREAD_BADGE_CLASS} absolute left-[calc(50%+0.375rem)] top-1.5 lg:static lg:ml-0.5`}
+                >
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              ) : null}
             </button>
           );
         })}

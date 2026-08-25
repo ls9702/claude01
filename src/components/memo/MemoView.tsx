@@ -2,31 +2,50 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { groupByDay, threadOf } from '../../memo/thread';
 import { useProfileStore } from '../../profile/profile';
+import { firstUnreadIndex, latestSeenStamp, memoReadKey, unreadMemos } from '../../read/readState';
 import { schedulePhotoGc } from '../../stores/photoGc';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { flushPush } from '../../sync/syncEngine';
-import type { MemoMessage } from '../../types/models';
+import type { Id, MemoMessage } from '../../types/models';
 import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
-import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../common/formStyles';
+import {
+  PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+  UNREAD_DOT_CLASS,
+} from '../common/formStyles';
 import MemoBubble from './MemoBubble';
 import MemoComposer from './MemoComposer';
 
 /** How close to the bottom still counts as "reading the newest line", in px. */
 const NEAR_BOTTOM_PX = 120;
 
+/** 「여기까지 읽었어요」 — 안 읽은 첫 줄 바로 위에 서는 가로선. */
+function UnreadDivider() {
+  return (
+    <div data-testid="memo-unread-divider" className="my-3 flex items-center gap-2">
+      <span aria-hidden="true" className="h-px flex-1 bg-now/40" />
+      <span className="shrink-0 text-micro text-now">여기까지 읽었어요</span>
+      <span aria-hidden="true" className="h-px flex-1 bg-now/40" />
+    </div>
+  );
+}
+
 /** Shown when no trip is selected yet — same prompt the 보드 tab uses. */
 function TripPrompt() {
   const workspace = useWorkspaceStore((s) => s.workspace);
+  const profileId = useProfileStore((s) => s.profileId);
   const setTab = useUiStore((s) => s.setTab);
   const setActiveTrip = useUiStore((s) => s.setActiveTrip);
   const trips = useMemo(
     () => Object.values(workspace.trips).sort((a, b) => b.createdAt - a.createdAt),
     [workspace.trips],
   );
+  // 탭 배지는 「어딘가에 있다」까지만 말한다. 고르는 화면이 그 「어디」다.
+  const unread = useMemo(() => unreadMemos(workspace, profileId).byTrip, [workspace, profileId]);
 
   return (
     <section
@@ -50,7 +69,16 @@ function TripPrompt() {
                 onClick={() => setActiveTrip(trip.id)}
                 className={`${SECONDARY_BUTTON_CLASS} w-full justify-start`}
               >
-                {trip.title}
+                <span className="min-w-0 flex-1 truncate text-left">{trip.title}</span>
+                {(unread[trip.id] ?? 0) > 0 ? (
+                  <span
+                    data-testid="memo-trip-unread"
+                    data-trip-id={trip.id}
+                    data-count={unread[trip.id]}
+                    title={`안 읽은 메모 ${unread[trip.id]}개`}
+                    className={UNREAD_DOT_CLASS}
+                  />
+                ) : null}
               </button>
             </li>
           ))}
@@ -87,7 +115,9 @@ function TripPrompt() {
  */
 export default function MemoView() {
   const memos = useWorkspaceStore((s) => s.workspace.memos);
+  const seenBy = useWorkspaceStore((s) => s.workspace.seenBy);
   const removeMemoMessage = useWorkspaceStore((s) => s.removeMemoMessage);
+  const markRead = useWorkspaceStore((s) => s.markRead);
   const activeTripId = useUiStore((s) => s.activeTripId);
   const trip = useWorkspaceStore((s) => (activeTripId ? s.workspace.trips[activeTripId] : undefined));
   const profileId = useProfileStore((s) => s.profileId);
@@ -98,7 +128,54 @@ export default function MemoView() {
   const messages = useMemo(() => threadOf(memos, trip?.id), [memos, trip?.id]);
   const days = useMemo(() => groupByDay(messages), [messages]);
 
+  const readKey = trip && profileId ? memoReadKey(trip.id, profileId) : null;
+
+  /**
+   * 「여기까지 읽었어요」가 붙을 메시지 — **이 방문이 시작될 때 한 번** 정한다.
+   *
+   * 아래의 읽음 표시 이펙트는 화면을 여는 순간 곧바로 찍는다. 구분선을 매
+   * 렌더 다시 계산하면 그 표시가 자기 근거를 지워버려서, 선이 뜨자마자
+   * 사라진다. 그래서 열린 시점의 stamp와 그때의 스레드로 한 번 정하고 방문이
+   * 끝날 때까지 붙들고 있는다 — 보는 동안 새로 온 줄이 선을 움직이지도 않는다
+   * (내가 보고 있는 앞에서 온 줄은 「안 읽은 줄」이 아니다). 다음에 다시 열면
+   * 선은 없다.
+   */
+  const visit = useRef<{ key: string; dividerId: Id | null } | null>(null);
+  if (readKey === null) {
+    visit.current = null;
+  } else if (visit.current?.key !== readKey) {
+    const index = firstUnreadIndex(messages, seenBy?.[readKey] ?? 0, profileId);
+    visit.current = { key: readKey, dividerId: index < 0 ? null : messages[index].id };
+  }
+  const dividerId = visit.current?.dividerId ?? null;
+
+  /**
+   * 스레드가 눈앞에 있는 동안 읽은 지점을 워크스페이스에 남긴다 (M24).
+   *
+   * 마운트할 때, 여행을 바꿀 때, 보는 중에 새 줄이 올 때마다 돈다. 그래도
+   * 트래픽이 되지 않는 건 `markRead`가 **앞으로만 가기** 때문이다 — 같은 값을
+   * 다시 찍는 호출은 워크스페이스를 dirty로 만들지 않는다. 찍는 값이
+   * `Date.now()`가 아니라 스레드의 마지막 `createdAt`인 이유는
+   * `read/readState`에 적어두었다(두 사람의 시계는 서로 다르다).
+   */
+  useEffect(() => {
+    if (!readKey) return;
+    const stamp = (): void => {
+      // 백그라운드 탭에서 도착한 줄은 읽은 것이 아니다.
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const at = latestSeenStamp(messages);
+      if (at > 0) markRead(readKey, at);
+    };
+
+    stamp();
+    if (typeof document === 'undefined') return;
+    document.addEventListener('visibilitychange', stamp);
+    return () => document.removeEventListener('visibilitychange', stamp);
+  }, [readKey, messages, markRead]);
+
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  /** The divider node, while this visit has one — the first scroll aims at it. */
+  const dividerRef = useRef<HTMLDivElement | null>(null);
   /** Was the reader at the bottom before this render? Starts true (on mount). */
   const atBottom = useRef(true);
   /** The last message id this view has already scrolled for. */
@@ -122,8 +199,20 @@ export default function MemoView() {
     lastSeen.current = newest;
 
     if (first || forceScroll.current || atBottom.current) {
-      node.scrollTop = node.scrollHeight;
-      atBottom.current = true;
+      // 안 읽은 줄을 안고 열렸다면 맨 아래가 아니라 그 경계에서 멈춘다 —
+      // 「여기까지 읽었어요」는 보라고 그은 선이다. 그 뒤로는 평소대로,
+      // 바닥에 붙어 있을 때만 따라 내려간다.
+      const divider = first ? dividerRef.current : null;
+      if (divider) {
+        const offset =
+          divider.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop;
+        node.scrollTop = Math.max(0, offset - 48);
+        atBottom.current =
+          node.scrollHeight - node.clientHeight - node.scrollTop < NEAR_BOTTOM_PX;
+      } else {
+        node.scrollTop = node.scrollHeight;
+        atBottom.current = true;
+      }
     }
     forceScroll.current = false;
   }, [messages]);
@@ -210,12 +299,18 @@ export default function MemoView() {
                 </div>
                 <div className="space-y-2">
                   {day.messages.map((memo) => (
-                    <MemoBubble
-                      key={memo.id}
-                      memo={memo}
-                      own={Boolean(profileId) && memo.by === profileId}
-                      onDelete={setAsking}
-                    />
+                    <div key={memo.id}>
+                      {memo.id === dividerId ? (
+                        <div ref={dividerRef}>
+                          <UnreadDivider />
+                        </div>
+                      ) : null}
+                      <MemoBubble
+                        memo={memo}
+                        own={Boolean(profileId) && memo.by === profileId}
+                        onDelete={setAsking}
+                      />
+                    </div>
                   ))}
                 </div>
               </div>

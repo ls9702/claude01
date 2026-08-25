@@ -11,6 +11,8 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { resolveBoardDrop, snapshotBoard } from '../../dnd/boardDnd';
+import { useProfileStore } from '../../profile/profile';
+import { cardsWithUnreadComments } from '../../read/readState';
 import { useUiStore } from '../../stores/uiStore';
 import { deleteWithUndo } from '../../stores/undoDelete';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
@@ -111,6 +113,7 @@ export default function BoardView() {
   const activeTripId = useUiStore((s) => s.activeTripId);
   const focusCardId = useUiStore((s) => s.focusCardId);
   const focusCard = useUiStore((s) => s.focusCard);
+  const profileId = useProfileStore((s) => s.profileId);
 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -200,6 +203,17 @@ export default function BoardView() {
   const { counts: scheduledCounts, bySheet: scheduleBreakdowns } = useMemo(
     () => summarizeSchedule(workspace, trip?.id),
     [workspace, trip?.id],
+  );
+
+  /**
+   * 상대가 코멘트를 남긴 뒤로 내가 한 번도 열지 않은 카드들 (M24).
+   *
+   * 보드에서만 계산한다: 시간표의 레일도 같은 `CardItem`을 쓰지만, 레일은 카드를
+   * *끌어다 놓는* 자리이지 읽는 자리가 아니다.
+   */
+  const newComments = useMemo(
+    () => cardsWithUnreadComments(Object.values(cardsByColumn).flat(), workspace, profileId),
+    [cardsByColumn, workspace, profileId],
   );
 
   /**
@@ -326,6 +340,7 @@ export default function BoardView() {
                 currency={trip.currency}
                 scheduledCounts={scheduledCounts}
                 scheduleBreakdowns={scheduleBreakdowns}
+                newCommentCards={newComments}
                 onAddCard={(target) => setDialog({ kind: 'card-create', column: target })}
                 onOpenCard={(card) => setDialog({ kind: 'card-edit', card })}
                 onEditColumn={(target) => setDialog({ kind: 'column-edit', column: target })}

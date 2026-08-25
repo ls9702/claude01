@@ -18,6 +18,11 @@ interface BoardColumnViewProps {
   scheduledCounts?: Record<Id, number>;
   /** cardId → per-sheet split behind the badge's popover. */
   scheduleBreakdowns?: Record<Id, SheetScheduleCount[]>;
+  /**
+   * Cards carrying a comment by the other person this device's profile has not
+   * read yet (M24). Omitted by the timeline rail — see `BoardView`.
+   */
+  newCommentCards?: ReadonlySet<Id>;
   onOpenCard: (card: Card) => void;
   /** Omitted in the timeline rail — the rail does not create cards. */
   onAddCard?: (column: BoardColumn) => void;
@@ -53,6 +58,7 @@ export default function BoardColumnView({
   currency,
   scheduledCounts,
   scheduleBreakdowns,
+  newCommentCards,
   onAddCard,
   onOpenCard,
   onEditColumn,
@@ -157,6 +163,7 @@ export default function BoardColumnView({
                 color={column.color}
                 scheduledCount={scheduledCounts?.[card.id] ?? 0}
                 scheduleBreakdown={scheduleBreakdowns?.[card.id]}
+                hasNewComments={newCommentCards?.has(card.id) ?? false}
                 onOpen={onOpenCard}
               />
             ))}
