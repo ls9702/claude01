@@ -188,9 +188,17 @@ export default function MemoComposer({ tripId, onSent }: { tripId: Id; onSent: (
    * Enter sends **on a desktop only**, where the keyboard has a Shift to hold
    * for a newline. On a phone the on-screen return key is the only way to get
    * a second line, and stealing it would make multi-line messages impossible.
+   *
+   * An Enter that lands **while the IME is still composing** is not a send
+   * (M23). 한글 is typed syllable by syllable, and committing the one under
+   * construction fires a keydown of its own — honouring it sent the message
+   * *minus* its last syllable, which then arrived alone as a second bubble
+   * ("…있어요" + "오"). `isComposing` is the standards answer; `keyCode 229`
+   * catches the browsers that report composition that way instead.
    */
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (!isDesktop || event.key !== 'Enter' || event.shiftKey) return;
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     send();
   };

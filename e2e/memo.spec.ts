@@ -203,6 +203,57 @@ test('내 메시지를 지우면 「삭제된 메시지」 자리만 남는다',
   await expect(page.getByTestId('memo-msg-menu')).toHaveCount(1);
 });
 
+test('한글 조합 중의 Enter는 전송이 아니다 — 마지막 글자가 따로 가지 않는다 (M23)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+
+  await createTrip(page, '교토');
+  await openMemo(page);
+
+  // IME가 마지막 음절을 확정하며 쏘는 keydown — `isComposing`이 그 표식이다.
+  // 예전에는 이걸 전송으로 받아들여 "…있어요"가 먼저 가고 "오"가 뒤따랐다.
+  await page.getByTestId('memo-input').fill('료칸 예약했어요');
+  await page.getByTestId('memo-input').evaluate((node) => {
+    node.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+        isComposing: true,
+      }),
+    );
+  });
+  await expect(page.getByTestId('memo-msg')).toHaveCount(0);
+  await expect(page.getByTestId('memo-input')).toHaveValue('료칸 예약했어요');
+
+  // 조합이 끝난 뒤의 진짜 Enter는 여전히 보낸다 — 한 줄, 통째로.
+  await page.getByTestId('memo-input').press('Enter');
+  const bubble = page.getByTestId('memo-msg');
+  await expect(bubble).toHaveCount(1);
+  await expect(bubble).toContainText('료칸 예약했어요');
+  await expect(page.getByTestId('memo-input')).toHaveValue('');
+});
+
+test('내 말풍선을 길게 누르면(우클릭) 삭제 메뉴가 뜬다 (M23)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+
+  await createTrip(page, '하코다테');
+  await openMemo(page);
+  await send(page, '야경은 로프웨이로');
+
+  // 마우스의 우클릭은 터치의 길게 누르기와 같은 `contextmenu` 경로를 탄다.
+  await page.getByTestId('memo-bubble').click({ button: 'right' });
+  await expect(page.getByTestId('memo-msg-menu-panel')).toBeVisible();
+  await page.getByTestId('memo-msg-delete').click();
+  await expect(page.getByTestId('memo-delete-confirm')).toBeVisible();
+  await page.getByTestId('confirm-accept').click();
+
+  const bubbles = page.getByTestId('memo-msg');
+  await expect(bubbles).toHaveCount(1);
+  await expect(bubbles).toHaveAttribute('data-removed', 'true');
+});
+
 test('상대가 쓴 메시지는 아바타를 달고 왼쪽에 선다', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('tab-bar')).toBeVisible();

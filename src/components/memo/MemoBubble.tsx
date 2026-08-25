@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PROFILES, isProfileId } from '../../profile/profile';
 import { usePhotoUrl } from '../../stores/photoBlobs';
 import { memoClock, isRemoved } from '../../memo/thread';
@@ -11,6 +11,13 @@ import { POPOVER_ROW_DANGER_CLASS } from '../common/formStyles';
 
 /** Frozen copy the e2e suite reads. */
 export const REMOVED_TEXT = '삭제된 메시지예요';
+
+/**
+ * How long a finger has to rest on one's own bubble before the delete menu
+ * opens (M23). Longer than a tap, shorter than dnd-kit's 250ms would feel
+ * here — 500ms is what messengers have trained thumbs to expect.
+ */
+export const LONG_PRESS_MS = 500;
 
 interface MemoBubbleProps {
   memo: MemoMessage;
@@ -64,23 +71,50 @@ function PhotoTile({ photo, alone, onOpen }: { photo: CardPhoto; alone: boolean;
  *
  * The 더보기 menu only exists on one's own live message: deleting someone
  * else's line is not a thing this app offers, and a removed one has nothing
- * left to delete.
+ * left to delete. It opens two ways (M23): the ⋯ button, and — because that is
+ * what a decade of messengers has taught every thumb — **길게 누르기** on the
+ * bubble itself. The long press is a timer on the touch events plus a
+ * `contextmenu` handler (Android fires one mid-press; on a mouse it doubles as
+ * right-click), and one's own live bubble is `select-none` so the browser's
+ * text-selection callout does not fight the menu for the same gesture.
  */
 export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
+  /** The element the menu hangs off — doubles as the open flag. */
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const bubbleRef = useRef<HTMLDivElement | null>(null);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const menuOpen = menuAnchor !== null;
 
   const removed = isRemoved(memo);
   const photos = memo.photos ?? [];
   const authorLabel = isProfileId(memo.by) ? PROFILES[memo.by].label : null;
+  /** Only one's own live message has a menu to offer. */
+  const deletable = own && !removed;
+
+  const cancelPress = (): void => {
+    if (pressTimer.current === null) return;
+    clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
+  const startPress = (): void => {
+    cancelPress();
+    pressTimer.current = setTimeout(() => {
+      pressTimer.current = null;
+      setMenuAnchor(bubbleRef.current);
+    }, LONG_PRESS_MS);
+  };
+  // A bubble unmounted mid-press (the message just synced away) must not fire.
+  useEffect(() => cancelPress, []);
 
   const bubbleClass = [
     'w-fit max-w-[16rem] rounded-lg px-3 py-2 text-label font-normal sm:max-w-md',
     removed
       ? 'border border-dashed border-line bg-transparent text-ink-faint'
       : own
-        ? 'bg-inverse text-surface'
+        ? 'select-none bg-inverse text-surface'
         : 'bg-surface text-ink shadow-raise',
   ].join(' ');
 
@@ -110,7 +144,24 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
         {/* Bubble, timestamp and ⋯ on one baseline. Reversed for my own line so
             the stamp always sits on the *inside* edge, the way a chat reads. */}
         <div className={`flex items-end gap-1 ${own ? 'flex-row-reverse' : ''}`}>
-          <div className={bubbleClass}>
+          <div
+            ref={bubbleRef}
+            data-testid="memo-bubble"
+            className={bubbleClass}
+            {...(deletable
+              ? {
+                  onTouchStart: startPress,
+                  onTouchMove: cancelPress,
+                  onTouchEnd: cancelPress,
+                  onTouchCancel: cancelPress,
+                  onContextMenu: (event) => {
+                    event.preventDefault();
+                    cancelPress();
+                    setMenuAnchor(bubbleRef.current);
+                  },
+                }
+              : {})}
+          >
             {removed ? (
               REMOVED_TEXT
             ) : (
@@ -148,16 +199,16 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
             </span>
           )}
 
-          {own && !removed ? (
+          {deletable ? (
             <button
               type="button"
-              ref={setMenuAnchor}
+              ref={buttonRef}
               data-testid="memo-msg-menu"
               data-memo-id={memo.id}
               aria-label="메시지 메뉴 (삭제)"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
+              onClick={() => setMenuAnchor((open) => (open ? null : buttonRef.current))}
               // 44px on a phone, M9's smaller square on a mouse-driven desktop.
               className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink lg:h-8 lg:w-8"
             >
@@ -171,13 +222,13 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
         <AnchoredMenu
           anchor={menuAnchor}
           testId="memo-msg-menu-panel"
-          onClose={() => setMenuOpen(false)}
+          onClose={() => setMenuAnchor(null)}
         >
           <button
             type="button"
             data-testid="memo-msg-delete"
             onClick={() => {
-              setMenuOpen(false);
+              setMenuAnchor(null);
               onDelete(memo);
             }}
             className={POPOVER_ROW_DANGER_CLASS}
