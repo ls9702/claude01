@@ -1,14 +1,14 @@
 import { expect, test } from '@playwright/test';
 
-test('앱이 뜨고 탭 4개가 보인다', async ({ page }) => {
+test('앱이 뜨고 탭 5개가 보인다', async ({ page }) => {
   await page.goto('/');
 
   const tabBar = page.getByTestId('tab-bar');
   await expect(tabBar).toBeVisible();
-  await expect(tabBar.getByRole('tab')).toHaveCount(4);
+  await expect(tabBar.getByRole('tab')).toHaveCount(5);
   // Each tab renders an icon + its Korean label.
-  await expect(tabBar.getByRole('tab')).toContainText(['여행', '보드', '일정', '지도']);
-  for (const id of ['trips', 'board', 'timeline', 'map']) {
+  await expect(tabBar.getByRole('tab')).toContainText(['여행', '보드', '일정', '지도', '메모']);
+  for (const id of ['trips', 'board', 'timeline', 'map', 'memo']) {
     await expect(tabBar.getByTestId(`tab-${id}`)).toBeVisible();
   }
 

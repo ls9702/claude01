@@ -11,7 +11,16 @@ import Icon from './Icon';
 const SWIPE_PX = 40;
 
 interface PhotoLightboxProps {
-  cardId: Id;
+  /** The card whose strip this was opened from (M10). */
+  cardId?: Id;
+  /**
+   * …or the 메모 message whose bubble it was (M21). Exactly one of the two.
+   *
+   * A memo's photos are deleted **with the message**, never one at a time, so
+   * this mode hides the 삭제 footer rather than offering a button that would
+   * have to invent a "remove one photo from a sent message" mutation.
+   */
+  memoId?: Id;
   /** Which photo to open on. Clamped, so a stale index is harmless. */
   startIndex: number;
   onClose: () => void;
@@ -55,8 +64,15 @@ function LightboxImage({ id }: { id: Id }) {
  * opposite reason: 카드/여행 삭제 is offered back by a 실행 취소 toast, but the
  * bytes behind a photo are swept for good. A question now beats a regret later.
  */
-export default function PhotoLightbox({ cardId, startIndex, onClose }: PhotoLightboxProps) {
-  const photos = useWorkspaceStore((s) => s.workspace.cards[cardId]?.photos);
+export default function PhotoLightbox({
+  cardId,
+  memoId,
+  startIndex,
+  onClose,
+}: PhotoLightboxProps) {
+  const photos = useWorkspaceStore((s) =>
+    memoId ? s.workspace.memos?.[memoId]?.photos : cardId ? s.workspace.cards[cardId]?.photos : undefined,
+  );
   const removePhoto = useWorkspaceStore((s) => s.removePhoto);
   const [index, setIndex] = useState(startIndex);
   const [asking, setAsking] = useState(false);
@@ -119,7 +135,7 @@ export default function PhotoLightbox({ cardId, startIndex, onClose }: PhotoLigh
   const confirmDelete = (): void => {
     const photoId = current?.id;
     setAsking(false);
-    if (!photoId) return;
+    if (!photoId || !cardId) return;
     removePhoto(cardId, photoId);
     // The bytes stay put for now — the sweep collects them once the grace
     // period has passed and nothing has picked the id back up.
@@ -205,19 +221,22 @@ export default function PhotoLightbox({ cardId, startIndex, onClose }: PhotoLigh
         ) : null}
       </div>
 
+      {/* 메모 사진은 메시지째로 지운다 — 이 자리에 버튼이 없다 (M21). */}
       <footer className="flex shrink-0 items-center justify-center px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3">
-        <button
-          type="button"
-          data-testid="photo-lightbox-delete"
-          onClick={(event) => {
-            event.stopPropagation();
-            setAsking(true);
-          }}
-          className="inline-flex h-11 items-center justify-center gap-1 rounded-md px-4 text-body font-semibold text-danger transition-colors duration-[140ms] ease-quick hover:bg-surface/10"
-        >
-          <Icon name="trash" size={20} />
-          삭제
-        </button>
+        {cardId ? (
+          <button
+            type="button"
+            data-testid="photo-lightbox-delete"
+            onClick={(event) => {
+              event.stopPropagation();
+              setAsking(true);
+            }}
+            className="inline-flex h-11 items-center justify-center gap-1 rounded-md px-4 text-body font-semibold text-danger transition-colors duration-[140ms] ease-quick hover:bg-surface/10"
+          >
+            <Icon name="trash" size={20} />
+            삭제
+          </button>
+        ) : null}
       </footer>
 
       {asking ? (

@@ -71,7 +71,7 @@ test('첫 방문에는 누구인지 묻고, 고른 사람이 카드와 코멘트
 
   // …and now the app, with the chosen face in the top bar's utility zone.
   await expect(page.getByTestId('view-trips')).toBeVisible();
-  await expect(page.getByTestId('tab-bar').getByRole('tab')).toHaveCount(4);
+  await expect(page.getByTestId('tab-bar').getByRole('tab')).toHaveCount(5);
   await expect(page.getByTestId('profile-chip')).toHaveAttribute('data-profile', 'hoyabom');
 
   await createTrip(page, '오사카');

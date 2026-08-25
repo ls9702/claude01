@@ -228,6 +228,44 @@ export interface TimelineEntry {
   updatedAt: Millis;
 }
 
+/**
+ * One line of the trip's 메모 thread (M21) — text, photos, or both.
+ *
+ * A top-level entity rather than a field on the trip, for the same reason cards
+ * are: two people typing at once must not lose one of the two messages, and an
+ * entity carrying its own `updatedAt` is exactly what `sync/merge` folds per id
+ * instead of whole-list LWW.
+ *
+ * There is **no order array**. A chat is ordered by when it was said, so the
+ * thread sorts by `createdAt` (then `id`, so ties never flap) — see
+ * `src/memo/thread.ts`. That also means a message written offline lands in the
+ * right place in the other person's thread the moment it syncs, rather than at
+ * the end of an array whichever device happened to push last.
+ */
+export interface MemoMessage {
+  id: Id;
+  tripId: Id;
+  text?: string;
+  /** Same shape — and the same idb/blob split — as {@link Card.photos}. */
+  photos?: CardPhoto[];
+  /** Who wrote it. Same shape and same caveats as {@link CardExpense.by}. */
+  by?: string;
+  /**
+   * Soft delete: when set, `text`/`photos` have **already been stripped** and
+   * the UI renders a 삭제된 메시지 stub in place of the bubble.
+   *
+   * Deliberately not a {@link Tombstone}: `Tombstone['entity']` is a closed set
+   * an older build looks up in a map, so a `'memo'` tombstone reaching a device
+   * that predates this milestone would crash its merge. A soft delete is just
+   * another edit and rides the ordinary entity LWW — and stripping the photo
+   * ids here is what lets the existing GC (and the server delete behind it)
+   * reclaim the bytes with no new machinery at all.
+   */
+  removedAt?: Millis;
+  createdAt: Millis;
+  updatedAt: Millis;
+}
+
 /** Record of a deletion, kept so sync/merge does not resurrect the entity. */
 export interface Tombstone {
   id: Id;
@@ -261,6 +299,16 @@ export interface Workspace {
    * stays 1.
    */
   seenBy?: Record<string, Millis>;
+  /**
+   * The 메모 threads of every trip (M21), keyed by message id.
+   *
+   * One flat map rather than one per trip: it merges like every other entity
+   * map, and each message carries its own `tripId`. Optional and additive — a
+   * workspace saved before M21 has no field, {@link emptyWorkspace} still does
+   * not create one (same reasoning as {@link Workspace.seenBy}), and
+   * `schemaVersion` stays 1.
+   */
+  memos?: Record<Id, MemoMessage>;
 }
 
 /** A fresh, empty workspace. */

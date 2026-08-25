@@ -29,6 +29,7 @@ import type {
   Card,
   Day,
   Id,
+  MemoMessage,
   Millis,
   Sheet,
   TimelineEntry,
@@ -152,11 +153,24 @@ interface Draft {
   cards: Record<Id, Card>;
   days: Record<Id, Day>;
   entries: Record<Id, TimelineEntry>;
+  /**
+   * 메모 (M21). Merged like any other entity map — a soft-deleted message is
+   * just a message whose newest edit stripped it, so LWW carries the delete.
+   */
+  memos: Record<Id, MemoMessage>;
   tombs: Map<string, Tombstone>;
 }
 
-/** The map a tombstone `entity` refers to. */
-const MAP_OF: Record<EntityKind, keyof Omit<Draft, 'tombs'>> = {
+/**
+ * The map a tombstone `entity` refers to.
+ *
+ * `memos` is deliberately **not** reachable from here: `Tombstone['entity']` is
+ * a closed set that every build looks up in this table, so a `'memo'` tombstone
+ * arriving at a device that predates M21 would index it with `undefined` and
+ * throw on the very next line. Memo deletions are soft (see
+ * {@link MemoMessage.removedAt}) precisely so nothing has to be added here.
+ */
+const MAP_OF: Record<EntityKind, keyof Omit<Draft, 'tombs' | 'memos'>> = {
   trip: 'trips',
   sheet: 'sheets',
   column: 'columns',
@@ -232,6 +246,16 @@ function repairReferences(draft: Draft, now: Millis): void {
     if (!draft.trips[entry.tripId] || !draft.cards[entry.cardId] || !draft.days[entry.dayId]) {
       kill(draft, 'entry', entry, now);
     }
+  }
+
+  // A memo whose trip is gone is simply dropped — no tombstone, because there
+  // is no memo tombstone to write (see `MAP_OF`). It does not need one: the
+  // rule is a pure function of what survived the merge, so both devices reach
+  // the same verdict on their own and the deletion converges without being
+  // announced. The trip's own tombstone is what keeps the trip from coming
+  // back and taking its thread with it.
+  for (const memo of Object.values(draft.memos)) {
+    if (!draft.trips[memo.tripId]) delete draft.memos[memo.id];
   }
 }
 
@@ -322,7 +346,8 @@ export function workspaceEquals(a: Workspace, b: Workspace): boolean {
     // `undefined` and `{}` are not the same value here, but `deepEqual` treats
     // a missing key and an `undefined` one alike — which is what makes a
     // pre-M13 workspace compare equal to itself after a round trip.
-    deepEqual(a.seenBy, b.seenBy)
+    deepEqual(a.seenBy, b.seenBy) &&
+    deepEqual(a.memos, b.memos)
   );
 }
 
@@ -342,6 +367,8 @@ export function merge(local: Workspace, remote: Workspace, now: Millis = Date.no
     cards: mergeMap(local.cards, remote.cards),
     days: mergeMap(local.days, remote.days),
     entries: mergeMap(local.entries, remote.entries),
+    // Absent-safe on both sides: a pre-M21 workspace has no field at all.
+    memos: mergeMap(local.memos ?? {}, remote.memos ?? {}),
     tombs: mergeTombstones(local.tombstones, remote.tombstones),
   };
 
@@ -374,5 +401,9 @@ export function merge(local: Workspace, remote: Workspace, now: Millis = Date.no
     entries: draft.entries,
     tombstones,
     seenBy: mergeSeenBy(local.seenBy, remote.seenBy),
+    // `undefined` rather than `{}` for an empty thread, for exactly the reason
+    // `mergeSeenBy` does it: a pre-M21 workspace has to stay byte-identical to
+    // itself through a merge, or every pull would schedule a pointless push.
+    memos: Object.keys(draft.memos).length > 0 ? draft.memos : undefined,
   };
 }

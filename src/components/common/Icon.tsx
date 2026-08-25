@@ -38,7 +38,8 @@ export type IconName =
   | 'camera'
   | 'route'
   | 'drag'
-  | 'sparkle';
+  | 'sparkle'
+  | 'chat';
 
 /** `name` → the path data drawn inside a `0 0 24 24` box. */
 const PATHS: Record<IconName, string> = {
@@ -78,6 +79,11 @@ const PATHS: Record<IconName, string> = {
   // glyph in the set that ignores `currentColor`.
   sparkle:
     'M10 3l1.9 5.1L17 10l-5.1 1.9L10 17l-1.9-5.1L3 10l5.1-1.9L10 3ZM18 14l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9L18 14Z',
+  // 메모 탭 (M21). A bubble with a tail, like `comment`, but with the three
+  // dots of a conversation in it — the tab is a thread, not one note, and the
+  // two glyphs have to be told apart at 24px in a five-cell tab row.
+  chat:
+    'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7l-4.5 3.5V15H6a2 2 0 0 1-2-2V6ZM9 9.5h.01M12 9.5h.01M15 9.5h.01',
 };
 
 interface IconProps {

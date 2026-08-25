@@ -1232,3 +1232,104 @@ describe('markSeen (M13)', () => {
     expect(typeof ws().seenBy!.song).toBe('number');
   });
 });
+
+describe('addMemoMessage / removeMemoMessage (M21)', () => {
+  const photo = (id: string) => ({ id, w: 1_600, h: 1_200, bytes: 240_000, createdAt: 1 });
+
+  beforeEach(() => {
+    useProfileStore.setState({ profileId: null });
+  });
+
+  it('메시지를 만들고 여행에 매단다', () => {
+    const tripId = store().addTrip('오사카');
+    const id = store().addMemoMessage(tripId, { text: '  내일 우메다 어때?  ' })!;
+
+    const memo = ws().memos![id];
+    expect(memo).toMatchObject({ id, tripId, text: '내일 우메다 어때?' });
+    expect(memo.createdAt).toBeGreaterThan(0);
+    expect(memo.updatedAt).toBe(memo.createdAt);
+    expect(store().dirty).toBe(true);
+  });
+
+  it('사진만 있는 메시지도 메시지다', () => {
+    const tripId = store().addTrip('오사카');
+    const id = store().addMemoMessage(tripId, { photos: [photo('p1')] })!;
+
+    expect(ws().memos![id].photos!.map((item) => item.id)).toEqual(['p1']);
+    expect(ws().memos![id].text).toBeUndefined();
+  });
+
+  it('빈 메시지와 없는 여행은 거절한다 — 워크스페이스도 그대로다', () => {
+    const tripId = store().addTrip('오사카');
+    const before = ws();
+    expect(store().addMemoMessage(tripId, { text: '   ' })).toBeNull();
+    expect(store().addMemoMessage(tripId, {})).toBeNull();
+    expect(store().addMemoMessage(tripId, { text: '', photos: [] })).toBeNull();
+    expect(store().addMemoMessage('nope', { text: '있음' })).toBeNull();
+    expect(ws()).toBe(before);
+    expect(ws().memos).toBeUndefined();
+  });
+
+  it('지금 프로필을 찍고, 프로필이 없으면 필드 자체가 없다', () => {
+    const tripId = store().addTrip('오사카');
+    const anonymous = store().addMemoMessage(tripId, { text: '익명' })!;
+    expect('by' in ws().memos![anonymous]).toBe(false);
+
+    useProfileStore.setState({ profileId: 'hoyabom' });
+    const mine = store().addMemoMessage(tripId, { text: '나야' })!;
+    expect(ws().memos![mine].by).toBe('hoyabom');
+    // 전환은 이미 쓴 것을 고쳐 쓰지 않는다.
+    expect('by' in ws().memos![anonymous]).toBe(false);
+  });
+
+  it('삭제는 톰스톤이 아니라 소프트 삭제다 — 본문과 사진만 사라진다', () => {
+    useProfileStore.setState({ profileId: 'song' });
+    const tripId = store().addTrip('오사카');
+    const id = store().addMemoMessage(tripId, { text: '오타났다', photos: [photo('p1')] })!;
+    const created = ws().memos![id].createdAt;
+
+    store().removeMemoMessage(id);
+
+    const memo = ws().memos![id];
+    expect(memo.removedAt).toBeGreaterThanOrEqual(created);
+    expect(memo.updatedAt).toBe(memo.removedAt);
+    expect(memo.createdAt).toBe(created);
+    // 누가 썼는지는 남는다(빈칸의 자리를 잡아 준다). 내용과 사진은 남지 않는다.
+    expect(memo.by).toBe('song');
+    expect('text' in memo).toBe(false);
+    expect('photos' in memo).toBe(false);
+    // 톰스톤은 하나도 생기지 않는다 — 구버전 클라이언트의 병합이 깨지지 않는다.
+    expect(ws().tombstones).toEqual([]);
+  });
+
+  it('없는 메시지, 이미 지운 메시지는 아무 것도 하지 않는다', () => {
+    const tripId = store().addTrip('오사카');
+    const id = store().addMemoMessage(tripId, { text: '하나' })!;
+    store().removeMemoMessage(id);
+
+    const before = ws();
+    store().removeMemoMessage(id);
+    store().removeMemoMessage('nope');
+    expect(ws()).toBe(before);
+  });
+
+  it('여행을 지우면 그 스레드도 같이 사라진다 (톰스톤 없이)', () => {
+    const kept = store().addTrip('삿포로');
+    const doomed = store().addTrip('오사카');
+    const keptId = store().addMemoMessage(kept, { text: '남는다' })!;
+    store().addMemoMessage(doomed, { text: '사라진다' });
+
+    store().deleteTrip(doomed);
+
+    expect(Object.keys(ws().memos!)).toEqual([keptId]);
+    expect(ws().tombstones.some((tomb) => tomb.entity === ('memo' as never))).toBe(false);
+  });
+
+  it('마지막 스레드가 비면 memos 키 자체가 없어진다 (M21 이전과 같은 모양)', () => {
+    const tripId = store().addTrip('오사카');
+    store().addMemoMessage(tripId, { text: '하나' });
+    store().deleteTrip(tripId);
+
+    expect(ws().memos).toBeUndefined();
+  });
+});

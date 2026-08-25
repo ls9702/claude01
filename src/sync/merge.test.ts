@@ -4,6 +4,7 @@ import type {
   Card,
   Day,
   Id,
+  MemoMessage,
   Millis,
   Sheet,
   TimelineEntry,
@@ -111,6 +112,15 @@ const entry = (
   dayId,
   startMin: 540,
   durationMin: 60,
+  createdAt: at,
+  updatedAt: at,
+  ...over,
+});
+
+const memo = (id: Id, tripId: Id, at: Millis, over: Partial<MemoMessage> = {}): MemoMessage => ({
+  id,
+  tripId,
+  text: `메모 ${id}`,
   createdAt: at,
   updatedAt: at,
   ...over,
@@ -774,5 +784,100 @@ describe('merge — seenBy', () => {
     expect(workspaceEquals(a, a)).toBe(true);
     expect(workspaceEquals(a, b)).toBe(false);
     expect(workspaceEquals(a, ws())).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * memos — 메모 스레드 (M21)
+ * ------------------------------------------------------------------ */
+
+describe('merge — memos', () => {
+  /** A workspace with one trip and whatever memos the case needs. */
+  const withMemos = (memos: MemoMessage[], parts: Parts = {}): Workspace => ({
+    ...ws({ trips: [trip('t1', T(1))], ...parts }),
+    memos: byId(memos),
+  });
+
+  it('양쪽 다 없으면 필드를 만들지 않는다 — M21 이전 워크스페이스는 그대로다', () => {
+    const before = ws({ trips: [trip('t1', T(1))] });
+    const merged = merge(before, before, NOW);
+    expect(merged.memos).toBeUndefined();
+    expect(workspaceEquals(merged, before)).toBe(true);
+  });
+
+  it('메시지도 엔티티 LWW다 — 늦게 고친 쪽이 이긴다', () => {
+    const local = withMemos([memo('m1', 't1', T(5), { text: '로컬', updatedAt: T(20) })]);
+    const remote = withMemos([memo('m1', 't1', T(5), { text: '리모트', updatedAt: T(10) })]);
+
+    expect(merge(local, remote, NOW).memos?.m1.text).toBe('로컬');
+    // 무승부는 다른 엔티티와 똑같이 리모트가 가져간다.
+    const tie = withMemos([memo('m1', 't1', T(5), { text: '리모트', updatedAt: T(20) })]);
+    expect(merge(local, tie, NOW).memos?.m1.text).toBe('리모트');
+  });
+
+  it('각 기기가 따로 쓴 메시지는 둘 다 살아남는다', () => {
+    const local = withMemos([memo('m1', 't1', T(5), { by: 'song' })]);
+    const remote = withMemos([memo('m2', 't1', T(6), { by: 'hoyabom' })]);
+
+    const merged = merge(local, remote, NOW);
+    expect(Object.keys(merged.memos ?? {}).sort()).toEqual(['m1', 'm2']);
+  });
+
+  it('소프트 삭제는 그냥 최신 수정이라 병합을 그대로 통과한다', () => {
+    const removed = memo('m1', 't1', T(5), {
+      text: undefined,
+      photos: undefined,
+      removedAt: T(30),
+      updatedAt: T(30),
+    });
+    const local = withMemos([removed]);
+    const remote = withMemos([memo('m1', 't1', T(5), { text: '아직 살아있는 사본' })]);
+
+    const merged = merge(local, remote, NOW);
+    expect(merged.memos?.m1.removedAt).toBe(T(30));
+    expect(merged.memos?.m1.text).toBeUndefined();
+    // 톰스톤은 하나도 생기지 않는다 — 그게 이 설계의 핵심이다.
+    expect(merged.tombstones).toEqual([]);
+  });
+
+  it('여행이 사라진 메모는 조용히 버려진다 (톰스톤 없이, 양쪽이 같은 답을 낸다)', () => {
+    const orphan: Workspace = { ...ws(), memos: byId([memo('m1', 'gone', T(5))]) };
+    const merged = merge(orphan, ws(), NOW);
+
+    expect(merged.memos).toBeUndefined();
+    expect(merged.tombstones).toEqual([]);
+    // 결정이 순수하니 인자 순서와 무관하고, 다시 병합해도 흔들리지 않는다.
+    expect(merge(ws(), orphan, NOW).memos).toBeUndefined();
+    expect(merge(merged, merged, NOW)).toEqual(merged);
+  });
+
+  it('여행 톰스톤이 이기면 그 스레드도 함께 사라진다', () => {
+    const local = withMemos([memo('m1', 't1', T(5))]);
+    const remote: Workspace = { ...ws({ tombstones: [tomb('trip', 't1', T(50))] }) };
+
+    const merged = merge(local, remote, NOW);
+    expect(merged.trips.t1).toBeUndefined();
+    expect(merged.memos).toBeUndefined();
+  });
+
+  it('빈 결과는 `{}`가 아니라 undefined다 — 무의미한 푸시를 부르지 않는다', () => {
+    const empty: Workspace = { ...ws({ trips: [trip('t1', T(1))] }), memos: {} };
+    expect(merge(empty, empty, NOW).memos).toBeUndefined();
+  });
+
+  it('멱등이다', () => {
+    const local = withMemos([memo('m1', 't1', T(5))]);
+    const remote = withMemos([memo('m2', 't1', T(6))]);
+    const once = merge(local, remote, NOW);
+    expect(merge(local, once, NOW)).toEqual(once);
+    expect(merge(once, once, NOW)).toEqual(once);
+  });
+
+  it('workspaceEquals가 메모 차이를 본다', () => {
+    const a = withMemos([memo('m1', 't1', T(5), { text: '하나' })]);
+    const b = withMemos([memo('m1', 't1', T(5), { text: '둘' })]);
+    expect(workspaceEquals(a, a)).toBe(true);
+    expect(workspaceEquals(a, b)).toBe(false);
+    expect(workspaceEquals(a, ws({ trips: [trip('t1', T(1))] }))).toBe(false);
   });
 });

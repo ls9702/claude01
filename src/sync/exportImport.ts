@@ -198,11 +198,17 @@ export async function exportJsonWithPhotos(now: Millis = Date.now()): Promise<nu
   return Object.keys(photos).length;
 }
 
-/** Every photo id the workspace mentions, oldest card first. */
+/**
+ * Every photo id the workspace mentions, oldest card first — then the 메모
+ * thread's own photos (M21), which a 사진 포함 backup must carry too.
+ */
 function referencedIds(workspace: Workspace): Id[] {
   const ids = new Set<Id>();
   for (const card of Object.values(workspace.cards)) {
     for (const photo of card.photos ?? []) ids.add(photo.id);
+  }
+  for (const memo of Object.values(workspace.memos ?? {})) {
+    for (const photo of memo.photos ?? []) ids.add(photo.id);
   }
   return [...ids];
 }

@@ -7,6 +7,7 @@ import TripsView from '../trips/TripListView';
 import BoardView from '../board/BoardView';
 import TimelineView from '../timeline/TimelineView';
 import MapView from '../map/MapView';
+import MemoView from '../memo/MemoView';
 import Icon from '../common/Icon';
 import PersistBanner from '../common/PersistBanner';
 import ProfilePicker from '../common/ProfilePicker';
@@ -17,6 +18,7 @@ const VIEWS: Record<TabId, () => React.JSX.Element> = {
   board: BoardView,
   timeline: TimelineView,
   map: MapView,
+  memo: MemoView,
 };
 
 /** Minimal splash shown until IndexedDB rehydration completes. */

@@ -240,13 +240,22 @@ export async function preparePhoto(file: Blob): Promise<PreparedPhoto> {
  * uploader (upload blobs somebody does), and the backup writer. Two of those
  * are in `stores/`, one in `sync/`, and hanging it off either would put a
  * needless edge — in one case a cycle — between them.
+ *
+ * 메모 photos (M21) count exactly like card photos, and walking them here is
+ * the *only* wiring that milestone needed on the photo side: retention, the
+ * `image.php` upload, the lazy download and 사진 포함 내보내기 all ask this one
+ * question. A workspace with no `memos` field answers it as before.
  */
 export function referencedPhotoIds(workspace: {
   cards: Record<string, { photos?: { id: string }[] }>;
+  memos?: Record<string, { photos?: { id: string }[] }>;
 }): Set<string> {
   const ids = new Set<string>();
   for (const card of Object.values(workspace.cards)) {
     for (const photo of card.photos ?? []) ids.add(photo.id);
+  }
+  for (const memo of Object.values(workspace.memos ?? {})) {
+    for (const photo of memo.photos ?? []) ids.add(photo.id);
   }
   return ids;
 }
@@ -260,7 +269,7 @@ export interface PhotoUsage {
 }
 
 /**
- * Totals every photo the workspace still refers to (M10).
+ * Totals every photo the workspace still refers to (M10, + 메모 in M21).
  *
  * Counts *references*, not blobs: an id that appears on two cards — which only
  * a hand-edited backup can produce — is one photo of storage, and a blob no
@@ -268,15 +277,19 @@ export interface PhotoUsage {
  */
 export function photoUsage(workspace: {
   cards: Record<string, { photos?: { id: string; bytes: number }[] }>;
+  memos?: Record<string, { photos?: { id: string; bytes: number }[] }>;
 }): PhotoUsage {
   const seen = new Map<string, number>();
-  for (const card of Object.values(workspace.cards)) {
-    for (const photo of card.photos ?? []) {
+  const count = (photos?: { id: string; bytes: number }[]): void => {
+    for (const photo of photos ?? []) {
       if (!seen.has(photo.id)) {
         seen.set(photo.id, Number.isFinite(photo.bytes) ? Math.max(0, photo.bytes) : 0);
       }
     }
-  }
+  };
+  for (const card of Object.values(workspace.cards)) count(card.photos);
+  for (const memo of Object.values(workspace.memos ?? {})) count(memo.photos);
+
   let bytes = 0;
   for (const size of seen.values()) bytes += size;
   return { count: seen.size, bytes };

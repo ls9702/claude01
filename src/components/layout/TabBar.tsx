@@ -10,13 +10,15 @@ const TAB_ICONS: Record<TabId, IconName> = {
   board: 'board',
   timeline: 'calendar',
   map: 'map',
+  memo: 'chat',
 };
 
 /**
  * Bottom tab bar on mobile; a top bar from `lg` (≥1024px) up.
  *
- * **The tab row holds tabs and nothing else** (M9 §3.3): exactly four cells,
- * four `role="tab"`s. The backup nudge and the sync indicator are not tabs, so
+ * **The tab row holds tabs and nothing else** (M9 §3.3): exactly five cells
+ * (four until 메모 arrived in M21), five `role="tab"`s. The backup nudge and
+ * the sync indicator are not tabs, so
  * on desktop they live in a utility zone pushed to the right, and on mobile the
  * app shell renders them above the active view instead.
  */
@@ -38,7 +40,7 @@ export default function TabBar() {
         'lg:pt-[env(safe-area-inset-top)]',
       ].join(' ')}
     >
-      <div className="mx-auto grid max-w-3xl grid-cols-4 lg:flex lg:h-14 lg:max-w-5xl lg:items-center lg:gap-1 lg:px-6">
+      <div className="mx-auto grid max-w-3xl grid-cols-5 lg:flex lg:h-14 lg:max-w-5xl lg:items-center lg:gap-1 lg:px-6">
         <span className="hidden select-none pr-4 text-title text-ink lg:block">Trip Board</span>
 
         {TAB_IDS.map((tab) => {
@@ -74,7 +76,7 @@ export default function TabBar() {
         })}
 
         {/* Desktop only. Below `lg` these two ride above the active view — a
-            tab bar with a fifth and sixth thing in it is not a tab bar. */}
+            tab bar with things in it that are not tabs is not a tab bar. */}
         {isDesktop ? (
           <div className="ml-auto flex items-center gap-2">
             <BackupNudge />

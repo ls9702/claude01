@@ -2,10 +2,10 @@ import { create } from 'zustand';
 import type { Workspace } from '../types/models';
 import { loadActiveIds, saveActiveIds, validActiveIds } from './uiPersist';
 
-/** The four top-level tabs: 여행 / 보드 / 일정 / 지도. */
-export type TabId = 'trips' | 'board' | 'timeline' | 'map';
+/** The five top-level tabs: 여행 / 보드 / 일정 / 지도 / 메모. */
+export type TabId = 'trips' | 'board' | 'timeline' | 'map' | 'memo';
 
-export const TAB_IDS: readonly TabId[] = ['trips', 'board', 'timeline', 'map'];
+export const TAB_IDS: readonly TabId[] = ['trips', 'board', 'timeline', 'map', 'memo'];
 
 /** Korean labels shown in the tab bar. */
 export const TAB_LABELS: Record<TabId, string> = {
@@ -13,6 +13,7 @@ export const TAB_LABELS: Record<TabId, string> = {
   board: '보드',
   timeline: '일정',
   map: '지도',
+  memo: '메모',
 };
 
 export const isTabId = (value: string): value is TabId =>

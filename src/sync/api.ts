@@ -153,8 +153,15 @@ function asMeta(body: unknown, status: number): SyncMeta {
   };
 }
 
-/** The six `Record<Id, …>` maps a workspace carries. */
-const ENTITY_MAPS = ['trips', 'sheets', 'columns', 'cards', 'days', 'entries'] as const;
+/**
+ * The `Record<Id, …>` maps a workspace carries.
+ *
+ * `memos` (M21) is optional and simply absent from a pre-M21 payload, which
+ * both users of this list already handle: the presence check below only runs
+ * on keys that are there, and the `[]`-flattening shim only rewrites a value
+ * that actually arrived as an empty array.
+ */
+const ENTITY_MAPS = ['trips', 'sheets', 'columns', 'cards', 'days', 'entries', 'memos'] as const;
 
 /**
  * Repairs empty maps that came back as `[]` instead of `{}`.

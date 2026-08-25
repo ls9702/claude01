@@ -11,6 +11,7 @@ import {
   type FlightLeg,
   type GeoPoint,
   type Id,
+  type MemoMessage,
   type Millis,
   type Sheet,
   type TimelineEntry,
@@ -141,6 +142,9 @@ function draftOf(ws: Workspace): Draft {
     entries: { ...ws.entries },
     tombstones: [...ws.tombstones],
     seenBy: ws.seenBy ? { ...ws.seenBy } : undefined,
+    // Cloned only when it exists, so a workspace that never had a 메모 keeps
+    // no `memos` key at all — the shape every pre-M21 device already handles.
+    memos: ws.memos ? { ...ws.memos } : undefined,
   };
 }
 
@@ -481,6 +485,38 @@ export interface WorkspaceState {
    */
   removePhoto: (cardId: Id, photoId: Id) => void;
 
+  /* --- 메모 — M21 ------------------------------------------------------ */
+
+  /**
+   * Appends one message to a trip's 메모 thread.
+   *
+   * Photos arrive the same way {@link addPhoto}'s do — the caller has already
+   * written the bytes under those ids, so metadata never points at pixels that
+   * are not there. Text is trimmed; a message with neither text nor photos is
+   * not a message, and neither is one addressed to a trip that is gone.
+   *
+   * Returns the new message id, or `null` in either of those cases.
+   */
+  addMemoMessage: (
+    tripId: Id,
+    input: { text?: string; photos?: CardPhoto[] },
+  ) => Id | null;
+  /**
+   * Soft-deletes one message: strips its text and photos, stamps `removedAt`,
+   * and bumps `updatedAt` so the *edit* rides the ordinary entity LWW.
+   *
+   * Not a tombstone — see {@link MemoMessage.removedAt}. Stripping the photo
+   * ids is what hands those bytes to the GC (and, behind it, to the server
+   * delete), so a deleted photo message really does stop costing storage.
+   *
+   * Authorship is not checked here. Only the UI offers the affordance, and
+   * only on one's own messages — the same trust model as every other mutation
+   * in this store, which has exactly two users and no permission system.
+   *
+   * No-op for an unknown id, and for a message that is already removed.
+   */
+  removeMemoMessage: (id: Id) => void;
+
   /* --- 일정 (timeline) — M2a ------------------------------------------ */
 
   /** Appends a sheet to the trip's `sheetOrder`. Returns its id, or `null`. */
@@ -669,6 +705,19 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               if (entry.tripId !== id) continue;
               delete draft.entries[entry.id];
               bury(draft, 'entry', entry.id, now);
+            }
+
+            // The 메모 thread goes with the trip, and **without** a tombstone —
+            // there is no memo tombstone to write (see `sync/merge`'s `MAP_OF`),
+            // and none is needed: "a memo whose trip is gone is dropped" is the
+            // rule merge applies on its own, so the two ends agree without one.
+            // Dropping them here as well is what lets the photo GC reclaim the
+            // thread's bytes on a device that never syncs.
+            if (draft.memos) {
+              const kept = Object.fromEntries(
+                Object.entries(draft.memos).filter(([, memo]) => memo.tripId !== id),
+              );
+              draft.memos = Object.keys(kept).length > 0 ? kept : undefined;
             }
             return true;
           });
@@ -926,6 +975,56 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               { photos: kept.length > 0 ? kept : undefined },
               now,
             );
+          });
+        },
+
+        /* --- 메모 (M21) ------------------------------------------------ */
+
+        addMemoMessage: (tripId, input) =>
+          run((draft, now) => {
+            if (!draft.trips[tripId]) return null;
+
+            const text = input.text?.trim() ?? '';
+            const photos = (input.photos ?? []).filter((photo) => Boolean(photo?.id));
+            if (text === '' && photos.length === 0) return null;
+
+            const memoId = newId();
+            const memo: MemoMessage = {
+              id: memoId,
+              tripId,
+              ...(text !== '' ? { text } : {}),
+              ...(photos.length > 0 ? { photos } : {}),
+              // Stamped once, at creation, exactly like a card's `createdBy`.
+              ...authorStamp(),
+              createdAt: now,
+              updatedAt: now,
+            };
+            // The map is created on first use, so a workspace with no 메모 has
+            // no `memos` key — see `draftOf`.
+            draft.memos = { ...(draft.memos ?? {}), [memoId]: memo };
+            return memoId;
+          }),
+
+        removeMemoMessage: (id) => {
+          run((draft, now) => {
+            const memo = draft.memos?.[id];
+            if (!memo || memo.removedAt) return null;
+
+            // Rebuilt rather than patched: `text`/`photos` have to be *gone*,
+            // not set to `undefined`, so what syncs is the empty shape and the
+            // photo ids stop being referenced anywhere.
+            draft.memos = {
+              ...draft.memos,
+              [id]: {
+                id: memo.id,
+                tripId: memo.tripId,
+                ...(memo.by ? { by: memo.by } : {}),
+                removedAt: now,
+                createdAt: memo.createdAt,
+                updatedAt: now,
+              },
+            };
+            return true;
           });
         },
 

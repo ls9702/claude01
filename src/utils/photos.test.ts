@@ -8,6 +8,7 @@ import {
   formatBytes,
   nextAttempt,
   photoUsage,
+  referencedPhotoIds,
   type Attempt,
 } from './photos';
 
@@ -138,5 +139,61 @@ describe('photoUsage', () => {
       ]),
     };
     expect(photoUsage(ws)).toEqual({ count: 2, bytes: 0 });
+  });
+});
+
+describe('referencedPhotoIds', () => {
+  it('카드에 붙은 사진을 모은다', () => {
+    const ws = {
+      cards: {
+        k1: { photos: [{ id: 'p1' }, { id: 'p2' }] },
+        k2: { photos: [{ id: 'p3' }] },
+        k3: {},
+      },
+    };
+    expect([...referencedPhotoIds(ws)].sort()).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('메모 사진도 센다 (M21) — 이 한 줄이 GC·업로드·백업을 전부 잇는다', () => {
+    const ws = {
+      cards: { k1: { photos: [{ id: 'p1' }] } },
+      memos: {
+        m1: { photos: [{ id: 'p2' }, { id: 'p3' }] },
+        // 지워진 메시지는 사진을 이미 잃었다 — 그래서 바이트가 회수된다.
+        m2: {},
+      },
+    };
+    expect([...referencedPhotoIds(ws)].sort()).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('같은 id는 한 번만 — 카드와 메모에 걸쳐 있어도 사진 하나다', () => {
+    const ws = {
+      cards: { k1: { photos: [{ id: 'p1' }] } },
+      memos: { m1: { photos: [{ id: 'p1' }] } },
+    };
+    expect([...referencedPhotoIds(ws)]).toEqual(['p1']);
+  });
+
+  it('memos가 없는 워크스페이스도 그대로 답한다 (M21 이전)', () => {
+    expect([...referencedPhotoIds({ cards: {} })]).toEqual([]);
+    expect([...referencedPhotoIds({ cards: { k1: { photos: [{ id: 'p1' }] } } })]).toEqual(['p1']);
+  });
+});
+
+describe('photoUsage — 메모 포함 (M21)', () => {
+  it('메모 사진의 용량도 설정 화면의 합계에 들어간다', () => {
+    const ws = {
+      cards: { k1: { photos: [{ id: 'p1', bytes: 100 }] } },
+      memos: { m1: { photos: [{ id: 'p2', bytes: 200 }] } },
+    };
+    expect(photoUsage(ws)).toEqual({ count: 2, bytes: 300 });
+  });
+
+  it('카드와 메모가 같은 id를 가리켜도 한 장이다', () => {
+    const ws = {
+      cards: { k1: { photos: [{ id: 'p1', bytes: 100 }] } },
+      memos: { m1: { photos: [{ id: 'p1', bytes: 100 }] } },
+    };
+    expect(photoUsage(ws)).toEqual({ count: 1, bytes: 100 });
   });
 });
