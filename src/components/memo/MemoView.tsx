@@ -5,6 +5,7 @@ import { useProfileStore } from '../../profile/profile';
 import { schedulePhotoGc } from '../../stores/photoGc';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { flushPush } from '../../sync/syncEngine';
 import type { MemoMessage } from '../../types/models';
 import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
@@ -140,6 +141,9 @@ export default function MemoView() {
     setAsking(null);
     if (!memo) return;
     removeMemoMessage(memo.id);
+    // Urgent for the same reason a send is (M22): a line taken back should stop
+    // being readable on the other phone now, not four seconds from now.
+    void flushPush();
     // The delete stripped the message's photo ids, so those bytes are now
     // unreferenced — book the sweep that reclaims them (and the copy on the
     // NAS behind it). It re-checks references before deleting anything.

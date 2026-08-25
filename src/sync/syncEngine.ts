@@ -13,6 +13,11 @@
  *   produced anything the server does not already have.
  * - **Push** 4s after the workspace goes dirty. On a 409 the server's copy is
  *   merged in and the push is retried, up to {@link MAX_CONFLICT_RETRIES}.
+ * - **Poll** while the page is visible (M22): the cheap `?meta=1` probe on a
+ *   timer, and the pull above runs only when the version it reports has moved.
+ *   The cadence and its backoff live in `sync/poll`; see {@link armPoll}.
+ * - **Flush** (M22): {@link flushPush} sends the pending edit immediately
+ *   instead of at the end of the debounce — what a 메모 send needs.
  * - **Offline** is not an error: the status flips to `offline` and the next
  *   `online` event re-runs the whole thing.
  *
@@ -22,10 +27,12 @@
  */
 
 import { useSyncStore } from '../stores/syncStore';
+import { useUiStore } from '../stores/uiStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
-import { SyncError, fetchAll, push } from './api';
+import { SyncError, fetchAll, fetchMeta, push } from './api';
 import { merge, workspaceEquals } from './merge';
 import { uploadPendingPhotos } from './photoSync';
+import { nextPollDelay } from './poll';
 import { isConfigured, loadSettings, type SyncSettings } from './settings';
 
 /** How long the workspace has to stay quiet before we push it. */
@@ -42,6 +49,10 @@ export const MAX_CONFLICT_RETRIES = 3;
 let inFlight: Promise<void> | null = null;
 /** Pending debounced push. */
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
+/** Booked version probe (M22) — `null` while the poll is stopped. */
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+/** Probes that failed in a row. Drives the backoff; reset by any good news. */
+let pollFailures = 0;
 /** Teardown for the listeners + store subscription, or `null` when stopped. */
 let teardown: (() => void) | null = null;
 
@@ -55,10 +66,17 @@ const workspace = () => useWorkspaceStore.getState();
  */
 function enqueue(job: () => Promise<void>): Promise<void> {
   const run = (inFlight ?? Promise.resolve()).then(job, job);
-  inFlight = run.finally(() => {
-    if (inFlight === run) inFlight = null;
+  // The tail is what gets stored, so the "am I still the last one?" check has
+  // to compare against *it* and not against `run` — `finally` hands back a new
+  // promise, and comparing with `run` never matched, which quietly left
+  // `inFlight` non-null forever. Nothing minded while it was only a chaining
+  // point, but M22's poll skips a tick when the queue is busy, and a queue that
+  // is permanently "busy" is a poll that never runs.
+  const tail: Promise<void> = run.finally(() => {
+    if (inFlight === tail) inFlight = null;
   });
-  return inFlight;
+  inFlight = tail;
+  return tail;
 }
 
 /** Maps a thrown error onto a status. Transport trouble is `offline`, not `error`. */
@@ -190,6 +208,10 @@ export function syncNow(): Promise<void> {
       reportFailure(err);
     }
     uploadPhotosAfterSync();
+    // A completed round trip *is* an answer to the question the probe asks, so
+    // the next one is due a full interval from here rather than from some fixed
+    // grid — a busy device polls the NAS less, not more.
+    armPoll();
   });
 }
 
@@ -211,6 +233,7 @@ function pushNow(): Promise<void> {
       reportFailure(err);
     }
     uploadPhotosAfterSync();
+    armPoll();
   });
 }
 
@@ -236,26 +259,139 @@ export function schedulePush(): void {
 }
 
 /**
+ * Sends what is pending **now** instead of at the end of the debounce (M22).
+ *
+ * The 4초 debounce exists so that typing a card title is one write instead of
+ * twenty, and it is still the right default for everything the user edits in
+ * place. A 메모 message is the exception: it is *finished* the moment 보내기 is
+ * pressed, and the other person is waiting for it. So the composer calls this
+ * instead of leaving the timer to it.
+ *
+ * Nothing here needs its own guards — it hands the work to the same
+ * {@link enqueue}d push the timer would have run:
+ *
+ * - not configured → `pushNow` returns without touching the network;
+ * - nothing dirty → the queued job bails on the flag, so a stray call is free;
+ * - already syncing → the queue chains it behind, which is what keeps two
+ *   pushes from racing the version counter;
+ * - offline → it fails the same quiet way the debounced push does, status chip
+ *   and all, and the message still goes up on the next cycle.
+ */
+export function flushPush(): Promise<void> {
+  cancelPush();
+  return pushNow();
+}
+
+/* ------------------------------------------------------------------ *
+ * Poll (M22)
+ * ------------------------------------------------------------------ */
+
+/** Stops the booked probe, if there is one. */
+function cancelPoll(): void {
+  if (pollTimer === null) return;
+  clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
+/**
+ * One probe: ask the server for its version counter, and run the *ordinary*
+ * cycle when it has moved.
+ *
+ * Deliberately not a second pull path — `syncNow` already knows how to merge,
+ * how to push back what the merge produced and how to report what went wrong.
+ * All this adds is the decision to call it, made from one number instead of
+ * from a whole workspace.
+ *
+ * The two skip conditions are borrowed rather than invented: `inFlight` is the
+ * queue's own "somebody is already talking to the server", and an armed
+ * `pushTimer` means an edit is about to go up and come back with a fresh
+ * version anyway. Neither would be *unsafe* to run through — everything
+ * funnels through the queue — they are simply requests nobody needed.
+ */
+export async function pollOnce(): Promise<void> {
+  const settings = loadSettings();
+  if (!isConfigured(settings)) return;
+  if (inFlight !== null || pushTimer !== null) return;
+
+  let version: number;
+  try {
+    version = (await fetchMeta(settings)).version;
+  } catch {
+    // Silent on purpose. A probe that could not reach the NAS is not a failed
+    // sync: crying 오프라인 at a phone walking between wifi APs would make the
+    // chip flicker at something the user cannot act on, and the last *real*
+    // round trip is still the honest thing for it to be showing. The failure is
+    // paid for in the interval instead — see `nextPollDelay`.
+    pollFailures += 1;
+    return;
+  }
+
+  pollFailures = 0;
+  // The engine's own bookkeeping is the only copy of "what we last saw" — a
+  // second one here would drift out of step with the 409 handling that uses it.
+  if (version === sync().serverVersion) return;
+  await syncNow();
+}
+
+/**
+ * Books the next probe, replacing any already booked.
+ *
+ * Called from every direction that can change the answer: the engine starting,
+ * a cycle finishing, the 메모 탭 being opened or left, the page coming back
+ * into view, settings being saved or 해제'd. Because it always cancels first,
+ * "re-evaluate" and "start" are the same call and none of those paths can leave
+ * two timers running.
+ *
+ * Three reasons not to book anything: no engine installed (the poll's lifetime
+ * is the engine's — see {@link initSyncEngine}), nothing configured, or a page
+ * nobody is looking at. That last one is the battery rule: a hidden tab has
+ * nobody to show a new message to, and `visibilitychange` brings it back with a
+ * full sync anyway.
+ */
+function armPoll(): void {
+  cancelPoll();
+  if (teardown === null || !isConfigured()) return;
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+
+  const delay = nextPollDelay({
+    memoActive: useUiStore.getState().activeTab === 'memo',
+    failures: pollFailures,
+  });
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    void pollOnce().finally(armPoll);
+  }, delay);
+}
+
+/**
  * Adopts new settings: persists nothing itself (the settings sheet does that),
  * resets the version counter so the next run re-reads the server from scratch,
  * and kicks off a sync.
  */
 export function restartSync(): Promise<void> {
   cancelPush();
+  // New settings are new circumstances: whatever the old server did to the
+  // backoff says nothing about this one (M22).
+  pollFailures = 0;
   if (!isConfigured()) {
     sync().reset();
+    // 해제 means 해제 — no probes at an address the user just took away.
+    cancelPoll();
     return Promise.resolve();
   }
+  armPoll();
   sync().setServerVersion(0);
   sync().setStatus('syncing');
   return syncNow();
 }
 
 /**
- * Starts the engine: subscribes to the workspace's dirty flag and listens for
- * `online` / `visibilitychange`. Idempotent — calling it twice keeps the first
- * set of listeners. Returns a teardown function (used by tests; `App` mounts
- * the engine for the lifetime of the page).
+ * Starts the engine: subscribes to the workspace's dirty flag and to the active
+ * tab, listens for `online` / `visibilitychange`, and books the first version
+ * probe. Idempotent — calling it twice keeps the first set of listeners, which
+ * is what makes it safe under StrictMode's double mount. Returns a teardown
+ * function (used by tests; `App` mounts the engine for the lifetime of the
+ * page).
  */
 export function initSyncEngine(): () => void {
   if (teardown) return teardown;
@@ -269,11 +405,28 @@ export function initSyncEngine(): () => void {
     if (state.dirty && !previous.dirty) schedulePush();
   });
 
+  // The 메모 탭 is polled six times as often as the rest of the app, so the
+  // only piece of view state the engine cares about is whether it is the tab on
+  // screen — hence the narrow condition rather than a re-arm on every UI change
+  // (which a 여행 선택 or a 카드 포커스 would also trip).
+  const unsubscribeUi = useUiStore.subscribe((state, previous) => {
+    if ((state.activeTab === 'memo') !== (previous.activeTab === 'memo')) armPoll();
+  });
+
   const onOnline = (): void => {
     void syncNow();
   };
   const onVisible = (): void => {
-    if (document.visibilityState === 'visible') void syncNow();
+    if (document.visibilityState !== 'visible') {
+      // Nobody is looking; stop probing until they are (M22).
+      cancelPoll();
+      return;
+    }
+    // Coming back is the clearest "the situation may have changed" there is —
+    // a new network, a NAS that finished rebooting — so the backoff starts over.
+    pollFailures = 0;
+    armPoll();
+    void syncNow();
   };
 
   if (typeof window !== 'undefined') {
@@ -283,13 +436,19 @@ export function initSyncEngine(): () => void {
 
   teardown = () => {
     cancelPush();
+    cancelPoll();
     unsubscribe();
+    unsubscribeUi();
     if (typeof window !== 'undefined') {
       window.removeEventListener('online', onOnline);
       document.removeEventListener('visibilitychange', onVisible);
     }
     teardown = null;
   };
+
+  // After `teardown` is set, never before: `armPoll` refuses to book anything
+  // for an engine that is not installed, so nothing can outlive one.
+  armPoll();
 
   if (isConfigured()) {
     void syncNow();
@@ -299,4 +458,28 @@ export function initSyncEngine(): () => void {
   }
 
   return teardown;
+}
+
+/* ------------------------------------------------------------------ *
+ * Browser test seam
+ * ------------------------------------------------------------------ */
+
+/**
+ * `window.__tripBoardPollNow()` — run one version probe *now* (M22).
+ *
+ * Same seam, same reasoning as `__tripBoardSweepPhotos` in `stores/photoGc`:
+ * the honest e2e proof that B sees A's message without touching anything is a
+ * 5초 nap per assertion, times however many the spec needs. This bypasses the
+ * booked interval and nothing else — the probe it runs is the real
+ * {@link pollOnce}, guards included, so what the test exercises is the code
+ * that ships rather than a fixture of it.
+ *
+ * Attached unconditionally rather than behind a dev flag: it is three lines
+ * calling an already-exported function, it reaches nothing a page's own scripts
+ * cannot reach anyway, and a seam that only exists in dev builds is a seam the
+ * production bundle is never tested with.
+ */
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__tripBoardPollNow = (): Promise<void> =>
+    pollOnce();
 }

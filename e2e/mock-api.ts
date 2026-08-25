@@ -61,6 +61,16 @@ export interface MockApi {
   data: () => unknown;
   /** How many PUTs have been answered with 409. */
   conflicts: () => number;
+  /**
+   * How many `GET ?meta=1` probes have been answered (M22).
+   *
+   * The version poll's whole promise is that it costs one number, so the specs
+   * need to see both halves of that: the probes really happen, and a probe
+   * that finds nothing new really does not turn into a write.
+   */
+  metaReads: () => number;
+  /** How many PUTs have been attempted at all — 200s and 409s alike. */
+  puts: () => number;
   /** Every `POST /ai.php` body the mock has seen, oldest first. */
   aiCalls: () => MockAiCall[];
   /** What `GET /ai.php?ping=1` reports. Flip it to test the no-key path. */
@@ -167,6 +177,8 @@ async function readBody(req: IncomingMessage): Promise<string | null> {
 export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
   let stored: MockEnvelope | null = null;
   let conflicts = 0;
+  let metaReads = 0;
+  let puts = 0;
   let aiAvailable = true;
   let aiCalls: MockAiCall[] = [];
   /** `image.php`'s disk: photo id → the JPEG bytes. */
@@ -319,6 +331,7 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
 
     if (req.method === 'GET') {
       if (url.searchParams.has('meta')) {
+        metaReads += 1;
         send(res, 200, { version: stored?.version ?? 0, updatedAt: stored?.updatedAt ?? 0 });
         return;
       }
@@ -334,6 +347,9 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       send(res, 405, { error: 'method_not_allowed' });
       return;
     }
+    // Counted before the body is even read: what the poll specs assert is that
+    // no write was *attempted*, not that one was attempted and rejected.
+    puts += 1;
 
     void readBody(req).then((body) => {
       if (body === null) {
@@ -390,6 +406,8 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     version: () => stored?.version ?? 0,
     data: () => stored?.data ?? null,
     conflicts: () => conflicts,
+    metaReads: () => metaReads,
+    puts: () => puts,
     aiCalls: () => aiCalls,
     setAiAvailable: (available: boolean) => {
       aiAvailable = available;
@@ -399,6 +417,8 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     reset: () => {
       stored = null;
       conflicts = 0;
+      metaReads = 0;
+      puts = 0;
       aiCalls = [];
       aiAvailable = true;
       photos.clear();

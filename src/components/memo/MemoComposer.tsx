@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { deletePhotoBlobs, putPhotoBlob, usePhotoUrl } from '../../stores/photoBlobs';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { flushPush } from '../../sync/syncEngine';
 import type { CardPhoto, Id } from '../../types/models';
 import { newId } from '../../utils/ids';
 import { preparePhoto } from '../../utils/photos';
@@ -172,6 +173,12 @@ export default function MemoComposer({ tripId, onSent }: { tripId: Id; onSent: (
     setText('');
     setStaged([]);
     setError(null);
+    // Past the store's door, the message is ordinary workspace data and would
+    // ride the 4초 debounce like any edit. A chat cannot afford that: 보내기 is
+    // a finished thought and the other person is waiting for it, so the push is
+    // asked for now (M22). The store stays transport-ignorant — this is the UI
+    // saying "that one was urgent", which only the UI knows.
+    void flushPush();
     // The height was grown to fit a message that is no longer there.
     requestAnimationFrame(grow);
     onSent();
