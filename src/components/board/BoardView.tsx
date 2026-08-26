@@ -108,6 +108,7 @@ export default function BoardView() {
   const addColumn = useWorkspaceStore((s) => s.addColumn);
   const updateColumn = useWorkspaceStore((s) => s.updateColumn);
   const setColumnTodo = useWorkspaceStore((s) => s.setColumnTodo);
+  const setColumnBudgetOnce = useWorkspaceStore((s) => s.setColumnBudgetOnce);
   const deleteColumn = useWorkspaceStore((s) => s.deleteColumn);
   const moveCard = useWorkspaceStore((s) => s.moveCard);
   const activeTripId = useUiStore((s) => s.activeTripId);
@@ -266,12 +267,16 @@ export default function BoardView() {
 
   const submitColumn = (values: ColumnFormValues) => {
     if (dialog?.kind !== 'column-edit') return;
-    const { todo, ...patch } = values;
+    const { todo, budgetOnce, ...patch } = values;
     updateColumn(dialog.column.id, patch);
     // 값이 실제로 바뀔 때만 쓴다 (M29). 이름만 고친 칸에 `todo: false`를 남기면
     // 그 칸은 자동 이행이 영원히 손댈 수 없는 칸이 되는데, 사람은 토글을 건드린
     // 적이 없다. 「명시적으로 껐다」는 사람이 정말 끈 순간에만 참이어야 한다.
     if (todo !== (dialog.column.todo === true)) setColumnTodo(dialog.column.id, todo);
+    // 숙소 셈법도 같은 규칙으로 (M31).
+    if (budgetOnce !== (dialog.column.budgetOnce === true)) {
+      setColumnBudgetOnce(dialog.column.id, budgetOnce);
+    }
     setDialog(null);
   };
 

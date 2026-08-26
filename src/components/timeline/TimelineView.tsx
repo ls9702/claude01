@@ -32,6 +32,8 @@ import {
   emptySpend,
   sheetPlannedBudget,
   sheetPlannedByColumn,
+  sheetSpend,
+  sheetSpendByColumn,
   unplacedPlan,
   type SpendTotals,
 } from '../../utils/spend';
@@ -312,6 +314,18 @@ export default function TimelineView() {
   );
 
   /**
+   * 이 시트에 배치된 카드들에 **이미 적힌 지출** (M31).
+   *
+   * 계획판(`sheetPlanned`)과 달리 카드 단위로 접어 센다 — 4박 호텔 카드를 네
+   * 날에 걸어 두어도 영수증은 하나다. 그래서 M6의 `sheetSpend`를 그대로 쓴다:
+   * 결산·일자 칩이 답하던 그 숫자와 요약 바가 서로 다른 답을 내면 안 된다.
+   */
+  const sheetSpent = useMemo(
+    () => (sheet ? sheetSpend(workspace, sheet.id).spent : 0),
+    [sheet, workspace],
+  );
+
+  /**
    * AI 검토 (M11) — offered only when there is a plan to review.
    *
    * An empty sheet would produce a prompt that says "(비어 있음)" six times and
@@ -378,7 +392,14 @@ export default function TimelineView() {
    * Sheet scope, because that is the scope of the number it hangs under.
    */
   const categories = useMemo(
-    () => (sheet ? categoryRows(columns, sheetPlannedByColumn(workspace, sheet.id)) : []),
+    () =>
+      sheet
+        ? categoryRows(
+            columns,
+            sheetPlannedByColumn(workspace, sheet.id),
+            sheetSpendByColumn(workspace, sheet.id),
+          )
+        : [],
     [sheet, columns, workspace],
   );
 
@@ -796,16 +817,17 @@ export default function TimelineView() {
         </div>
       ) : (
         <>
-          {/* M16-A → M25: 「이 계획대로면 얼마가 드나」 한 줄, 그리드 위에 고정.
-              Full-bleed and `h-10` so it costs exactly one hairline-bounded row
-              — see SpendSummaryBar for why it is not a floating card, and why
-              it stopped talking about 지출. */}
+          {/* M16-A → M25 → M31: 「이 계획대로면 얼마가 드나, 그중 얼마는 이미
+              냈나」 한 줄, 그리드 위에 고정. Full-bleed and `h-10` so it costs
+              exactly one hairline-bounded row — see SpendSummaryBar for why it
+              is not a floating card, and why 지출은 뒤에 작게만 선다. */}
           {/* M18: the second of the two rows 접기 takes away. The number is
               a *glance*, not navigation — and it is one tap away in 카테고리별
-              (지출은 페이저의 지출 칩과 결산이 계속 말한다). */}
+              (일자별 지출은 페이저의 지출 칩이 계속 말한다). */}
           {collapsed ? null : (
           <SpendSummaryBar
             sheetBudget={sheetPlanned}
+            sheetSpent={sheetSpent}
             // Desktop scrolls many columns at once, so "the visible day" is only
             // an honest phrase when 오늘 is one of them; otherwise the bar says
             // nothing rather than guessing which column the eye is on.

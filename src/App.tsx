@@ -7,6 +7,7 @@ import { schedulePhotoGc } from './stores/photoGc';
 import { pruneActiveIds } from './stores/uiStore';
 import { useWorkspaceStore } from './stores/workspaceStore';
 import { adoptTodoColumns } from './todo/migrate';
+import { adoptStayColumns } from './board/budgetOnce';
 import { applyBootstrapConfig } from './sync/bootstrap';
 import { initSyncEngine } from './sync/syncEngine';
 
@@ -69,6 +70,9 @@ export default function App() {
     // 끝나야 존재한다. 더하기만 하고 멱등이라 매 실행 첫 로드에 그냥 돌려도
     // 두 번째부터는 아무 일이 없다.
     adoptTodoColumns();
+    // 그리고 같은 이유로 한 줄 더 (M31): 이름이 「숙소」인 기존 칸의 예산은
+    // 오늘부터 시트마다 한 번만 센다. 더하기만 하고 멱등인 것도 위와 같다.
+    adoptStayColumns();
     // Same reason again: a sweep against an empty workspace would find every
     // photo unreferenced. Booked, not run — the first pass only marks
     // candidates (blobs a crash left behind mid-add), and the sweeper books

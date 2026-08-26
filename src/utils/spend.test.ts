@@ -9,6 +9,7 @@ import {
   dayPlannedBudgetWindowed,
   emptySpend,
   hasSpend,
+  isBudgetOnceColumn,
   sheetCardIds,
   sheetPlannedBudget,
   sheetPlannedByColumn,
@@ -649,5 +650,245 @@ describe('unplacedPlan', () => {
 
     expect(unplacedPlan(ws, 't1')).toEqual({ budget: 0, count: 0 });
     expect(unplacedPlan(ws, 'nope')).toEqual({ budget: 0, count: 0 });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M31 — 필요 예산 옆에 다시 선 지출 (계획은 배치 단위, 지출은 카드 단위)
+ * ------------------------------------------------------------------ */
+
+describe('요약 바의 두 숫자 (M31)', () => {
+  it('선결제 호텔: 4박을 걸어도 영수증은 한 번, 예산은 네 번', () => {
+    const ws = scaffold(4);
+    // 40만원짜리 숙소를 떠나기 전에 카드로 긁었고, 시트에는 4박이 걸려 있다.
+    addCard(ws, 'hotel', { budget: 100_000, expenses: [400_000] });
+    place(ws, 'e1', 'hotel', 'd1');
+    place(ws, 'e2', 'hotel', 'd2');
+    place(ws, 'e3', 'hotel', 'd3');
+    place(ws, 'e4', 'hotel', 'd4');
+
+    // 계획은 배치 단위 — 하루 10만씩 네 밤.
+    expect(sheetPlannedBudget(ws, 's1')).toBe(400_000);
+    // 지출은 카드 단위 — 네 번 결제한 게 아니다.
+    expect(sheetSpend(ws, 's1').spent).toBe(400_000);
+
+    // 같은 카드를 하루 더 걸어도 지출은 꿈쩍하지 않는다.
+    place(ws, 'e5', 'hotel', 'd4', 1_200);
+    expect(sheetPlannedBudget(ws, 's1')).toBe(500_000);
+    expect(sheetSpend(ws, 's1').spent).toBe(400_000);
+  });
+
+  it('예산을 안 적은 선결제 카드도 지출로는 잡힌다', () => {
+    const ws = scaffold();
+    // 비행기표: 결제는 끝났고 예산 칸은 비어 있다 — M25의 바는 여기서 ₩0이었다.
+    addCard(ws, 'flight', { expenses: [320_000] });
+    place(ws, 'e1', 'flight', 'd1');
+
+    expect(sheetPlannedBudget(ws, 's1')).toBe(0);
+    expect(sheetSpend(ws, 's1').spent).toBe(320_000);
+  });
+
+  it('카테고리별 지출의 합은 시트 지출과 같다 — 배치를 늘려도 그대로다', () => {
+    const ws = scaffold(3);
+    ws.columns.c2 = {
+      id: 'c2',
+      tripId: 't1',
+      name: '숙소',
+      color: 'sky',
+      icon: '🏨',
+      cardOrder: [],
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    addCard(ws, 'meal', { budget: 20_000, expenses: [9_000] });
+    const hotel = addCard(ws, 'hotel', { expenses: [400_000] });
+    hotel.columnId = 'c2';
+    place(ws, 'e1', 'meal', 'd1');
+    place(ws, 'e2', 'meal', 'd2');
+    place(ws, 'e3', 'hotel', 'd1');
+    place(ws, 'e4', 'hotel', 'd2');
+    place(ws, 'e5', 'hotel', 'd3');
+
+    const spentByColumn = sheetSpendByColumn(ws, 's1');
+    expect(spentByColumn.c1.spent).toBe(9_000);
+    expect(spentByColumn.c2.spent).toBe(400_000);
+    expect(spentByColumn.c1.spent + spentByColumn.c2.spent).toBe(sheetSpend(ws, 's1').spent);
+
+    // 그리고 계획판은 계획판대로 배치를 센다 — 둘은 서로 다른 질문이다.
+    const plannedByColumn = sheetPlannedByColumn(ws, 's1');
+    expect(plannedByColumn).toEqual({ c1: 40_000, c2: 0 });
+    expect(plannedByColumn.c1 + plannedByColumn.c2).toBe(sheetPlannedBudget(ws, 's1'));
+  });
+
+  it('다른 시트에만 놓인 카드의 지출은 이 시트의 숫자가 아니다', () => {
+    const ws = scaffold();
+    ws.sheets.s2 = {
+      id: 's2',
+      tripId: 't1',
+      name: '플랜 B',
+      dayOrder: ['d9'],
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    ws.days.d9 = { id: 'd9', tripId: 't1', sheetId: 's2', createdAt: AT, updatedAt: AT };
+    addCard(ws, 'hotel', { expenses: [400_000] });
+    place(ws, 'e1', 'hotel', 'd9');
+
+    expect(sheetSpend(ws, 's1').spent).toBe(0);
+    expect(sheetSpend(ws, 's2').spent).toBe(400_000);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M31 — 숙소: 예산은 시트마다 한 번
+ * ------------------------------------------------------------------ */
+
+describe('예산을 한 번만 세는 칸 (M31)', () => {
+  const ORDER = ['d1', 'd2', 'd3', 'd4'];
+
+  /** 4일짜리 시트 + 숙소 칸(c2, budgetOnce) + 식사 칸(c1, 배치 단위). */
+  function stayScaffold(): Workspace {
+    const ws = scaffold(4);
+    ws.columns.c2 = {
+      id: 'c2',
+      tripId: 't1',
+      name: '숙소',
+      color: 'rose',
+      icon: '🏨',
+      cardOrder: [],
+      budgetOnce: true,
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    return ws;
+  }
+
+  /** 4박 예약 하나를 네 칸에 걸어 둔 시트. */
+  function fourNights(ws: Workspace): void {
+    const hotel = addCard(ws, 'hotel', { budget: 400_000 });
+    hotel.columnId = 'c2';
+    place(ws, 'h1', 'hotel', 'd1', 900);
+    place(ws, 'h2', 'hotel', 'd2', 900);
+    place(ws, 'h3', 'hotel', 'd3', 900);
+    place(ws, 'h4', 'hotel', 'd4', 900);
+  }
+
+  it('4박을 걸어도 시트 필요 예산에는 한 번만 든다', () => {
+    const ws = stayScaffold();
+    fourNights(ws);
+    expect(sheetPlannedBudget(ws, 's1')).toBe(400_000);
+  });
+
+  it('그 한 번은 첫 밤에 붙는다 — 나머지 밤은 0이다', () => {
+    const ws = stayScaffold();
+    fourNights(ws);
+    const days = ORDER.map((dayId) => dayPlannedBudgetWindowed(ws, dayId, ORDER));
+    expect(days).toEqual([400_000, 0, 0, 0]);
+    expect(days.reduce((sum, value) => sum + value, 0)).toBe(sheetPlannedBudget(ws, 's1'));
+  });
+
+  it('배치 순서가 뒤죽박죽이어도 가장 이른 밤이 가져간다', () => {
+    const ws = stayScaffold();
+    const hotel = addCard(ws, 'hotel', { budget: 400_000 });
+    hotel.columnId = 'c2';
+    // 3일차를 먼저 만들고 2일차를 나중에 만들어도 답은 2일차다.
+    place(ws, 'z-late', 'hotel', 'd3', 900);
+    place(ws, 'a-early', 'hotel', 'd2', 900);
+
+    expect(dayPlannedBudgetWindowed(ws, 'd2', ORDER)).toBe(400_000);
+    expect(dayPlannedBudgetWindowed(ws, 'd3', ORDER)).toBe(0);
+  });
+
+  it('같은 날 두 번이면 창 안에서 더 이른 쪽이 가져간다', () => {
+    const ws = stayScaffold();
+    const hotel = addCard(ws, 'hotel', { budget: 400_000 });
+    hotel.columnId = 'c2';
+    place(ws, 'e-late', 'hotel', 'd2', 1_380); // 23:00
+    place(ws, 'e-noon', 'hotel', 'd2', 720); // 12:00 — 같은 창, 더 이르다
+
+    // 어느 쪽이 이기든 하루에 한 번뿐이라는 것이 요지다.
+    expect(dayPlannedBudgetWindowed(ws, 'd2', ORDER)).toBe(400_000);
+    expect(sheetPlannedBudget(ws, 's1')).toBe(400_000);
+  });
+
+  it('새벽 배치는 전날 창의 것으로 세고, 그래서 그날이 첫 밤이 된다', () => {
+    const ws = stayScaffold();
+    const hotel = addCard(ws, 'hotel', { budget: 400_000 });
+    hotel.columnId = 'c2';
+    place(ws, 'h2', 'hotel', 'd2', 120); // 2일차 02:00 → 1일차 밤
+    place(ws, 'h3', 'hotel', 'd3', 900);
+
+    expect(dayPlannedBudgetWindowed(ws, 'd1', ORDER)).toBe(400_000);
+    expect(dayPlannedBudgetWindowed(ws, 'd2', ORDER)).toBe(0);
+    expect(dayPlannedBudgetWindowed(ws, 'd3', ORDER)).toBe(0);
+  });
+
+  it('식사는 여전히 배치마다 센다 — 섞인 시트도 합이 맞는다', () => {
+    const ws = stayScaffold();
+    fourNights(ws);
+    addCard(ws, 'meal', { budget: 20_000 }); // c1 — 평범한 칸
+    place(ws, 'm1', 'meal', 'd1');
+    place(ws, 'm2', 'meal', 'd2');
+    place(ws, 'm3', 'meal', 'd3');
+
+    // 숙소 40만 한 번 + 밥값 2만 × 3.
+    expect(sheetPlannedBudget(ws, 's1')).toBe(460_000);
+    const days = ORDER.map((dayId) => dayPlannedBudgetWindowed(ws, dayId, ORDER));
+    expect(days).toEqual([420_000, 20_000, 20_000, 0]);
+    expect(days.reduce((sum, value) => sum + value, 0)).toBe(sheetPlannedBudget(ws, 's1'));
+
+    // 카테고리 합계도 같은 총계로 떨어진다 (팝오버가 바 아래에서 어긋나지 않게).
+    const byColumn = sheetPlannedByColumn(ws, 's1');
+    expect(byColumn).toEqual({ c1: 60_000, c2: 400_000 });
+    expect(byColumn.c1 + byColumn.c2).toBe(sheetPlannedBudget(ws, 's1'));
+  });
+
+  it('시트가 둘이면 시트마다 한 번씩이다', () => {
+    const ws = stayScaffold();
+    ws.sheets.s2 = {
+      id: 's2',
+      tripId: 't1',
+      name: '플랜 B',
+      dayOrder: ['d9'],
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    ws.days.d9 = { id: 'd9', tripId: 't1', sheetId: 's2', createdAt: AT, updatedAt: AT };
+    fourNights(ws);
+    place(ws, 'h9', 'hotel', 'd9', 900);
+
+    expect(sheetPlannedBudget(ws, 's1')).toBe(400_000);
+    expect(sheetPlannedBudget(ws, 's2')).toBe(400_000);
+    // 다른 시트의 배치가 이 시트의 첫 밤을 가로채지 않는다.
+    expect(dayPlannedBudgetWindowed(ws, 'd1', ORDER)).toBe(400_000);
+    expect(dayPlannedBudgetWindowed(ws, 'd9', ['d9'])).toBe(400_000);
+  });
+
+  it('명시적으로 끈 칸은 예전처럼 배치마다 센다', () => {
+    const ws = stayScaffold();
+    ws.columns.c2.budgetOnce = false;
+    fourNights(ws);
+
+    expect(sheetPlannedBudget(ws, 's1')).toBe(1_600_000);
+    expect(dayPlannedBudgetWindowed(ws, 'd1', ORDER)).toBe(400_000);
+    expect(dayPlannedBudgetWindowed(ws, 'd4', ORDER)).toBe(400_000);
+  });
+
+  it('지출은 이 규칙과 상관없다 — 원래 카드 단위였다', () => {
+    const ws = stayScaffold();
+    const hotel = addCard(ws, 'hotel', { budget: 400_000, expenses: [380_000] });
+    hotel.columnId = 'c2';
+    place(ws, 'h1', 'hotel', 'd1', 900);
+    place(ws, 'h2', 'hotel', 'd2', 900);
+
+    expect(sheetSpend(ws, 's1').spent).toBe(380_000);
+    expect(sheetSpendByColumn(ws, 's1').c2.spent).toBe(380_000);
+  });
+
+  it('isBudgetOnceColumn: 없으면 거짓, 사라진 칸도 거짓', () => {
+    const ws = stayScaffold();
+    expect(isBudgetOnceColumn(ws.columns.c2)).toBe(true);
+    expect(isBudgetOnceColumn(ws.columns.c1)).toBe(false);
+    expect(isBudgetOnceColumn(undefined)).toBe(false);
   });
 });

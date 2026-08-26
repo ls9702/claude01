@@ -111,6 +111,8 @@ export interface SeedColumn {
   icon: string;
   /** 체크리스트 카테고리로 태어나는가 (M29). 없으면 평범한 칸. */
   todo?: boolean;
+  /** 예산을 시트마다 한 번만 세는 칸인가 (M31). 없으면 배치 단위. */
+  budgetOnce?: boolean;
 }
 
 /**
@@ -126,7 +128,9 @@ export const SEED_COLUMNS: readonly SeedColumn[] = [
   { name: '이동수단', color: 'sky', icon: '🚗' },
   { name: '할일', color: 'violet', icon: '📌', todo: true },
   { name: '식사', color: 'amber', icon: '🍽️' },
-  { name: '숙소', color: 'rose', icon: '🏨' },
+  // 숙소는 예산을 시트마다 한 번만 센다 (M31): 4박 예약 하나를 네 칸에 걸어도
+  // 결제는 한 번이고, 배치 단위로 세면 40만원이 160만원이 된다.
+  { name: '숙소', color: 'rose', icon: '🏨', budgetOnce: true },
   { name: '볼거리', color: 'emerald', icon: '🎡' },
 ];
 
@@ -461,6 +465,14 @@ export interface WorkspaceState {
    */
   setColumnTodo: (id: Id, todo: boolean) => void;
   /**
+   * 이 칸의 예산을 시트마다 한 번만 세도록 켜거나 끈다 (M31).
+   *
+   * {@link setColumnTodo}와 같은 이유로 `updateColumn` 바깥에 있다: 끄기가
+   * 필드를 지우는 것이 아니라 **명시적 `false`를 남기는** 것이어야 이름이
+   * 「숙소」인 칸에 자동 이행이 다시 손대지 않는다. No-op for an unknown id.
+   */
+  setColumnBudgetOnce: (id: Id, budgetOnce: boolean) => void;
+  /**
    * Deletes a column, moving its cards to the trip's first remaining column.
    * Returns `false` (and changes nothing) when the column is unknown or is the
    * trip's last one — a board always keeps at least one category.
@@ -713,6 +725,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 // **no** key at all, which is the shape every pre-M29 device
                 // (and the 자동 이행 rule) already reads as "not a checklist".
                 ...(seed.todo ? { todo: true } : {}),
+                // 같은 이유로 같은 모양 (M31): 평범한 칸에는 키가 아예 없다.
+                ...(seed.budgetOnce ? { budgetOnce: true } : {}),
                 cardOrder: [],
                 createdAt: now,
                 updatedAt: now,
@@ -825,6 +839,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             // 바뀌지 않았다는 사실보다 시끄럽다.
             if (column.todo === todo) return null;
             return touch<BoardColumn>(draft.columns, id, { todo }, now);
+          });
+        },
+
+        setColumnBudgetOnce: (id, budgetOnce) => {
+          run((draft, now) => {
+            const column = draft.columns[id];
+            if (!column) return null;
+            // 같은 값이면 아무 일도 없다 — `setColumnTodo`와 같은 이유다.
+            if (column.budgetOnce === budgetOnce) return null;
+            return touch<BoardColumn>(draft.columns, id, { budgetOnce }, now);
           });
         },
 

@@ -11,7 +11,7 @@
  * share it.
  */
 
-import type { Card, Id, Workspace } from '../types/models';
+import type { BoardColumn, Card, Id, Workspace } from '../types/models';
 import { datedAxis, visualPlacement, type DayAxis } from '../timeline/dayWindow';
 
 /** 예산 / 지출 pair, in the trip's currency. */
@@ -269,7 +269,14 @@ export const hasSpend = (totals: SpendTotals): boolean =>
  * the only rule under which the bar's own numbers agree — 시트 합계 = 일자 합계의
  * 합, always.
  *
- * 지출 has no business here at all: a plan is not a receipt.
+ * 예외는 하나, 숙소다 (M31): 4박 예약은 「하루치 × 4」가 아니라 한 건의 결제라
+ * 시트마다 한 번만 세고, 그 한 번은 가장 이른 밤에 붙는다. 예외인지 아닌지는
+ * 카드가 앉은 **칸**이 들고 있다 ({@link isBudgetOnceColumn}) — 규칙이 카드마다
+ * 흩어지지 않게.
+ *
+ * 지출은 여기 없다: a plan is not a receipt. 이미 낸 돈은 위쪽의 카드 단위
+ * 함수들({@link sheetSpend}·{@link sheetSpendByColumn})이 답하고, 요약 바는 그
+ * 둘을 나란히 세워 놓을 뿐이다 (M31).
  */
 
 /** One card's 예산; missing/garbled reads as 0. */
@@ -279,21 +286,66 @@ export function cardBudget(card: Card | undefined): number {
 }
 
 /**
+ * 이 칸의 예산은 배치마다가 아니라 **시트마다 한 번**인가 (M31).
+ *
+ * 배치 단위 셈법(위 주석)의 딱 하나짜리 예외다. 숙소가 그 예외인 이유는 4박
+ * 예약이 「하루치 숙박 × 4」가 아니라 **한 건의 결제**이기 때문이다: 네 칸에
+ * 걸어 두는 것은 그 예약이 나흘에 걸쳐 있다는 표시이지 네 번 산다는 뜻이 아니고,
+ * 40만원을 160만원이라 말하는 바는 그냥 틀린 바다. 식사·이동수단은 예외가
+ * 아니다 — 거기서는 네 번 걸면 네 번 낸다.
+ *
+ * 판단은 카드가 아니라 **칸**이 갖는다: 사람이 「숙소」라고 이름 붙인 자리에
+ * 넣는 순간 그 성질이 따라오고, 아니라고 생각하면 카테고리 편집에서 한 번에
+ * 끈다 (M29의 체크리스트 토글과 같은 자리, 같은 삼항 규칙).
+ */
+export const isBudgetOnceColumn = (column: BoardColumn | undefined): boolean =>
+  column?.budgetOnce === true;
+
+/** 이 카드의 예산이 시트마다 한 번만 세어지는가 — 카드가 앉은 칸이 정한다. */
+function countsOnce(workspace: Workspace, card: Card | undefined): boolean {
+  return card ? isBudgetOnceColumn(workspace.columns[card.columnId]) : false;
+}
+
+/**
  * 시트에 배치된 것만으로 셈한 필요 예산 (M25).
  *
  * Sum of `card.budget` over **every entry** of the sheet — a card on four days
- * counts four times. Cards nobody placed are not in it, on purpose; see
- * {@link unplacedPlan} for the number the bar owns up to.
+ * counts four times, unless it sits in a {@link isBudgetOnceColumn} 칸 (숙소),
+ * where the whole booking counts once per sheet (M31). Cards nobody placed are
+ * not in it, on purpose; see {@link unplacedPlan} for the number the bar owns
+ * up to.
  */
 export function sheetPlannedBudget(workspace: Workspace, sheetId: Id): number {
   const dayIds = sheetDayIds(workspace, sheetId);
   if (!dayIds) return 0;
 
+  const counted = new Set<Id>();
   let budget = 0;
   for (const entry of Object.values(workspace.entries)) {
-    if (dayIds.has(entry.dayId)) budget += cardBudget(workspace.cards[entry.cardId]);
+    if (!dayIds.has(entry.dayId)) continue;
+    const card = workspace.cards[entry.cardId];
+    if (countsOnce(workspace, card)) {
+      if (counted.has(entry.cardId)) continue;
+      counted.add(entry.cardId);
+    }
+    budget += cardBudget(card);
   }
   return budget;
+}
+
+/** 「가장 이른 배치」의 순서 키: 날 순서 → 창 안에서의 위치 → entry id. */
+type Rank = [number, number, string];
+
+/**
+ * `a`가 `b`보다 이른가 — 자리마다 따로 비교한다.
+ *
+ * 배열끼리 `<`로 견주면 자바스크립트가 문자열로 바꿔 `"0,100,e1" < "0,90,e2"`
+ * 를 참이라 답한다. 100분이 90분보다 이르다는 뜻이 되므로, 비교는 손으로 쓴다.
+ */
+function earlier(a: Rank, b: Rank): boolean {
+  if (a[0] !== b[0]) return a[0] < b[0];
+  if (a[1] !== b[1]) return a[1] < b[1];
+  return a[2] < b[2];
 }
 
 /**
@@ -302,6 +354,17 @@ export function sheetPlannedBudget(workspace: Workspace, sheetId: Id): number {
  * Membership is the windowed one, like every other day-scoped figure: 새벽 2시
  * 라멘은 전날 밤의 예산이다. Placement-counted like {@link sheetPlannedBudget},
  * so summing this over a sheet's days gives exactly the sheet total.
+ *
+ * ## 숙소는 어느 날에 붙는가 (M31)
+ *
+ * 시트마다 한 번만 세는 카드({@link isBudgetOnceColumn})는 그 한 번을 **가장
+ * 이른 배치가 그려지는 창**에 붙인다 — 체크인하는 날이다. 네 날에 4분의 1씩
+ * 쪼개는 대신 첫날에 통째로 얹는 이유는 그것이 실제로 카드가 긁히는 날이기도
+ * 하고, 쪼갠 숫자는 어느 날의 바에서도 본 적 없는 금액이 되기 때문이다.
+ *
+ * 어느 쪽이든 불변식은 그대로다: 일자 합계를 시트의 날들에 대해 더하면 정확히
+ * {@link sheetPlannedBudget}이 된다. 「가장 이르다」는 창 기준(날 순서 → 창
+ * 안에서의 위치 → entry id)이라 두 기기가 같은 답을 낸다.
  */
 export function dayPlannedBudgetWindowed(
   workspace: Workspace,
@@ -309,11 +372,33 @@ export function dayPlannedBudgetWindowed(
   dayOrder: DayAxis,
 ): number {
   const axis = datedAxis(dayOrder, workspace.days);
+  const dayIndex = new Map<Id, number>(axis.map((day, index) => [day.id, index]));
+
+  /** cardId → 이 축에서 가장 이른 배치의 (날, 창 안 위치, entry id). */
+  const firstOf = new Map<Id, { day: Id; rank: Rank }>();
   let budget = 0;
+
   for (const entry of Object.values(workspace.entries)) {
-    if (visualPlacement(entry, axis).renderDayId === dayId) {
-      budget += cardBudget(workspace.cards[entry.cardId]);
+    const placement = visualPlacement(entry, axis);
+    const card = workspace.cards[entry.cardId];
+
+    if (!countsOnce(workspace, card)) {
+      if (placement.renderDayId === dayId) budget += cardBudget(card);
+      continue;
     }
+    // 시트마다 한 번인 카드: 이 축 밖의 배치(다른 시트)는 이 시트의 숙박이
+    // 아니므로 아예 후보가 아니다.
+    const index = dayIndex.get(placement.renderDayId);
+    if (index === undefined) continue;
+    const rank: Rank = [index, placement.rawOffsetMin, entry.id];
+    const current = firstOf.get(entry.cardId);
+    if (!current || earlier(rank, current.rank)) {
+      firstOf.set(entry.cardId, { day: placement.renderDayId, rank });
+    }
+  }
+
+  for (const [cardId, first] of firstOf) {
+    if (first.day === dayId) budget += cardBudget(workspace.cards[cardId]);
   }
   return budget;
 }
@@ -333,10 +418,17 @@ export function sheetPlannedByColumn(
   const byColumn: Record<Id, number> = {};
   if (!dayIds) return byColumn;
 
+  const counted = new Set<Id>();
   for (const entry of Object.values(workspace.entries)) {
     if (!dayIds.has(entry.dayId)) continue;
     const card = workspace.cards[entry.cardId];
     if (!card) continue;
+    // 시트마다 한 번인 카드(숙소)는 여기서도 한 번만 — 아니면 카테고리 합계가
+    // 그 위의 총계와 어긋난다 (M31).
+    if (countsOnce(workspace, card)) {
+      if (counted.has(card.id)) continue;
+      counted.add(card.id);
+    }
     byColumn[card.columnId] = (byColumn[card.columnId] ?? 0) + cardBudget(card);
   }
   return byColumn;

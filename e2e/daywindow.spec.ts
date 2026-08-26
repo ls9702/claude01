@@ -316,7 +316,8 @@ test('요약 바가 시트에 배치된 만큼의 필요 예산을 말한다 (M2
   await expect(sheetFigure).toHaveAttribute('data-budget', '50000');
   await expect(page.getByTestId('spend-summary-total')).toHaveText('₩5만');
 
-  // ── 이 줄은 계획만 말한다: 지출을 적어도 꿈쩍하지 않는다 ────────────
+  // ── 지출은 계획을 밀어내지 않는다: 뒤에, 작게, 따로 선다 (M25 → M31) ──
+  await expect(page.getByTestId('spend-summary-spent')).toHaveCount(0);
   await page.getByTestId('tab-board').click();
   await page.getByTestId('board-card').filter({ hasText: '우메다 전망대' }).click();
   await page.getByTestId('card-expense-amount-input').fill('18000');
@@ -324,22 +325,29 @@ test('요약 바가 시트에 배치된 만큼의 필요 예산을 말한다 (M2
   await page.getByTestId('sheet-close').click();
   await page.getByTestId('tab-timeline').click();
 
+  // 앞자리 숫자는 그대로 필요 예산이고,
   await expect(sheetFigure).toHaveAttribute('data-budget', '50000');
-  await expect(summary).not.toContainText('지출');
-  await expect(summary).not.toContainText('1.8만');
-  // 지출은 여전히 일자 칩이 말한다 — 사라진 기능이 아니라 옮겨간 질문이다.
+  await expect(page.getByTestId('spend-summary-total')).toHaveText('₩5만');
+  // 이미 낸 18,000원이 그 뒤에 붙는다 — 배치가 셋이어도 영수증은 하나다.
+  await expect(page.getByTestId('spend-summary-spent')).toHaveAttribute('data-spent', '18000');
+  await expect(page.getByTestId('spend-summary-spent-amount')).toHaveText('₩1.8만');
+  // 일자 칩도 예전 그대로 말한다 — 두 줄은 서로 다른 범위의 같은 사실이다.
   await expect(page.getByTestId('day-spend').first()).toHaveAttribute('data-spent', '18000');
 
-  // 카테고리별: 배치된 만큼의 예산을, 큰 것부터.
+  // 카테고리별: 배치된 만큼의 예산을, 큰 것부터 — 그리고 그 아래 지출을.
   await page.getByTestId('spend-summary-cats-open').click();
   await expect(page.getByTestId('spend-summary-cats')).toBeVisible();
   await expect(page.getByTestId('spend-summary-cats-amount')).toHaveText('₩5만');
+  await expect(page.getByTestId('spend-summary-cats-spent')).toHaveAttribute('data-spent', '18000');
+  await expect(page.getByTestId('spend-summary-cats-spent-amount')).toHaveText('₩1.8만');
   const rows = page.getByTestId('spend-cat-row');
   await expect(rows).toHaveCount(2);
   // 이치란 30,000(두 번) > 우메다 20,000 — 배치가 순서를 바꿨다.
   await expect(rows.first()).toHaveAttribute('data-budget', '30000');
+  await expect(rows.first()).toHaveAttribute('data-spent', '0');
   await expect(rows.nth(1)).toHaveAttribute('data-budget', '20000');
-  await expect(page.getByTestId('spend-summary-cats')).not.toContainText('1.8만');
+  await expect(rows.nth(1)).toHaveAttribute('data-spent', '18000');
+  await expect(rows.nth(1)).toContainText('지출 ₩1.8만');
   // Nothing is 미배치 yet, so the footer has nothing to own up to.
   await expect(page.getByTestId('spend-summary-unplaced')).toHaveCount(0);
   await page.getByTestId('spend-summary-cats-open').click();
@@ -352,6 +360,76 @@ test('요약 바가 시트에 배치된 만큼의 필요 예산을 말한다 (M2
   await expect(page.getByTestId('spend-summary-unplaced')).toHaveText(
     '미배치 카드 1장의 예산은 빠져 있어요',
   );
+});
+
+test('두 번 걸어 둔 카드: 예산은 두 번, 이미 낸 돈은 한 번 (M31)', async ({ page }) => {
+  await createTrip(page, '오사카 선결제');
+  // 20,000원짜리 카드 하나, 영수증 하나 — 그리고 이틀에 걸쳐 두 번 배치.
+  await addCard(page, 2, '이치란', '20000');
+  await page.getByTestId('board-card').filter({ hasText: '이치란' }).click();
+  await page.getByTestId('card-expense-amount-input').fill('20000');
+  await page.getByTestId('card-expense-add').click();
+  await page.getByTestId('sheet-close').click();
+
+  await page.getByTestId('tab-timeline').click();
+  await page.getByTestId('timeline-add-day-empty').click();
+  await page.getByTestId('timeline-add-day').click();
+  await expect(page.getByTestId('timeline-day')).toHaveCount(2);
+
+  for (const index of [0, 1]) {
+    await page.getByTestId('tab-board').click();
+    await page.getByTestId('board-card').filter({ hasText: '이치란' }).click();
+    await page.getByTestId('card-schedule').click();
+    await page.getByTestId('schedule-day-option').nth(index).click();
+    await page.getByTestId('schedule-submit').click();
+    await expect(page.getByTestId('schedule-sheet')).toHaveCount(0);
+  }
+  await page.getByTestId('tab-timeline').click();
+  await expect(page.getByTestId('timeline-entry')).toHaveCount(2);
+
+  // 밥은 두 번 먹으니 계획은 4만원…
+  await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-budget', '40000');
+  await expect(page.getByTestId('spend-summary-total')).toHaveText('₩4만');
+  // …이미 낸 돈은 2만원이다. 영수증이 배치를 따라 늘어나지는 않는다.
+  await expect(page.getByTestId('spend-summary-spent')).toHaveAttribute('data-spent', '20000');
+  await expect(page.getByTestId('spend-summary-spent-amount')).toHaveText('₩2만');
+
+  await page.getByTestId('spend-summary-cats-open').click();
+  await expect(page.getByTestId('spend-summary-cats-spent-amount')).toHaveText('₩2만');
+  const row = page.getByTestId('spend-cat-row');
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute('data-budget', '40000');
+  await expect(row).toHaveAttribute('data-spent', '20000');
+});
+
+test('예산은 안 적고 결제만 해둔 카드도 요약 바에 남는다 (M31)', async ({ page }) => {
+  await createTrip(page, '오사카 항공권');
+  // 비행기표: 예산 칸은 비어 있고 결제만 끝났다 — M25의 바는 여기서 ₩0이었다.
+  await addCard(page, 0, '간사이 왕복');
+  await page.getByTestId('board-card').filter({ hasText: '간사이 왕복' }).click();
+  await page.getByTestId('card-expense-amount-input').fill('320000');
+  await page.getByTestId('card-expense-add').click();
+  await page.getByTestId('sheet-close').click();
+
+  await page.getByTestId('tab-timeline').click();
+  await page.getByTestId('timeline-add-day-empty').click();
+  await page.getByTestId('tab-board').click();
+  await page.getByTestId('board-card').filter({ hasText: '간사이 왕복' }).click();
+  await page.getByTestId('card-schedule').click();
+  await page.getByTestId('schedule-submit').click();
+  await page.getByTestId('tab-timeline').click();
+
+  await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-budget', '0');
+  await expect(page.getByTestId('spend-summary-spent-amount')).toHaveText('₩32만');
+
+  // 팝오버도 이 여행에 이동수단이 **있다**고 말한다 — 예산 0짜리 줄이지만
+  // 32만원은 진짜 나간 돈이다.
+  await page.getByTestId('spend-summary-cats-open').click();
+  const row = page.getByTestId('spend-cat-row');
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute('data-budget', '0');
+  await expect(row).toHaveAttribute('data-spent', '320000');
+  await expect(row).toContainText('지출 ₩32만');
 });
 
 test('현지 통화를 켠 여행이면 필요 예산을 두 통화로 말한다 (M25)', async ({ page }) => {
@@ -391,6 +469,25 @@ test('현지 통화를 켠 여행이면 필요 예산을 두 통화로 말한다
   await page.getByTestId('spend-summary-cats-open').click();
   await expect(page.getByTestId('spend-summary-cats-amount')).toHaveText('₩2만');
   await expect(page.getByTestId('spend-summary-cats-amount-local')).toHaveText('¥2,151');
+  // 아직 낸 돈이 없으면 지출 줄 자체가 없다 (M31).
+  await expect(page.getByTestId('spend-summary-cats-spent')).toHaveCount(0);
+  await page.getByTestId('spend-summary-cats-open').click();
+
+  // ¥1,000을 결제하면 (현지 통화 여행의 지출 입력은 현지 금액을 받는다)
+  // 지출 총계도 같은 두 통화로 선다 — 1,000 × 9.3 = 9,300원.
+  await page.getByTestId('tab-board').click();
+  await page.getByTestId('board-card').filter({ hasText: '이치란' }).click();
+  await page.getByTestId('card-expense-amount-input').fill('1000');
+  await page.getByTestId('card-expense-add').click();
+  await page.getByTestId('sheet-close').click();
+  await page.getByTestId('tab-timeline').click();
+
+  await expect(page.getByTestId('spend-summary-spent-amount')).toHaveText('₩9,300');
+  await page.getByTestId('spend-summary-cats-open').click();
+  await expect(page.getByTestId('spend-summary-cats-spent-amount')).toHaveText('₩9,300');
+  await expect(page.getByTestId('spend-summary-cats-spent-amount-local')).toHaveText('¥1,000');
+  // 계획 줄은 손대지 않았다 — 두 줄은 서로 다른 질문이다.
+  await expect(page.getByTestId('spend-summary-cats-amount')).toHaveText('₩2만');
 });
 
 test('현지 통화가 없는 여행은 기준 통화만 말한다 (M25)', async ({ page }) => {
@@ -460,6 +557,78 @@ test.describe('새벽 2시', () => {
       'data-day-id',
       String(firstDayId),
     );
+  });
+});
+
+test.describe('숙소 예산은 시트마다 한 번 (M31)', () => {
+  // 일자별 필요 예산은 모바일 바의 일자 칸이 말한다 (데스크톱은 여러 칸이 한
+  // 화면에 있어 '보이는 일자'를 하나로 고르지 않는다).
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('4박을 두 날에 걸어도 한 번, 토글을 끄면 두 번', async ({ page }) => {
+    await createTrip(page, '오사카 숙소');
+    // 3번 칸이 「숙소」 — 새 여행은 이 칸을 예산 1회로 태어난다.
+    await addCard(page, 3, '난바 호텔', '400000');
+
+    await page.getByTestId('tab-timeline').click();
+    await page.getByTestId('timeline-add-day-empty').click();
+    await page.getByTestId('timeline-add-day').click();
+    // 모바일은 한 번에 한 칸만 그린다 — 일자가 둘이라는 사실은 페이저가 말한다.
+    await expect(page.getByTestId('day-pager-label')).toHaveText('2일차');
+
+    for (const index of [0, 1]) {
+      await page.getByTestId('tab-board').click();
+      await page.getByTestId('board-card').filter({ hasText: '난바 호텔' }).click();
+      await page.getByTestId('card-schedule').click();
+      await page.getByTestId('schedule-day-option').nth(index).click();
+      await page.getByTestId('schedule-submit').click();
+      await expect(page.getByTestId('schedule-sheet')).toHaveCount(0);
+    }
+    await page.getByTestId('tab-timeline').click();
+
+    // 두 밤에 걸려 있지만 결제는 한 번이다.
+    await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-budget', '400000');
+    await expect(page.getByTestId('spend-summary-total')).toHaveText('₩40만');
+
+    // 그 한 번은 체크인하는 날 — 1일차 — 에 붙고, 2일차는 0이다.
+    const dayFigure = page.getByTestId('spend-summary-day');
+    const pagerLabel = page.getByTestId('day-pager-label');
+    if ((await pagerLabel.textContent()) !== '1일차') {
+      await page.getByTestId('day-pager-prev').click();
+    }
+    await expect(pagerLabel).toHaveText('1일차');
+    await expect(dayFigure).toHaveAttribute('data-budget', '400000');
+    await page.getByTestId('day-pager-next').click();
+    await expect(pagerLabel).toHaveText('2일차');
+    await expect(dayFigure).toHaveAttribute('data-budget', '0');
+    await page.getByTestId('day-pager-prev').click();
+    await expect(pagerLabel).toHaveText('1일차');
+
+    // 카테고리별도 같은 한 번이다 — 팝오버가 바와 어긋나지 않는다.
+    await page.getByTestId('spend-summary-cats-open').click();
+    await expect(page.getByTestId('spend-cat-row')).toHaveAttribute('data-budget', '400000');
+    await page.getByTestId('spend-summary-cats-open').click();
+
+    // 카테고리 편집에서 끄면 예전 셈법(배치 단위)으로 돌아간다.
+    await page.getByTestId('tab-board').click();
+    await page.getByTestId('board-column').nth(3).getByTestId('edit-column').click();
+    await expect(page.getByTestId('column-form')).toBeVisible();
+    const toggle = page.getByTestId('column-budget-once-toggle');
+    await expect(toggle).toHaveAttribute('data-on', 'true');
+    await toggle.click();
+    await page.getByTestId('column-submit').click();
+    await expect(page.getByTestId('column-form')).toHaveCount(0);
+
+    await page.getByTestId('tab-timeline').click();
+    await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-budget', '800000');
+    if ((await pagerLabel.textContent()) !== '1일차') {
+      await page.getByTestId('day-pager-prev').click();
+    }
+    await expect(pagerLabel).toHaveText('1일차');
+    await expect(dayFigure).toHaveAttribute('data-budget', '400000');
+    await page.getByTestId('day-pager-next').click();
+    await expect(pagerLabel).toHaveText('2일차');
+    await expect(dayFigure).toHaveAttribute('data-budget', '400000');
   });
 });
 
@@ -622,5 +791,97 @@ test.describe('모바일 요약 바', () => {
       () => document.documentElement.scrollWidth <= window.innerWidth,
     );
     expect(openOverflow).toBe(true);
+  });
+  test('지출까지 붙은 가장 붐비는 줄도 한 줄로 버틴다 (M31)', async ({ page }) => {
+    // M25의 최악 경우(현지 통화 + 일자 칸 + 카테고리 다섯)에 M31의 지출까지.
+    await page.getByTestId('add-trip').click();
+    await page.getByTestId('trip-title-input').fill('도쿄 지출 모바일');
+    await page.getByTestId('trip-local-toggle').click();
+    await page.getByTestId('trip-local-currency-select').selectOption('JPY');
+    await page.getByTestId('trip-local-rate-input').fill('9.3');
+    await page.getByTestId('trip-submit').click();
+    await page
+      .getByTestId('trip-card')
+      .filter({ hasText: '도쿄 지출 모바일' })
+      .getByTestId('trip-open')
+      .click();
+    await expect(page).toHaveURL(/#\/board$/);
+
+    const titles = ['신칸센', '우체국', '이치란', '호텔', '스카이트리'];
+    for (const [index, title] of titles.entries()) {
+      await addCard(page, index, title, '120000');
+    }
+    // 셋은 이미 결제했다 — ¥12,000 × 9.3 = 111,600원씩.
+    for (const title of titles.slice(0, 3)) {
+      await page.getByTestId('board-card').filter({ hasText: title }).click();
+      await page.getByTestId('card-expense-amount-input').fill('12000');
+      await page.getByTestId('card-expense-add').click();
+      await page.getByTestId('sheet-close').click();
+    }
+
+    await page.getByTestId('tab-timeline').click();
+    await page.getByTestId('timeline-add-day-empty').click();
+    for (const title of titles) {
+      await page.getByTestId('tab-board').click();
+      await page.getByTestId('board-card').filter({ hasText: title }).click();
+      await page.getByTestId('card-schedule').click();
+      await page.getByTestId('schedule-submit').click();
+      await expect(page.getByTestId('schedule-sheet')).toHaveCount(0);
+    }
+    await page.getByTestId('tab-timeline').click();
+
+    const total = page.getByTestId('spend-summary-total');
+    const local = page.getByTestId('spend-summary-total-local');
+    const spent = page.getByTestId('spend-summary-spent-amount');
+    await expect(total).toHaveText('₩60만');
+    await expect(local).toHaveText('¥6.5만');
+    await expect(spent).toHaveText('₩33.5만');
+
+    for (const width of [320, 360, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const bar = await page.getByTestId('spend-summary').boundingBox();
+      const dayBox = await page.getByTestId('spend-summary-day').boundingBox();
+      if (!bar || !dayBox) throw new Error(`${width}px에서 요약 바를 찾지 못했어요`);
+
+      // 여전히 한 줄이고, 페이지는 가로로 밀리지 않는다.
+      expect(Math.round(bar.height)).toBeLessThanOrEqual(41);
+      const overflow = await page.evaluate(() => ({
+        scroll: document.documentElement.scrollWidth,
+        inner: window.innerWidth,
+      }));
+      expect(overflow.scroll).toBeLessThanOrEqual(overflow.inner);
+
+      // 390px 아래에서는 지출이 팝오버로 물러난다 (실측: 360px에는 두 통화
+      // 총액·일자·버튼이 이미 다 차 있다) — 계획 금액을 밀어내지 않는다.
+      const spentVisible = await spent.isVisible();
+      expect(spentVisible).toBe(width >= 390);
+
+      const boxes = [await total.boundingBox(), await local.boundingBox(), dayBox];
+      if (spentVisible) boxes.push(await spent.boundingBox());
+      for (const box of boxes) {
+        if (!box) throw new Error(`${width}px에서 금액을 찾지 못했어요`);
+        expect(box.width).toBeGreaterThan(20);
+        expect(box.x).toBeGreaterThanOrEqual(bar.x - 1);
+        expect(box.x + box.width).toBeLessThanOrEqual(bar.x + bar.width + 1);
+      }
+      // 그리고 잘려 나간 것도 없다 (B5: 좁아지면 말이 먼저 빠진다).
+      const clipped = await page
+        .getByTestId('spend-summary-sheet')
+        .evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+      expect(clipped).toBe(false);
+    }
+
+    // 좁은 폭에서도 팝오버는 두 총계를 다 들고 있다 — 물러난 것이지 사라진 게
+    // 아니다.
+    await page.setViewportSize({ width: 360, height: 844 });
+    await expect(spent).toBeHidden();
+    await page.getByTestId('spend-summary-cats-open').click();
+    await expect(page.getByTestId('spend-summary-cats-amount')).toHaveText('₩60만');
+    await expect(page.getByTestId('spend-summary-cats-spent-amount')).toHaveText('₩33.5만');
+    await expect(page.getByTestId('spend-summary-cats-spent-amount-local')).toHaveText('¥3.6만');
+    const popBox = await page.getByTestId('spend-summary-cats').boundingBox();
+    if (!popBox) throw new Error('팝오버를 찾지 못했어요');
+    expect(popBox.x).toBeGreaterThanOrEqual(0);
+    expect(popBox.x + popBox.width).toBeLessThanOrEqual(360 + 1);
   });
 });
