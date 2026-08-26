@@ -389,6 +389,9 @@ export default function CardEditSheet({
       {picker === 'search' ? (
         <PlaceSearch
           initialQuery={title.trim()}
+          // 여행의 목적지는 AI 검색이 「글리코상」을 어느 도시에서 찾을지 아는
+          // 유일한 단서다 (M28). OSM 경로는 이 값을 쓰지 않는다.
+          destination={tripDestination?.address}
           onPick={setLocation}
           onClose={() => setPicker(null)}
         />

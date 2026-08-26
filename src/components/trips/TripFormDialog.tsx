@@ -253,6 +253,9 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
       {searching ? (
         <PlaceSearch
           initialQuery={title.trim()}
+          // 이미 목적지가 있다면(고치는 중) 그게 곧 문맥이고, 없으면 문맥도
+          // 없다 — 여기서 찾는 것이 바로 그 목적지다 (M28).
+          destination={destination?.address}
           onPick={setDestination}
           onClose={() => setSearching(false)}
         />

@@ -49,6 +49,9 @@ export interface MockAiCall {
   grounding?: boolean;
 }
 
+/** How the mock answers a 장소 검색 call (M28). */
+export type MockPlaceMode = 'ok' | 'empty' | 'error';
+
 /** Handle returned by {@link startMockApi}. */
 export interface MockApi {
   /** Base URL to paste into the app's 서버 주소 field, e.g. `http://127.0.0.1:53210`. */
@@ -75,6 +78,14 @@ export interface MockApi {
   aiCalls: () => MockAiCall[];
   /** What `GET /ai.php?ping=1` reports. Flip it to test the no-key path. */
   setAiAvailable: (available: boolean) => void;
+  /**
+   * How the AI half answers a 장소 검색 call (M28).
+   *
+   * `'ok'` hands back {@link CANNED_PLACES}; `'empty'` an empty list (which is
+   * what makes the client try once more with grounding, and then fall back to
+   * Nominatim); `'error'` a 502, the shape `ai.php` uses for a failed upstream.
+   */
+  setAiPlaceMode: (mode: MockPlaceMode) => void;
   /** How many photos `image.php` is currently holding. */
   photoCount: () => number;
   /** Is this photo id stored? */
@@ -125,6 +136,30 @@ const CANNED_SUGGESTIONS = {
     { title: '야시장 구경', columnName: '없는칸', memo: '저녁에 걷기 좋아요' },
   ],
 };
+
+/**
+ * Two 장소 검색 candidates matching `PLACES_SCHEMA` (M28).
+ *
+ * 「츠텐카쿠」 is exactly the case the feature exists for: Nominatim has no such
+ * string, and the row only becomes checkable because 通天閣 is on it. The second
+ * row deliberately has no `localName`, so the "그 줄만 없다" rendering path is
+ * exercised too.
+ */
+const CANNED_PLACES = {
+  places: [
+    {
+      name: '통천각',
+      localName: '通天閣',
+      locality: '오사카',
+      lat: 34.6525,
+      lng: 135.5063,
+    },
+    { name: '신세카이 상점가', locality: '오사카', lat: 34.6519, lng: 135.5057 },
+  ],
+};
+
+/** The marker `buildPlacesPrompt` always leads with — how the mock spots one. */
+const PLACE_PROMPT_MARKER = '찾는 장소:';
 
 const CANNED_REVIEW = [
   '- 첫날 오전에 일정이 세 개 겹쳐 있어요. 하나를 오후로 옮기면 숨통이 트여요.',
@@ -180,6 +215,7 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
   let metaReads = 0;
   let puts = 0;
   let aiAvailable = true;
+  let aiPlaceMode: MockPlaceMode = 'ok';
   let aiCalls: MockAiCall[] = [];
   /** `image.php`'s disk: photo id → the JPEG bytes. */
   const photos = new Map<string, Buffer>();
@@ -303,6 +339,22 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
         }
         aiCalls = [...aiCalls, parsed];
 
+        // 장소 검색 (M28) rides on `ask`, so the prompt is what identifies it —
+        // and it stays identifiable on the grounded retry, where `ai.php` has
+        // dropped the schema.
+        if (typeof parsed.prompt === 'string' && parsed.prompt.includes(PLACE_PROMPT_MARKER)) {
+          if (aiPlaceMode === 'error') {
+            send(res, 502, { error: 'upstream_error', detail: 'HTTP 500 — mock' });
+            return;
+          }
+          send(
+            res,
+            200,
+            geminiText([JSON.stringify(aiPlaceMode === 'empty' ? { places: [] } : CANNED_PLACES)]),
+          );
+          return;
+        }
+
         if (parsed.kind === 'suggest') {
           // The real proxy sets `responseMimeType: application/json`, so what
           // comes back is JSON *inside* a text part — exactly as here.
@@ -412,6 +464,9 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     setAiAvailable: (available: boolean) => {
       aiAvailable = available;
     },
+    setAiPlaceMode: (mode: MockPlaceMode) => {
+      aiPlaceMode = mode;
+    },
     photoCount: () => photos.size,
     hasPhoto: (id: string) => photos.has(id),
     reset: () => {
@@ -421,6 +476,7 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       puts = 0;
       aiCalls = [];
       aiAvailable = true;
+      aiPlaceMode = 'ok';
       photos.clear();
     },
     stop: () =>

@@ -45,14 +45,14 @@ docs/                    ← deploy-synology.md(NAS 가이드)·HANDOFF.md(이 �
 2. **Playwright 1.56.1 고정** — 컨테이너의 chromium 빌드(1194)와 맞물림. 업그레이드·`playwright install` 금지.
 3. **하루 경계는 05시** (`timeline/dayWindow.ts`): 새벽(00~05시) 엔트리는 전날 창에 표시·집계. 일자 단위 UI는 반드시 windowed 트윈(daySpendWindowed 등) 사용, 달력 트윈은 결산/여행 범위용.
 4. 병합은 엔티티 LWW + 톰스톤(30일 TTL) + 정렬배열 재조정 (`sync/merge.ts`). 사진 바이트는 워크스페이스 JSON 밖(별도 idb + image.php).
-5. 완료 기준: `npm run typecheck && npm run build && npm run test && npm run e2e` **전부 그린** 후에만 커밋. 현재 기준선: **단위 707 / e2e 115**.
+5. 완료 기준: `npm run typecheck && npm run build && npm run test && npm run e2e` **전부 그린** 후에만 커밋. 현재 기준선: **단위 747 / e2e 119**.
 6. 테스트ID·문구는 추가만(기존 것 변경 시 해당 스펙 최소 수정 + 커밋 메시지에 기록). 드래그 e2e는 스텝 이동+`--repeat-each` 재확인.
 7. 커밋은 마일스톤 단위, 브랜치 `claude/mobile-macbook-session-sync-xs40tt`, PR 안 만듦. 모델명·세션 링크 외 AI 흔적을 저장소에 남기지 않음(커밋 트레일러는 기존 형식 유지).
 8. 사용자 워크플로우 선호: **블록 단위로 Opus 서브에이전트에 위임**, 메인 세션이 검증·커밋. 큰 변경엔 적대적 검수 패스 추가. 완료 시 NAS 덮어쓰기용 zip 패키지 제공(사용자가 File Station으로 올림).
 
 ## 5. 마일스톤 이력 (요약)
 
-M0 스캐폴드 → M1 보드 → M2 타임라인+시트/항공편 마법사 → M3 지도 → M4 동기화+PWA → M5 Pages 배포 → M6 경로화살표+지출/코멘트 → M7 토론 기반 5기능(실행취소·오늘모드·백업넛지·결산·갭칩) → M8 QA 20버그픽스 → M9 디자인 시스템 전면 개편 → M10 사진 첨부 → M11 Gemini AI(프록시) → M12 목적지 센터링 → M13 2인 프로필 → M14 제로설정 부트스트랩 → M15 피드백4건(시트메뉴 버그 등) → M16(+검수 12건) 05시 경계+지출 요약바 → M17 AI 상세오류+카드만들기 → M18 모바일 헤더 압축+전역 타이포 수정 → M19 모바일 QA 10건 → M20 사진 자동 동기화+주소 자동 이행 → M21 메모 탭(여행별 카카오톡식 채팅 — `Workspace.memos` 소프트 삭제, 탭 5개) → M22 즉시 반영(메모 전송 즉시 푸시 + `?meta=1` 버전 폴링: 메모 탭 5초/그 외 30초/백오프) → M23 메모 QA(IME 조합 Enter 무시, 말풍선 롱프레스·우클릭 삭제 메뉴) → M24 사람 단위 안 읽음(`seenBy` 이름공간 키 `memo:`/`card:` — 메모 탭 배지·「여기까지 읽었어요」 구분선·카드 NEW 코멘트, `read/readState`) → M25 「필요 예산」 바(요약 바에서 지출을 걷어내고 **배치 단위** 계획 합계로: `sheetPlannedBudget`/`dayPlannedBudgetWindowed`/`sheetPlannedByColumn`/`unplacedPlan` + 기준·현지 두 통화 동시 표기 `dualAmount`) → M26 메모 클립보드 붙여넣기 + 백업 경고를 설정 시트로 → M27 지도 필터(`src/map/filter.ts` 순수 규칙: 범위 **전체 아이템/일정 전체/일자별(05시 창)/미확정** × 카테고리 = 범례 칩 하나, 선택은 `stores/mapFilterPref`로 기기별 기억).
+M0 스캐폴드 → M1 보드 → M2 타임라인+시트/항공편 마법사 → M3 지도 → M4 동기화+PWA → M5 Pages 배포 → M6 경로화살표+지출/코멘트 → M7 토론 기반 5기능(실행취소·오늘모드·백업넛지·결산·갭칩) → M8 QA 20버그픽스 → M9 디자인 시스템 전면 개편 → M10 사진 첨부 → M11 Gemini AI(프록시) → M12 목적지 센터링 → M13 2인 프로필 → M14 제로설정 부트스트랩 → M15 피드백4건(시트메뉴 버그 등) → M16(+검수 12건) 05시 경계+지출 요약바 → M17 AI 상세오류+카드만들기 → M18 모바일 헤더 압축+전역 타이포 수정 → M19 모바일 QA 10건 → M20 사진 자동 동기화+주소 자동 이행 → M21 메모 탭(여행별 카카오톡식 채팅 — `Workspace.memos` 소프트 삭제, 탭 5개) → M22 즉시 반영(메모 전송 즉시 푸시 + `?meta=1` 버전 폴링: 메모 탭 5초/그 외 30초/백오프) → M23 메모 QA(IME 조합 Enter 무시, 말풍선 롱프레스·우클릭 삭제 메뉴) → M24 사람 단위 안 읽음(`seenBy` 이름공간 키 `memo:`/`card:` — 메모 탭 배지·「여기까지 읽었어요」 구분선·카드 NEW 코멘트, `read/readState`) → M25 「필요 예산」 바(요약 바에서 지출을 걷어내고 **배치 단위** 계획 합계로: `sheetPlannedBudget`/`dayPlannedBudgetWindowed`/`sheetPlannedByColumn`/`unplacedPlan` + 기준·현지 두 통화 동시 표기 `dualAmount`) → M26 메모 클립보드 붙여넣기 + 백업 경고를 설정 시트로 → M27 지도 필터(`src/map/filter.ts` 순수 규칙: 범위 **전체 아이템/일정 전체/일자별(05시 창)/미확정** × 카테고리 = 범례 칩 하나, 선택은 `stores/mapFilterPref`로 기기별 기억) → M28 AI 장소 검색(`ai/aiPlaces.ts` 프롬프트·스키마·파서 + `map/placeSearch.ts`의 `searchPlacesSmart`: AI 켜져 있으면 Gemini에 먼저 묻고 — 「츠텐카쿠」→通天閣 현지 표기까지 결과 줄에 — 꺼짐·오류·429·빈 결과면 **자동으로 Nominatim**. 서버 변경 없음: 기존 `ask` kind + 스키마, 빈손일 때만 grounding 1회 재시도).
 
 ## 6. 보류/백로그 (토론·검수에서 합의된 순서)
 
