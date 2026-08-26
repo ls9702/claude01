@@ -60,6 +60,7 @@ Web Station → **웹 서비스 포털**(또는 웹 서비스 → 생성) → **
 
 - `api/data/` 는 첫 저장 때 자동 생성됩니다. 실패하면 File Station에서 `web/travel/api` 폴더 속성 → 권한에 **http** 사용자 쓰기 권한 부여.
 - 카드 사진은 `api/data/photos/` 에 id 하나당 JPEG 한 장으로 쌓입니다(`image.php`가 첫 업로드 때 폴더를 만듭니다). 장당 500KB 안팎이니 공간만 넉넉하면 따로 설정할 건 없어요.
+- **일 단위 백업(M30)**: 매일 첫 저장 때 직전 상태가 `api/data/daily/workspace-YYYYMMDD.json` 으로 자동 보관됩니다(30일 유지, 설정 불필요). 복구가 필요하면 원하는 날짜 파일을 열어 `data` 부분을 확인하거나, File Station으로 내려받아 앱의 「가져오기」에 쓸 수 있어요.
 - **선택(권장)**: 데이터를 웹 루트 밖으로 — File Station에서 `web` 밖에 폴더를 만들기 어렵다면 최소한 Web Station의 **기본 서버(default server)** 문서 루트가 `web` 전체를 서빙하지 않는지 확인하고, 가능하면 `config.php`의 `DATA_DIR`을 웹으로 서빙되지 않는 경로로 변경.
 
 ## 7. 동작 확인

@@ -118,6 +118,16 @@ describe('내보내기 → 가져오기 왕복', () => {
     expect(deserializeBackup(bare)).toEqual(populated());
   });
 
+  it('서버 봉투({version, data})도 받아준다 — NAS 일 단위 스냅샷 복구 경로 (M30)', () => {
+    const envelope = JSON.stringify({ version: 42, updatedAt: AT, data: populated() });
+    expect(deserializeBackup(envelope)).toEqual(populated());
+  });
+
+  it('서버 봉투라도 data가 워크스페이스가 아니면 거른다', () => {
+    const bogus = JSON.stringify({ version: 1, data: { schemaVersion: 999 } });
+    expect(() => deserializeBackup(bogus)).toThrow('지원하지 않는 백업 버전이에요');
+  });
+
   it('가져오기는 병합이라 같은 파일을 두 번 넣어도 그대로다', () => {
     const workspace = populated();
     const imported = deserializeBackup(serializeBackup(workspace, AT));

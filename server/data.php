@@ -43,6 +43,9 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
 /** How many rotating copies of past versions to keep. */
 const BACKUP_SLOTS = 5;
 
+/** How many daily snapshots to keep under data/daily/ (M30). */
+const DAILY_KEEP = 30;
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
@@ -316,6 +319,13 @@ if ($encoded === false) {
     fail(400, 'bad_request', 'data를 JSON으로 저장할 수 없어요.');
 }
 
+// 일 단위 스냅샷 (M30): 그날의 **첫** 저장이, 덮어쓰기 직전의 파일 — 즉
+// 어제까지의 마지막 상태 — 를 data/daily/workspace-YYYYMMDD.json 으로 남긴다.
+// 회전 백업(BACKUP_SLOTS)은 편집이 활발한 날 몇 분 만에 다 밀려나지만, 이
+// 파일은 하루에 하나씩 DAILY_KEEP일을 산다. 전부 최선노력: 스냅샷이 무슨
+// 이유로든 실패해도 본 저장은 계속된다 — 백업이 저장을 막으면 본말전도다.
+daily_snapshot($dataDir, $dataFile);
+
 if (!write_atomic($dataFile, $encoded)) {
     $unlock();
     fail(500, 'storage_error', '저장에 실패했어요.');
@@ -328,3 +338,37 @@ write_atomic($backup, $encoded);
 
 $unlock();
 respond(200, ['version' => $version, 'updatedAt' => $updatedAt]);
+
+/* ------------------------------------------------------------------ *
+ * 일 단위 스냅샷 (M30)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Keeps one dated copy of the workspace per day, best effort.
+ *
+ * Called with the lock held, immediately before the day's first overwrite, so
+ * what it copies is yesterday's final state. A brand-new install has no file
+ * yet and nothing worth keeping; a day whose snapshot already exists is done.
+ * Pruning trusts the filename (`workspace-YYYYMMDD.json`) — the name *is* the
+ * order, so a restored file's mtime can't confuse it.
+ */
+function daily_snapshot(string $dataDir, string $dataFile): void
+{
+    if (!is_file($dataFile)) {
+        return;
+    }
+    $dir = $dataDir . '/daily';
+    if (!is_dir($dir) && !@mkdir($dir, 0770, true)) {
+        return;
+    }
+    $snapshot = sprintf('%s/workspace-%s.json', $dir, date('Ymd'));
+    if (is_file($snapshot) || !@copy($dataFile, $snapshot)) {
+        return;
+    }
+
+    $files = glob($dir . '/workspace-*.json') ?: [];
+    sort($files);
+    foreach (array_slice($files, 0, max(0, count($files) - DAILY_KEEP)) as $old) {
+        @unlink($old);
+    }
+}

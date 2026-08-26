@@ -106,7 +106,11 @@ export function readBackupPhotos(parsed: unknown): BackupPhotos | undefined {
  *
  * Throws an `Error` with a Korean message the settings sheet can show as-is.
  * Also accepts a bare workspace (no `{exportedAt, workspace}` wrapper), since
- * that is what someone poking at IndexedDB by hand will most likely paste in.
+ * that is what someone poking at IndexedDB by hand will most likely paste in —
+ * and the server's own envelope (`{version, updatedAt, data: …}`), which is
+ * what the NAS's rotating backups and 일 단위 스냅샷 (M30,
+ * `data/daily/workspace-YYYYMMDD.json`) look like, so a downloaded snapshot
+ * restores through 가져오기 with no hand surgery.
  */
 export function deserializeBackup(text: string): Workspace {
   let parsed: unknown;
@@ -122,7 +126,9 @@ export function deserializeBackup(text: string): Workspace {
   const candidate = (
     'workspace' in record && typeof record.workspace === 'object' && record.workspace !== null
       ? record.workspace
-      : record
+      : 'data' in record && typeof record.data === 'object' && record.data !== null
+        ? record.data
+        : record
   ) as Record<string, unknown>;
 
   if (candidate.schemaVersion !== 1) {
