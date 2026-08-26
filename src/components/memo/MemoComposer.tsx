@@ -152,6 +152,29 @@ export default function MemoComposer({ tripId, onSent }: { tripId: Id; onSent: (
     setError(problem);
   };
 
+  /**
+   * 붙여넣기 (desktop, M26) — a screenshot in the clipboard lands as a staged
+   * photo, exactly as `CardPhotoStrip` does it. Bound on `window` (the file
+   * picker cannot see the clipboard, and the user's focus may be anywhere in
+   * the view), only while the composer is mounted — which is only ever the
+   * 메모 tab. A text paste has no files and passes through untouched.
+   */
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent): void => {
+      if (busy) return;
+      const files = [...(event.clipboardData?.files ?? [])].filter((file) =>
+        file.type.startsWith('image/'),
+      );
+      if (files.length === 0) return;
+      event.preventDefault();
+      void addFiles(files);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+    // Re-bound whenever the handler's closure would go stale (same call as
+    // CardPhotoStrip — `addFiles` reads `staged`).
+  });
+
   const unstage = (photoId: Id): void => {
     setStaged((current) => current.filter((photo) => photo.id !== photoId));
     // Never committed anywhere, so the bytes go straight back out.

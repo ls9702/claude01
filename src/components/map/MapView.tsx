@@ -14,7 +14,6 @@ import { cardCommentCount, cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
 import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
 import Icon, { EmojiIcon } from '../common/Icon';
-import BackupNudge from '../common/BackupNudge';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
   CHIP_MONEY,
@@ -551,7 +550,6 @@ export default function MapView() {
 
       {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
           top bar instead, so only one of the two ever mounts. */}
-      {isDesktop ? null : <BackupNudge variant="banner" className="mx-4 mb-4" />}
 
       {legendColumns.length > 0 ? (
         <div

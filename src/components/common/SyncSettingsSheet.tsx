@@ -4,7 +4,14 @@ import { useAiStore } from '../../ai/aiSettings';
 import { SYNC_STATUS_LABELS, useSyncStore } from '../../stores/syncStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { fetchMeta } from '../../sync/api';
-import { daysBetween, formatLastBackup, loadBackupState } from '../../sync/backup';
+import {
+  backupNudgeText,
+  daysBetween,
+  formatLastBackup,
+  isWorkspaceWorthBacking,
+  loadBackupState,
+  shouldNudgeBackup,
+} from '../../sync/backup';
 import {
   exportJson,
   exportJsonWithPhotos,
@@ -219,7 +226,8 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   );
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const usage = photoUsage(useWorkspaceStore((s) => s.workspace));
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  const usage = photoUsage(workspace);
   const estimate = useStorageEstimate();
   /** M20: photos ride to the NAS too, but only once there is a NAS. */
   const photoSyncOn = isConfigured(stored);
@@ -570,6 +578,19 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
 
         <div className="border-t border-line pt-6">
           <h3 className={SECTION_TITLE_CLASS}>백업</h3>
+          {/* 백업 경고 (M26) — M7a의 넛지가 화면마다 배너로 뜨던 것을 여기로
+              옮겼다. 내보내기 버튼 바로 위가 이 경고가 일을 시킬 수 있는 유일한
+              자리이고, 설정 안에 있으니 ✕(일주일 뒤로 미루기)도 필요 없다. */}
+          {shouldNudgeBackup(backupState, isWorkspaceWorthBacking(workspace)) ? (
+            <p
+              role="status"
+              data-testid="backup-nudge"
+              className="mt-2 flex min-h-11 items-center gap-2 rounded-md border border-warn/35 bg-warn-wash px-3 text-label text-warn-ink"
+            >
+              <Icon name="package" size={16} className="shrink-0 text-warn" />
+              {backupNudgeText(backupState.lastBackupAt)}
+            </p>
+          ) : null}
           <dl className="mt-2">
             <Fact term="마지막 백업">
               <span data-testid="backup-last" data-days={backupDays}>

@@ -21,7 +21,6 @@ import type { BoardColumn, Card } from '../../types/models';
 import { useAiEnabled } from '../../ai/aiSettings';
 import AiAskButton from '../ai/AiAskButton';
 import AiSuggestSheet from '../ai/AiSuggestSheet';
-import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
@@ -312,7 +311,6 @@ export default function BoardView() {
 
       {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
           top bar instead, so only one of the two ever mounts. */}
-      {isDesktop ? null : <BackupNudge variant="banner" className="mx-4 mb-4" />}
 
       <DndContext
         sensors={sensors}

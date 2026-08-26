@@ -175,6 +175,37 @@ test('사진을 붙여 보내면 말풍선에 뜨고, 눌러서 크게 볼 수 �
   await expect(page.getByTestId('photo-lightbox')).toHaveCount(0);
 });
 
+test('클립보드의 그림을 Ctrl+V로 붙이면 첨부로 대기한다 (M26)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+
+  await createTrip(page, '나고야');
+  await openMemo(page);
+
+  // 진짜 클립보드는 헤드리스에서 만질 수 없으니, 같은 이벤트를 손으로 만들어
+  // 던진다 — 컴포저가 듣는 것은 window의 `paste` 하나뿐이다.
+  const { readFileSync } = await import('node:fs');
+  const base64 = readFileSync(PHOTO).toString('base64');
+  await page.evaluate((data) => {
+    const bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'screenshot.png', { type: 'image/png' }));
+    window.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true }),
+    );
+  }, base64);
+
+  await expect(page.getByTestId('memo-staged-photo')).toHaveCount(1, { timeout: 15_000 });
+
+  // 붙인 그림도 보내면 여느 사진 메시지와 같다.
+  await page.getByTestId('memo-input').fill('이 가게 어때?');
+  await page.getByTestId('memo-send').click();
+  const bubble = page.getByTestId('memo-msg');
+  await expect(bubble).toHaveCount(1);
+  await expect(bubble).toContainText('이 가게 어때?');
+  await expect(bubble.getByTestId('memo-photo')).toHaveCount(1);
+});
+
 test('내 메시지를 지우면 「삭제된 메시지」 자리만 남는다', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('tab-bar')).toBeVisible();

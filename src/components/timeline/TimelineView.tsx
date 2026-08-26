@@ -41,7 +41,6 @@ import Icon from '../common/Icon';
 import { useAiEnabled } from '../../ai/aiSettings';
 import AiAskButton from '../ai/AiAskButton';
 import AiReviewSheet from '../ai/AiReviewSheet';
-import BackupNudge from '../common/BackupNudge';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
   CHIP_BUTTON,
@@ -675,7 +674,6 @@ export default function TimelineView() {
 
       {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
           top bar instead, so only one of the two ever mounts. */}
-      {isDesktop ? null : <BackupNudge variant="banner" className="mx-4 mb-4" />}
 
       {/* Row 1 is sheets and nothing else; the 오늘 and 지출 chips moved down
           into the pager, which is where the day they describe lives.

@@ -8,7 +8,6 @@ import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { flushPush } from '../../sync/syncEngine';
 import type { Id, MemoMessage } from '../../types/models';
-import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
@@ -266,7 +265,6 @@ export default function MemoView() {
       </header>
 
       {/* Under the h1, never over it (M9 §3.5). */}
-      {isDesktop ? null : <BackupNudge variant="banner" className="mx-4 mb-2" />}
 
       <div
         ref={scrollerRef}

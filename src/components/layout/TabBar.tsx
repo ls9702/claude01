@@ -5,7 +5,6 @@ import { unreadMemos } from '../../read/readState';
 import { TAB_IDS, TAB_LABELS, useUiStore, type TabId } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import AiAskButton from '../ai/AiAskButton';
-import BackupNudge from '../common/BackupNudge';
 import Icon, { type IconName } from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
 import { UNREAD_BADGE_CLASS } from '../common/formStyles';
@@ -22,10 +21,10 @@ const TAB_ICONS: Record<TabId, IconName> = {
  * Bottom tab bar on mobile; a top bar from `lg` (≥1024px) up.
  *
  * **The tab row holds tabs and nothing else** (M9 §3.3): exactly five cells
- * (four until 메모 arrived in M21), five `role="tab"`s. The backup nudge and
- * the sync indicator are not tabs, so
- * on desktop they live in a utility zone pushed to the right, and on mobile the
- * app shell renders them above the active view instead.
+ * (four until 메모 arrived in M21), five `role="tab"`s. The sync indicator is
+ * not a tab, so on desktop it lives in a utility zone pushed to the right, and
+ * on mobile each view renders it above its own content instead. (백업 경고는
+ * M26부터 동기화 설정 시트 안에만 있다.)
  *
  * The one thing a tab is allowed to carry is news about itself: 메모 wears the
  * count of lines the other person wrote and this person has not read (M24).
@@ -105,7 +104,6 @@ export default function TabBar() {
             tab bar with things in it that are not tabs is not a tab bar. */}
         {isDesktop ? (
           <div className="ml-auto flex items-center gap-2">
-            <BackupNudge />
             <AiAskButton />
             <SyncStatusChip />
           </div>

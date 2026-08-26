@@ -8,7 +8,6 @@ import type { Id, Trip } from '../../types/models';
 import { todayIso } from '../../timeline/today';
 import { diffDaysIso, formatShortDate, isIsoDate } from '../../utils/flights';
 import { formatLatLng, shortPlace } from '../../utils/geo';
-import BackupNudge from '../common/BackupNudge';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
@@ -179,7 +178,6 @@ export default function TripListView() {
 
       {/* Under the h1, never over it (M9 §3.5). Desktop wears the chip in the
           top bar instead, so only one of the two ever mounts. */}
-      {isDesktop ? null : <BackupNudge variant="banner" className="mb-6" />}
 
       {!hasTrips ? (
         <div

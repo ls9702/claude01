@@ -157,7 +157,7 @@ async function seedStaleBackup(page: Page, days = 30): Promise<void> {
   }, Date.now() - days * DAY_MS);
 }
 
-test('백업이 오래된 데다 데이터가 쌓이면 넛지가 뜨고, 닫으면 일주일 조용해진다', async ({
+test('백업 경고는 설정 시트 안에만 살고, 오래된 데다 데이터가 쌓이면 뜬다 (M26)', async ({
   page,
 }) => {
   await seedStaleBackup(page, 30);
@@ -165,54 +165,54 @@ test('백업이 오래된 데다 데이터가 쌓이면 넛지가 뜨고, 닫으
   await expect(page.getByTestId('tab-bar')).toBeVisible();
 
   await createTrip(page, '다낭');
-
-  // Four cards is still "just poking at the app" — no nagging.
   for (const title of ['미케비치', '바나힐', '한강다리', '반쎄오']) {
     await addCard(page, 0, title);
   }
+  // The fifth crosses the "worth backing" line.
+  await addCard(page, 1, '용다리 불쇼');
+
+  // M26: no banner in the view — the warning lives in the settings sheet now.
   await expect(page.getByTestId('backup-nudge')).toHaveCount(0);
 
-  // The fifth crosses the line.
-  await addCard(page, 1, '용다리 불쇼');
+  await page.getByTestId('sync-chip').click();
+  await expect(page.getByTestId('sync-settings')).toBeVisible();
   await expect(page.getByTestId('backup-nudge')).toBeVisible();
   await expect(page.getByTestId('backup-nudge')).toContainText('백업한 지 오래됐어요');
-
-  // It opens the settings sheet, which spells the age out.
-  await page.getByTestId('backup-nudge-open').click();
-  await expect(page.getByTestId('sync-settings')).toBeVisible();
   await expect(page.getByTestId('backup-last')).toHaveAttribute('data-days', '30');
   await expect(page.getByTestId('backup-last')).toHaveText('30일 전');
   await page.getByTestId('sheet-close').click();
   await expect(page.getByTestId('sync-settings')).toHaveCount(0);
-  await expect(page.getByTestId('backup-nudge')).toBeVisible();
-
-  // ✕ snoozes it, and the snooze survives a reload.
-  await page.getByTestId('backup-nudge-dismiss').click();
   await expect(page.getByTestId('backup-nudge')).toHaveCount(0);
 
+  // There is no ✕ any more — nothing to snooze, so a reload changes nothing.
   await waitForPersisted(page, '용다리 불쇼');
   await page.reload();
   await expect(page.getByTestId('tab-bar')).toBeVisible();
-  // A reload lands back on 보드; hop to 여행 to prove the workspace rehydrated
-  // (an empty one would hide the nudge for the wrong reason).
-  await page.getByTestId('tab-trips').click();
-  await expect(page.getByTestId('trip-card').filter({ hasText: '다낭' })).toContainText('카드 5');
-  await expect(page.getByTestId('backup-nudge')).toHaveCount(0);
+  await page.getByTestId('sync-chip').click();
+  await expect(page.getByTestId('backup-nudge')).toContainText('백업한 지 오래됐어요');
 });
 
-test('백업한 적 없어도 데이터가 적으면 넛지는 안 뜬다', async ({ page }) => {
+test('백업한 적 없어도 데이터가 적으면 경고는 안 뜬다', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('tab-bar')).toBeVisible();
 
   await createTrip(page, '타이베이');
   await addCard(page, 0, '지우펀');
 
-  await expect(page.getByTestId('backup-nudge')).toHaveCount(0);
-
-  // And with nothing backed up at all the settings sheet says so.
+  // And with nothing backed up at all the settings sheet says so — but with
+  // this little data it does not warn yet.
   await page.getByTestId('sync-chip').click();
   await expect(page.getByTestId('backup-last')).toHaveText('없음');
   await expect(page.getByTestId('backup-last')).toHaveAttribute('data-days', '-1');
+  await expect(page.getByTestId('backup-nudge')).toHaveCount(0);
+
+  // Enough data with no backup ever → the sheet says 「아직 백업한 적이 없어요」.
+  await page.getByTestId('sheet-close').click();
+  for (const title of ['스린야시장', '용산사', '101', '단수이']) {
+    await addCard(page, 0, title);
+  }
+  await page.getByTestId('sync-chip').click();
+  await expect(page.getByTestId('backup-nudge')).toContainText('아직 백업한 적이 없어요');
 });
 
 /* ------------------------------------------------------------------ *
