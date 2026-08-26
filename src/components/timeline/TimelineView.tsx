@@ -42,10 +42,12 @@ import { useAiEnabled } from '../../ai/aiSettings';
 import AiAskButton from '../ai/AiAskButton';
 import AiReviewSheet from '../ai/AiReviewSheet';
 import SyncStatusChip from '../common/SyncStatusChip';
+import { todoSummary } from '../../todo/checklist';
 import {
   CHIP_BUTTON,
   CHIP_NOW,
   COMPACT_ACTION_BUTTON_CLASS,
+  COUNT_BADGE_CLASS,
   GHOST_BUTTON_CLASS,
   POPOVER_CLASS,
   POPOVER_ROW_DANGER_CLASS,
@@ -64,6 +66,7 @@ import SheetTabs from './SheetTabs';
 import SheetWizard from './SheetWizard';
 import SpendSummaryBar, { categoryRows } from './SpendSummaryBar';
 import TimeAxis from './TimeAxis';
+import TodoSheet from './TodoSheet';
 import UnscheduledTray from './UnscheduledTray';
 
 type Dialog =
@@ -323,6 +326,20 @@ export default function TimelineView() {
   );
 
   /**
+   * 할 일 (M29) — 시간표에 놓을 수 없는 일들이 사는 곳.
+   *
+   * 이 탭에 사는 이유는 그것이 「여행 준비」가 실제로 벌어지는 화면이기 때문이다:
+   * 환전·유심·예약은 몇 시에 할 일이 아니라 출발 전에 끝내 둘 일이고, 시간표를
+   * 들여다보는 그 순간이 그것들이 떠오르는 순간이다. 남은 개수는 버튼 위에서
+   * 조용히만 말한다 — 재촉하는 색은 now-line과 안 읽음의 몫이다.
+   */
+  const [todoOpen, setTodoOpen] = useState(false);
+  const todoRemaining = useMemo(
+    () => todoSummary(workspace, trip?.id).remaining,
+    [workspace, trip?.id],
+  );
+
+  /**
    * dayId → straight-line 이동 갭 between its consecutive located stops (M7b),
    * over the **windowed** sequence of the column (M16-B) — so the last hop of a
    * night is measured from 23:40 to 00:20, not across a calendar boundary.
@@ -525,6 +542,25 @@ export default function TimelineView() {
     <div className="ml-auto flex shrink-0 items-center gap-1 lg:gap-2">
       {isDesktop ? null : <AiAskButton />}
       {isDesktop ? null : <SyncStatusChip variant="dot" />}
+      {/* 접힘 줄과 펼침 줄이 **같은** 묶음을 쓰므로 (위 주석), 이 버튼은 상단
+          메뉴를 접어도 사라지지 않는다 — 접기는 숨기기가 아니다. */}
+      <button
+        type="button"
+        data-testid="todo-open"
+        data-remaining={todoRemaining}
+        onClick={() => setTodoOpen(true)}
+        aria-label="할 일"
+        title="할 일"
+        className={COMPACT_ACTION_BUTTON_CLASS}
+      >
+        <Icon name="check" size={16} />
+        <span className="hidden sm:inline">할 일</span>
+        {todoRemaining > 0 ? (
+          <span data-testid="todo-open-count" className={COUNT_BADGE_CLASS}>
+            {todoRemaining}
+          </span>
+        ) : null}
+      </button>
       {aiOn && sheet && sheetHasEntries ? (
         <button
           type="button"
@@ -1128,6 +1164,8 @@ export default function TimelineView() {
       {aiReviewOpen && aiOn && sheet ? (
         <AiReviewSheet sheetId={sheet.id} onClose={() => setAiReviewOpen(false)} />
       ) : null}
+
+      {todoOpen ? <TodoSheet tripId={trip.id} onClose={() => setTodoOpen(false)} /> : null}
     </section>
   );
 }

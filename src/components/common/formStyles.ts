@@ -151,6 +151,18 @@ export const UNREAD_BADGE_CLASS =
 /** 개수 없이 「새 것이 있다」만 말하는 점 — 보드 카드, 여행 목록. */
 export const UNREAD_DOT_CLASS = 'inline-block h-2 w-2 shrink-0 rounded-full bg-now';
 
+/**
+ * 재촉하지 않는 개수 배지 — 「할 일 3」의 3 (M29).
+ *
+ * 위의 코랄 배지와 모양은 같고 색만 중립이다. 남은 할 일은 안 읽은 메시지와
+ * 다르다: 상대가 방금 말을 걸어 **지금** 나를 기다리는 것이 아니라, 여행 전에
+ * 언젠가 하면 되는 일이다. 코랄로 칠하면 화면에서 「지금」이라는 말이 하나 더
+ * 늘어나 now-line과 안 읽음이 갖고 있던 뜻이 그만큼 묽어진다.
+ */
+export const COUNT_BADGE_CLASS =
+  'inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 ' +
+  'bg-sunken text-micro tabular-nums text-ink-muted';
+
 /** 누를 수 있는 칩(필터·세그먼트). 터치 타깃 h-9. */
 const CHIP_PRESSABLE = `${withoutPadX(withoutHeight(CHIP_BASE))} h-9 px-3 lg:h-8`;
 

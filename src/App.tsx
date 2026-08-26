@@ -6,6 +6,7 @@ import { SEEN_THROTTLE_MS, useProfileStore } from './profile/profile';
 import { schedulePhotoGc } from './stores/photoGc';
 import { pruneActiveIds } from './stores/uiStore';
 import { useWorkspaceStore } from './stores/workspaceStore';
+import { adoptTodoColumns } from './todo/migrate';
 import { applyBootstrapConfig } from './sync/bootstrap';
 import { initSyncEngine } from './sync/syncEngine';
 
@@ -64,6 +65,10 @@ export default function App() {
     // Same reason, one line up: the remembered 활성 여행 can only be checked
     // against a workspace that has actually loaded (B15).
     pruneActiveIds(useWorkspaceStore.getState().workspace);
+    // Same reason a third time (M29): 「할일」이라는 이름은 하이드레이션이
+    // 끝나야 존재한다. 더하기만 하고 멱등이라 매 실행 첫 로드에 그냥 돌려도
+    // 두 번째부터는 아무 일이 없다.
+    adoptTodoColumns();
     // Same reason again: a sweep against an empty workspace would find every
     // photo unreferenced. Booked, not run — the first pass only marks
     // candidates (blobs a crash left behind mid-add), and the sweeper books

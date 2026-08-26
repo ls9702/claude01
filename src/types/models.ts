@@ -91,6 +91,23 @@ export interface BoardColumn {
   icon: string;
   /** Ordered {@link Card} ids. */
   cardOrder: Id[];
+  /**
+   * 체크리스트 카테고리 (M29) — 환전·챙길 것·예약하기처럼 **장소가 없는** 일.
+   *
+   * 켜져 있으면 이 칸의 카드마다 보드에 체크박스가 서고, 일정 탭의 「할 일」
+   * 시트가 그 카드들을 한 줄씩 모아 보여준다. 꺼져 있거나 **없으면** 평범한
+   * 칸이다 — 즉 없음은 거짓쪽으로 읽힌다.
+   *
+   * 「없음」과 「명시적 false」를 굳이 가르는 이유는 M29의 자동 이행 때문이다:
+   * 이름이 할일/할 일/todo인 **기존** 칸을 한 번만 체크리스트로 올려주는데,
+   * 사람이 직접 끈 칸(false)까지 되살리면 그건 이행이 아니라 되돌리기다.
+   * 그래서 규칙은 「플래그가 아예 없을 때만 손댄다」이고, 이 필드가 optional인
+   * 것 자체가 그 규칙을 담는 그릇이다 (`todo/checklist.ts`).
+   *
+   * Optional and additive — M29 이전에 저장된 칸에는 필드가 없고
+   * `schemaVersion`은 그대로 1이다.
+   */
+  todo?: boolean;
   createdAt: Millis;
   updatedAt: Millis;
 }
@@ -198,6 +215,23 @@ export interface Card {
    * before M13 has no field and `schemaVersion` stays 1.
    */
   createdBy?: string;
+  /**
+   * 체크한 시각 (M29) — 불리언이 아니라 **타임스탬프**다.
+   *
+   * `true`와 달리 시각은 「방금 끝낸 것」의 순서를 공짜로 알려주므로, 할 일
+   * 목록이 끝난 항목을 아래로 가라앉힐 때 무엇을 맨 위에 둘지 따로 저장할
+   * 필요가 없다. 그러면서도 조건식에서는 그냥 참/거짓으로 읽힌다.
+   *
+   * 체크를 **풀면 필드가 사라진다** — `undefined`로 두는 것이 아니라
+   * ({@link MemoMessage.removedAt}의 반대편에서) 키째로 없앤다. 그래야 동기화로
+   * 건너가는 모양이 M29 이전 카드와 완전히 같아진다. 카드는 통째로 LWW로
+   * 병합되므로 `sync/merge`는 손댈 것이 없다.
+   *
+   * 체크리스트 칸({@link BoardColumn.todo})이 아닌 칸의 카드에도 남아 있을 수
+   * 있다 — 카드를 옮겨도 지우지 않는다. 보이지 않을 뿐이고, 되돌아오면 그대로
+   * 체크된 채다.
+   */
+  doneAt?: Millis;
   createdAt: Millis;
   updatedAt: Millis;
 }

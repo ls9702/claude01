@@ -56,6 +56,16 @@ describe('addTrip', () => {
     expect(columns.map((c) => c.name)).toEqual(SEED_COLUMNS.map((s) => s.name));
   });
 
+  it('seeds 할일 as a checklist category and nothing else (M29)', () => {
+    const tripId = store().addTrip('오사카');
+    const columns = ws().trips[tripId].columnOrder.map((id) => ws().columns[id]);
+
+    expect(columns.map((c) => c.todo)).toEqual([undefined, true, undefined, undefined, undefined]);
+    // A plain column carries **no** key — the shape every pre-M29 device reads.
+    expect(columns.filter((c) => 'todo' in c).map((c) => c.name)).toEqual(['할일']);
+    expect(SEED_COLUMNS.filter((s) => s.todo).map((s) => s.name)).toEqual(['할일']);
+  });
+
   it('marks the store dirty and honours a custom currency', () => {
     expect(store().dirty).toBe(false);
     const tripId = store().addTrip('도쿄', 'JPY');
@@ -125,6 +135,108 @@ describe('deleteTrip', () => {
   it('ignores an unknown trip id', () => {
     store().deleteTrip('nope');
     expect(ws().tombstones).toHaveLength(0);
+  });
+});
+
+describe('setColumnTodo', () => {
+  it('turns a plain column into a checklist one', () => {
+    const tripId = store().addTrip('여행');
+    const [movement] = columnIds(tripId);
+    expect(ws().columns[movement].todo).toBeUndefined();
+
+    store().setColumnTodo(movement, true);
+    expect(ws().columns[movement].todo).toBe(true);
+    expect(ws().columns[movement].updatedAt).toBeGreaterThan(0);
+  });
+
+  it('writes an explicit false when turned off, rather than dropping the flag', () => {
+    const tripId = store().addTrip('여행');
+    const [, todo] = columnIds(tripId);
+    expect(ws().columns[todo].todo).toBe(true);
+
+    store().setColumnTodo(todo, false);
+    expect(ws().columns[todo].todo).toBe(false);
+    expect('todo' in ws().columns[todo]).toBe(true);
+  });
+
+  it('changes nothing when the value already matches', () => {
+    const tripId = store().addTrip('여행');
+    const [, todo] = columnIds(tripId);
+    const before = ws();
+    store().setColumnTodo(todo, true);
+    expect(ws()).toBe(before);
+  });
+
+  it('ignores an unknown column', () => {
+    const before = ws();
+    store().setColumnTodo('nope', true);
+    expect(ws()).toBe(before);
+  });
+});
+
+describe('toggleCardDone', () => {
+  it('stamps doneAt on the way in', () => {
+    const tripId = store().addTrip('여행');
+    const [, todo] = columnIds(tripId);
+    const cardId = store().addCard(tripId, todo, { title: '환전' })!;
+    expect(ws().cards[cardId].doneAt).toBeUndefined();
+
+    store().toggleCardDone(cardId);
+    const done = ws().cards[cardId];
+    expect(typeof done.doneAt).toBe('number');
+    expect(done.doneAt).toBeGreaterThan(0);
+    expect(done.updatedAt).toBe(done.doneAt);
+  });
+
+  it('removes the field entirely on the way out', () => {
+    const tripId = store().addTrip('여행');
+    const [, todo] = columnIds(tripId);
+    const cardId = store().addCard(tripId, todo, { title: '유심' })!;
+
+    store().toggleCardDone(cardId);
+    store().toggleCardDone(cardId);
+
+    const card = ws().cards[cardId];
+    // Not `undefined` — the key itself must be gone, so what syncs is exactly
+    // the shape a pre-M29 card has.
+    expect('doneAt' in card).toBe(false);
+    expect(JSON.parse(JSON.stringify(card))).not.toHaveProperty('doneAt');
+  });
+
+  it('keeps the rest of the card intact across a round trip', () => {
+    const tripId = store().addTrip('여행');
+    const [, todo] = columnIds(tripId);
+    const cardId = store().addCard(tripId, todo, {
+      title: '예약하기',
+      memo: '9시 전에',
+      budget: 30000,
+    })!;
+    store().addComment(cardId, '링크 확인');
+
+    store().toggleCardDone(cardId);
+    store().toggleCardDone(cardId);
+
+    const card = ws().cards[cardId];
+    expect(card.title).toBe('예약하기');
+    expect(card.memo).toBe('9시 전에');
+    expect(card.budget).toBe(30000);
+    expect(card.comments).toHaveLength(1);
+    expect(card.columnId).toBe(todo);
+  });
+
+  it('does not care whether the column is a checklist', () => {
+    const tripId = store().addTrip('여행');
+    const [movement] = columnIds(tripId);
+    const cardId = store().addCard(tripId, movement, { title: '렌터카' })!;
+
+    store().toggleCardDone(cardId);
+    expect(ws().cards[cardId].doneAt).toBeGreaterThan(0);
+  });
+
+  it('ignores an unknown card', () => {
+    const before = ws();
+    store().toggleCardDone('nope');
+    expect(ws()).toBe(before);
   });
 });
 

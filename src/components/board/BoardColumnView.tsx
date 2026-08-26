@@ -2,6 +2,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { DND_COLUMN } from '../../dnd/boardDnd';
 import { useCollapsedStore, useColumnCollapsed } from '../../stores/collapsedColumns';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { BoardColumn, Card, Id } from '../../types/models';
 import { colorClasses } from '../../utils/colors';
@@ -67,6 +68,15 @@ export default function BoardColumnView({
   const colors = colorClasses(column.color);
   const collapsed = useColumnCollapsed(column.id);
   const toggleCollapsed = useCollapsedStore((state) => state.toggle);
+  /**
+   * 체크리스트 카테고리라면 카드마다 상자가 선다 (M29).
+   *
+   * 스토어를 여기서 직접 집는 것은 `useCollapsedStore`와 같은 이유다: 이 칸이
+   * 체크리스트인지는 이미 `column`이 들고 있으므로 호출부가 전해 줄 것이 없고,
+   * 보드 탭과 일정 탭의 레일이 **같은 화면 상태**를 보아야 하는 종류의 일이다.
+   */
+  const todo = column.todo === true;
+  const toggleCardDone = useWorkspaceStore((state) => state.toggleCardDone);
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
     data: { type: DND_COLUMN, columnId: column.id },
@@ -164,6 +174,8 @@ export default function BoardColumnView({
                 scheduledCount={scheduledCounts?.[card.id] ?? 0}
                 scheduleBreakdown={scheduleBreakdowns?.[card.id]}
                 hasNewComments={newCommentCards?.has(card.id) ?? false}
+                todo={todo}
+                onToggleDone={todo ? (target) => toggleCardDone(target.id) : undefined}
                 onOpen={onOpenCard}
               />
             ))}

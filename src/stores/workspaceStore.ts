@@ -109,15 +109,22 @@ export interface SeedColumn {
   name: string;
   color: string;
   icon: string;
+  /** 체크리스트 카테고리로 태어나는가 (M29). 없으면 평범한 칸. */
+  todo?: boolean;
 }
 
 /**
  * Categories every trip starts with. Order matters — it becomes the trip's
  * initial `columnOrder`.
+ *
+ * 「할일」은 처음부터 체크리스트다 (M29): 환전·유심·예약처럼 이 칸에 들어가는
+ * 일은 장소도 시간도 없고, 지도에 찍히지도 시간표에 놓이지도 않는다. 그런 것에
+ * 사람이 해줄 수 있는 유일한 일이 「끝냈다」이므로 여섯 번째 칸을 만들지 않고
+ * 이미 있던 칸에 그 성질을 준다.
  */
 export const SEED_COLUMNS: readonly SeedColumn[] = [
   { name: '이동수단', color: 'sky', icon: '🚗' },
-  { name: '할일', color: 'violet', icon: '📌' },
+  { name: '할일', color: 'violet', icon: '📌', todo: true },
   { name: '식사', color: 'amber', icon: '🍽️' },
   { name: '숙소', color: 'rose', icon: '🏨' },
   { name: '볼거리', color: 'emerald', icon: '🎡' },
@@ -444,6 +451,16 @@ export interface WorkspaceState {
   /** Renames / recolors a column. No-op for an unknown id. */
   updateColumn: (id: Id, patch: ColumnPatch) => void;
   /**
+   * 이 칸을 체크리스트 카테고리로 켜거나 끈다 (M29).
+   *
+   * `updateColumn`의 patch에 얹지 않고 따로 둔 이유는 저장하는 값이 다르기
+   * 때문이다: 끄기는 필드를 *지우는* 것이 아니라 **명시적 `false`를 남기는**
+   * 것이고 (그래야 이름이 「할일」인 칸에 자동 이행이 다시 손대지 못한다),
+   * `ColumnPatch`의 `undefined`는 어느 필드에서든 「비운다」는 뜻이라 그 구분을
+   * 실을 수 없다. No-op for an unknown id.
+   */
+  setColumnTodo: (id: Id, todo: boolean) => void;
+  /**
    * Deletes a column, moving its cards to the trip's first remaining column.
    * Returns `false` (and changes nothing) when the column is unknown or is the
    * trip's last one — a board always keeps at least one category.
@@ -456,6 +473,19 @@ export interface WorkspaceState {
   updateCard: (id: Id, patch: CardPatch) => void;
   /** Deletes a card and cascade-deletes its timeline entries (+ tombstones). */
   deleteCard: (id: Id) => void;
+  /**
+   * 할 일 체크를 켜고 끈다 (M29) — 보드의 체크박스와 「할 일」 시트가 같이 쓴다.
+   *
+   * 켜면 `doneAt`에 지금 시각이 박히고, 끄면 그 **필드가 사라진다**: 값을
+   * `undefined`로 두는 것이 아니라 키째로 없앤 카드를 다시 지어 넣는다
+   * (`removeMemoMessage`와 같은 손질). 그래야 동기화로 건너가는 모양이 M29
+   * 이전 카드와 완전히 같다.
+   *
+   * 칸이 체크리스트인지는 **묻지 않는다**. 그건 화면이 체크박스를 그릴지 말지의
+   * 규칙이지 데이터의 규칙이 아니고, 카드를 다른 칸으로 옮겼다고 끝낸 일이
+   * 안 끝난 일이 되지는 않는다. No-op for an unknown id.
+   */
+  toggleCardDone: (id: Id) => void;
   /**
    * Reorders a card inside its column or moves it to another column of the
    * same trip. `toIndex` is the position in the destination `cardOrder`
@@ -679,6 +709,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 name: seed.name,
                 color: seed.color,
                 icon: seed.icon,
+                // Spread, never `todo: seed.todo` — a plain column must keep
+                // **no** key at all, which is the shape every pre-M29 device
+                // (and the 자동 이행 rule) already reads as "not a checklist".
+                ...(seed.todo ? { todo: true } : {}),
                 cardOrder: [],
                 createdAt: now,
                 updatedAt: now,
@@ -782,6 +816,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           run((draft, now) => touch<BoardColumn>(draft.columns, id, patch, now));
         },
 
+        setColumnTodo: (id, todo) => {
+          run((draft, now) => {
+            const column = draft.columns[id];
+            if (!column) return null;
+            // 같은 값이면 아무 일도 없다: 카테고리 편집을 열었다 닫기만 해도
+            // 워크스페이스가 dirty가 되어 NAS로 한 번 밀려가는 건, 아무것도
+            // 바뀌지 않았다는 사실보다 시끄럽다.
+            if (column.todo === todo) return null;
+            return touch<BoardColumn>(draft.columns, id, { todo }, now);
+          });
+        },
+
         deleteColumn: (id) =>
           run((draft, now) => {
             const column = draft.columns[id];
@@ -862,6 +908,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
             removeEntriesForCard(draft, id, now);
             return true;
+          });
+        },
+
+        toggleCardDone: (id) => {
+          run((draft, now) => {
+            const card = draft.cards[id];
+            if (!card) return null;
+
+            if (card.doneAt) {
+              // 되지어 넣는다 — `doneAt: undefined`가 아니라 키가 **없는** 카드로.
+              const { doneAt: _cleared, ...rest } = card;
+              draft.cards[id] = { ...rest, updatedAt: now };
+              return true;
+            }
+            return touch<Card>(draft.cards, id, { doneAt: now }, now);
           });
         },
 

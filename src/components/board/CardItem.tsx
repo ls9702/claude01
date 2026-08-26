@@ -9,8 +9,10 @@ import { shortPlace } from '../../utils/geo';
 import { formatBudget } from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
+import { isCardDone } from '../../todo/checklist';
 import Avatar from '../common/Avatar';
 import Icon, { type IconName } from '../common/Icon';
+import TodoCheck from '../common/TodoCheck';
 import { CHIP_MONEY, CHIP_NEUTRAL, POPOVER_CLASS, UNREAD_BADGE_CLASS } from '../common/formStyles';
 
 interface CardSurfaceProps {
@@ -39,6 +41,16 @@ interface CardSurfaceProps {
    * the author avatar is: a drag source is not a place one reads.
    */
   hasNewComments?: boolean;
+  /**
+   * 이 카드가 체크리스트 카테고리에 있는가 (M29) — 체크박스를 그릴지의 유일한
+   * 조건. `card.doneAt`이 남아 있어도 칸이 체크리스트가 아니면 상자는 없다.
+   */
+  todo?: boolean;
+  /**
+   * 체크박스를 눌렀을 때. 없으면 상자는 **장식**이 된다 — `DragOverlay`의
+   * 유령 카드처럼 누를 수 없는 사본이 쓰는 길이다.
+   */
+  onToggleDone?: () => void;
 }
 
 /** How many chips a card may show before the rest fold into `＋N`. */
@@ -62,8 +74,14 @@ export function CardSurface({
   scheduleBreakdown,
   terse = false,
   hasNewComments = false,
+  todo = false,
+  onToggleDone,
 }: CardSurfaceProps) {
   const colors = colorClasses(color);
+  // 트레이의 terse 카드는 끌기 위한 손잡이라 상자를 달지 않는다 — 아바타와
+  // NEW가 같은 이유로 빠져 있는 자리다.
+  const showCheck = todo && !terse;
+  const done = showCheck && isCardDone(card);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const badgeRef = useRef<HTMLDivElement | null>(null);
   const hasBreakdown = (scheduleBreakdown?.length ?? 0) > 0;
@@ -140,7 +158,50 @@ export function CardSurface({
       ].join(' ')}
     >
       <div className="flex items-start gap-2">
-        <h3 className="min-w-0 flex-1 break-words text-label font-semibold text-ink">
+        {/* 체크박스는 제목 **앞**에 선다 (M29): 이 줄에서 먼저 답해야 하는
+            질문이 「끝났나」이고, 오른쪽 라벨 지대(아바타·일정 배지)는 카드가
+            바쁠수록 붐비는 자리다.
+
+            드래그와 싸우지 않는 법은 일정 배지·링크가 이미 쓰고 있는 것과 같다:
+            센서가 듣는 것은 mousedown/touchstart이므로 포인터 이벤트 세 개를
+            여기서 멈춰 세운 뒤, 열기(onClick)까지 함께 막는다. */}
+        {showCheck ? (
+          onToggleDone ? (
+            <button
+              type="button"
+              data-testid="card-done-toggle"
+              data-card-id={card.id}
+              data-done={done ? 'true' : 'false'}
+              role="checkbox"
+              aria-checked={done}
+              aria-label={`${card.title} ${done ? '완료 취소' : '완료'}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleDone();
+              }}
+              // 32px — 24px 최소치는 넘기면서 제목 줄의 높이는 건드리지 않는다.
+              className="-my-1 -ml-1 grid h-8 w-8 shrink-0 place-items-center rounded-md transition-colors duration-[140ms] ease-quick hover:bg-sunken"
+            >
+              <TodoCheck done={done} />
+            </button>
+          ) : (
+            <span className="-my-1 -ml-1 grid h-8 w-8 shrink-0 place-items-center">
+              <TodoCheck done={done} />
+            </span>
+          )
+        ) : null}
+        <h3
+          data-done={done ? 'true' : 'false'}
+          className={[
+            'min-w-0 flex-1 break-words text-label font-semibold',
+            // 끝난 일은 지워지지 않고 **가라앉는다** — 줄을 긋고 색을 낮출 뿐,
+            // 칩은 그대로다. 얼마 썼고 어디였는지는 끝난 뒤에도 사실이다.
+            done ? 'text-ink-faint line-through' : 'text-ink',
+          ].join(' ')}
+        >
           {card.title}
         </h3>
         {/* 상대의 새 코멘트 (M24). 칩 줄이 아니라 제목 줄에 붙는다: 칩은
@@ -264,6 +325,10 @@ interface CardItemProps {
   scheduleBreakdown?: readonly SheetScheduleCount[];
   /** Draws the NEW dot (M24) — see {@link CardSurfaceProps.hasNewComments}. */
   hasNewComments?: boolean;
+  /** Draws the checkbox (M29) — see {@link CardSurfaceProps.todo}. */
+  todo?: boolean;
+  /** Called by that checkbox; omitted, the box is not there at all. */
+  onToggleDone?: (card: Card) => void;
   onOpen: (card: Card) => void;
 }
 
@@ -284,6 +349,8 @@ export default function CardItem({
   scheduledCount = 0,
   scheduleBreakdown,
   hasNewComments = false,
+  todo = false,
+  onToggleDone,
   onOpen,
 }: CardItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -320,6 +387,8 @@ export default function CardItem({
         scheduledCount={scheduledCount}
         scheduleBreakdown={scheduleBreakdown}
         hasNewComments={hasNewComments}
+        todo={todo}
+        onToggleDone={onToggleDone ? () => onToggleDone(card) : undefined}
       />
     </div>
   );
