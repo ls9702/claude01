@@ -153,7 +153,7 @@ test('일정표가 일자별·시트별 지출 합계를 보여준다', async ({
   // Nothing scheduled yet → no money chip at all. The 요약 바 is always there
   // (M16-A) and honestly says zero.
   await expect(page.getByTestId('day-spend')).toHaveCount(0);
-  await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-spent', '0');
+  await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-budget', '0');
 
   // …placed through the card sheet (the touch path).
   await page.getByTestId('tab-board').click();
@@ -175,9 +175,9 @@ test('일정표가 일자별·시트별 지출 합계를 보여준다', async ({
   await expect(page.getByTestId('day-spend-spent')).toContainText('지출 15,000원');
   await dayChip.click();
 
-  // 시트 전체는 이제 상단 고정 요약 바가 말한다 (M16-A).
+  // 시트 전체의 **필요 예산**은 상단 고정 요약 바가 말한다 (M16-A → M25).
+  // 지출은 여기 없다: 이 줄은 계획이 얼마 드는지만 답한다.
   const sheetSummary = page.getByTestId('spend-summary-sheet');
-  await expect(sheetSummary).toHaveAttribute('data-spent', '15000');
   await expect(sheetSummary).toHaveAttribute('data-budget', '20000');
   // 이 시트에는 날짜가 없어 '오늘'이 없다 → 데스크톱 요약 바는 일자 칸을 생략한다
   // (여러 칸이 한 화면에 있는데 '현재 보이는 일자'를 하나로 고를 수 없어서다).
@@ -209,5 +209,6 @@ test('일정표가 일자별·시트별 지출 합계를 보여준다', async ({
 
   await page.getByTestId('tab-timeline').click();
   await expect(page.getByTestId('day-spend')).toHaveAttribute('data-spent', '12000');
-  await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-spent', '12000');
+  // 영수증을 지워도 필요 예산은 그대로다 — 계획은 계획이다 (M25).
+  await expect(page.getByTestId('spend-summary-sheet')).toHaveAttribute('data-budget', '20000');
 });

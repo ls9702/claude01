@@ -3,7 +3,14 @@ import { isProfileId, useProfileStore } from '../../profile/profile';
 import { cardReadKey, latestCommentStamp } from '../../read/readState';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, Id } from '../../types/models';
-import { MAX_AMOUNT, formatBudget, formatLocalAmount, isValidExpenseAmount } from '../../utils/money';
+import {
+  MAX_AMOUNT,
+  formatBudget,
+  formatLocalAmount,
+  hasLocalRate,
+  isValidExpenseAmount,
+  type LocalRate,
+} from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatStamp } from '../../utils/time';
 import Avatar from './Avatar';
@@ -24,13 +31,12 @@ export const numberOrUndefined = (raw: string): number | undefined => {
   return Number.isFinite(value) ? value : undefined;
 };
 
-/** The trip's 현지 통화 pair, when it has one. */
-export interface LocalMoney {
-  /** e.g. `JPY`. */
-  localCurrency?: string;
-  /** 기준통화 per 1 local unit, e.g. `9.3` KRW per JPY. */
-  fxRate?: number;
-}
+/**
+ * The trip's 현지 통화 pair, when it has one — the props shape every money
+ * sheet passes down. The type itself lives in `utils/money` now (M25), where
+ * the 필요 예산 바's 환산도 같은 짝을 쓴다.
+ */
+export type LocalMoney = LocalRate;
 
 /**
  * Who wrote this row (M13) — an 18px avatar in front of the text.
@@ -50,8 +56,7 @@ function LedgerAuthor({ by, className = '' }: { by?: string; className?: string 
 }
 
 /** True when both halves are usable — a rate of 0 is not a rate. */
-const hasLocal = (money: LocalMoney): boolean =>
-  Boolean(money.localCurrency) && Number.isFinite(money.fxRate) && (money.fxRate as number) > 0;
+const hasLocal = hasLocalRate;
 
 interface ExpenseInputRowProps extends LocalMoney {
   cardId: Id;

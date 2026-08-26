@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { COLORS, COLOR_HEX, COLOR_TOKENS, colorClasses, colorHex } from './colors';
 import {
   MAX_AMOUNT,
+  dualAmount,
   formatBudget,
   formatCompactAmount,
   formatLocalAmount,
+  formatSymbolAmount,
+  hasLocalRate,
   isValidBudget,
   isValidExpenseAmount,
   symbolFor,
+  toLocalAmount,
 } from './money';
 import { formatClock, formatDuration, formatStamp } from './time';
 
@@ -125,6 +129,78 @@ describe('symbolFor / formatLocalAmount', () => {
     expect(formatLocalAmount(1200, 'JPY')).toBe('¥1,200');
     expect(formatLocalAmount(12.5, 'USD')).toBe('$12.5');
     expect(formatLocalAmount(Number.NaN, 'JPY')).toBe('');
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M25 — 두 통화 동시 표기
+ * ------------------------------------------------------------------ */
+
+describe('formatSymbolAmount', () => {
+  it('기호를 앞에 두고 만/k 줄임은 그대로 쓴다', () => {
+    expect(formatSymbolAmount(81_000, 'KRW')).toBe('₩8.1만');
+    expect(formatSymbolAmount(1_500_000, 'KRW')).toBe('₩150만');
+    expect(formatSymbolAmount(8_710, 'JPY')).toBe('¥8,710');
+    expect(formatSymbolAmount(12_000, 'JPY')).toBe('¥1.2만');
+    expect(formatSymbolAmount(1_500, 'USD')).toBe('$1.5k');
+  });
+
+  it('작은 금액과 0도 기호를 잃지 않는다', () => {
+    expect(formatSymbolAmount(9_999, 'KRW')).toBe('₩9,999');
+    expect(formatSymbolAmount(0, 'KRW')).toBe('₩0');
+    // 기호가 없는 통화는 코드+공백으로 붙는다.
+    expect(formatSymbolAmount(1_200, 'THB')).toBe('THB 1.2k');
+  });
+
+  it('망가진 금액은 빈 문자열이다', () => {
+    expect(formatSymbolAmount(Number.NaN, 'KRW')).toBe('');
+  });
+});
+
+describe('hasLocalRate / toLocalAmount', () => {
+  it('두 짝이 다 있어야 현지 통화다', () => {
+    expect(hasLocalRate({ localCurrency: 'JPY', fxRate: 9.3 })).toBe(true);
+    expect(hasLocalRate({ localCurrency: 'JPY' })).toBe(false);
+    expect(hasLocalRate({ fxRate: 9.3 })).toBe(false);
+    expect(hasLocalRate({ localCurrency: 'JPY', fxRate: 0 })).toBe(false);
+    expect(hasLocalRate(undefined)).toBe(false);
+  });
+
+  it('환율은 「1 현지 = N 기준」 하나뿐이다 — 들어올 땐 곱하고 나갈 땐 나눈다', () => {
+    // 지출 입력이 하는 계산: ¥1,200 × 9.3 = 11,160원.
+    expect(1_200 * 9.3).toBeCloseTo(11_160, 5);
+    // 그 역이 이 함수다.
+    expect(toLocalAmount(11_160, 9.3)).toBeCloseTo(1_200, 5);
+  });
+});
+
+describe('dualAmount', () => {
+  it('현지 통화가 있으면 두 금액을 함께 준다', () => {
+    expect(dualAmount(81_000, 'KRW', { localCurrency: 'JPY', fxRate: 9.3 })).toEqual({
+      base: '₩8.1만',
+      local: '¥8,710',
+    });
+  });
+
+  it('현지 통화가 없으면 기준 통화만 준다 — 줄이 늘지 않는다', () => {
+    expect(dualAmount(81_000, 'KRW')).toEqual({ base: '₩8.1만' });
+    expect(dualAmount(81_000, 'KRW', { localCurrency: 'JPY' })).toEqual({ base: '₩8.1만' });
+    expect(dualAmount(81_000, 'KRW', { localCurrency: 'JPY', fxRate: 0 })).toEqual({
+      base: '₩8.1만',
+    });
+  });
+
+  it('0원도 두 통화로 말한다', () => {
+    expect(dualAmount(0, 'KRW', { localCurrency: 'JPY', fxRate: 9.3 })).toEqual({
+      base: '₩0',
+      local: '¥0',
+    });
+  });
+
+  it('망가진 금액은 환산하지 않는다', () => {
+    expect(dualAmount(Number.NaN, 'KRW', { localCurrency: 'JPY', fxRate: 9.3 })).toEqual({
+      base: '',
+    });
   });
 });
 

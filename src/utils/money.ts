@@ -64,6 +64,73 @@ export function formatLocalAmount(amount: number, code: string): string {
   return `${symbolFor(code)}${rounded.toLocaleString('ko-KR')}`;
 }
 
+/* ------------------------------------------------------------------ *
+ * 현지 통화 쌍 (M7b) + 두 통화 동시 표기 (M25)
+ * ------------------------------------------------------------------ */
+
+/** The trip's 현지 통화 pair, when it has one. */
+export interface LocalRate {
+  /** e.g. `JPY`. */
+  localCurrency?: string;
+  /** 기준통화 per 1 local unit — `9.3` means `1 JPY = 9.3 KRW`. */
+  fxRate?: number;
+}
+
+/** True when both halves are usable — a rate of 0 is not a rate. */
+export const hasLocalRate = (rate: LocalRate | undefined): boolean =>
+  Boolean(rate?.localCurrency) && Number.isFinite(rate?.fxRate) && (rate?.fxRate as number) > 0;
+
+/**
+ * 기준통화 금액 → 현지 금액, with the **one** rate the app has ever had.
+ *
+ * `fxRate` is 기준통화 per 1 local unit, so the 지출 입력 multiplies by it
+ * (`¥1,200 × 9.3 = 11,160원`, see `CardLedger`) and this — the only other
+ * direction — divides by it. No second rate, no second convention.
+ */
+export const toLocalAmount = (baseAmount: number, fxRate: number): number =>
+  baseAmount / fxRate;
+
+/**
+ * `81000` + `'KRW'` → `"₩8.1만"`; `8710` + `'JPY'` → `"¥8,710"`.
+ *
+ * {@link formatCompactAmount} with the **symbol in front instead of the word
+ * behind**: the moment two currencies stand side by side, `8.1만 · 8,710엔`
+ * reads as one amount cut in half, and `₩`/`¥` are what tell them apart at a
+ * glance in an 11px row.
+ */
+export function formatSymbolAmount(amount: number, code: string): string {
+  if (!Number.isFinite(amount)) return '';
+  const upper = (code || 'KRW').toUpperCase();
+  return `${symbolFor(upper)}${compactValue(amount, upper)}`;
+}
+
+/** 기준 통화 한 줄, 그리고 현지 통화가 있으면 그 옆줄 — 둘 다 이미 포맷된 문자열. */
+export interface DualAmount {
+  /** e.g. `₩8.1만` — always present. */
+  base: string;
+  /** e.g. `¥8,710` — absent when the trip has no 현지 통화 pair. */
+  local?: string;
+}
+
+/**
+ * One amount, said in both currencies the traveller thinks in (M25).
+ *
+ * The 필요 예산 bar answers "얼마 들고 가야 하나" — a question with two right
+ * answers on a trip to Japan: the 원 that leaves the bank account and the 엔
+ * that comes out of the wallet. A trip with no 현지 통화 configured gets
+ * exactly what it got before: one number, `local` absent.
+ */
+export function dualAmount(
+  amount: number,
+  currency: string,
+  rate: LocalRate | undefined = undefined,
+): DualAmount {
+  const base = formatSymbolAmount(amount, currency);
+  if (!hasLocalRate(rate) || !Number.isFinite(amount)) return { base };
+  const local = toLocalAmount(amount, rate?.fxRate as number);
+  return { base, local: formatSymbolAmount(local, rate?.localCurrency as string) };
+}
+
 /** `12.3` → `"12.3"`, `12.0` → `"12"` — one decimal, never a trailing `.0`. */
 const oneDecimal = (value: number): string =>
   (Math.round(value * 10) / 10).toFixed(1).replace(/\.0$/, '');
@@ -106,17 +173,29 @@ export const isValidExpenseAmount = (amount: number | undefined): amount is numb
 export const isValidBudget = (budget: number | undefined): boolean =>
   budget === undefined || (Number.isFinite(budget) && budget >= 0 && budget <= MAX_AMOUNT);
 
+/**
+ * The bare short *value* — `"12.3만"`, `"1.5k"`, `"9,999"` — with no currency
+ * mark of any kind. {@link formatCompactAmount} hangs the Korean word behind
+ * it, {@link formatSymbolAmount} the symbol in front of it.
+ */
+function compactValue(amount: number, code: string): string {
+  const abs = Math.abs(amount);
+  if (SUFFIX[code] && abs >= 10_000) {
+    const man = amount / 10_000;
+    const text = Math.abs(man) >= 100 ? Math.round(man).toLocaleString('ko-KR') : oneDecimal(man);
+    return `${text}만`;
+  }
+  if (!SUFFIX[code] && abs >= 1_000) return `${oneDecimal(amount / 1_000)}k`;
+  return Math.round(amount).toLocaleString('ko-KR');
+}
+
 export function formatCompactAmount(amount: number, currency: string): string {
   if (!Number.isFinite(amount)) return '';
   const code = (currency || 'KRW').toUpperCase();
   const suffix = SUFFIX[code];
   const abs = Math.abs(amount);
 
-  if (suffix && abs >= 10_000) {
-    const man = amount / 10_000;
-    const text = Math.abs(man) >= 100 ? Math.round(man).toLocaleString('ko-KR') : oneDecimal(man);
-    return `${text}만`;
-  }
-  if (!suffix && abs >= 1_000) return `${oneDecimal(amount / 1_000)}k ${code}`;
+  if (suffix && abs >= 10_000) return compactValue(amount, code);
+  if (!suffix && abs >= 1_000) return `${compactValue(amount, code)} ${code}`;
   return formatBudget(amount, currency);
 }

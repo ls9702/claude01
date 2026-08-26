@@ -55,6 +55,18 @@ function totalOf(workspace: Workspace, cardIds: Iterable<Id>): SpendTotals {
   return { budget, spent };
 }
 
+/** The day ids that belong to a sheet — `dayOrder`, plus any stray day. */
+function sheetDayIds(workspace: Workspace, sheetId: Id): Set<Id> | null {
+  const sheet = workspace.sheets[sheetId];
+  if (!sheet) return null;
+  const dayIds = new Set<Id>(sheet.dayOrder);
+  // Defensive: a day that fell out of `dayOrder` still belongs to the sheet.
+  for (const day of Object.values(workspace.days)) {
+    if (day.sheetId === sheetId) dayIds.add(day.id);
+  }
+  return dayIds;
+}
+
 /** The unique cards that have at least one entry on `dayId`. */
 function cardIdsOnDay(workspace: Workspace, dayId: Id): Set<Id> {
   const cardIds = new Set<Id>();
@@ -104,14 +116,8 @@ export function daySpendWindowed(
  * placed on two of them, so the de-duplication happens across the sheet.
  */
 export function sheetSpend(workspace: Workspace, sheetId: Id): SpendTotals {
-  const sheet = workspace.sheets[sheetId];
-  if (!sheet) return emptySpend();
-
-  const dayIds = new Set<Id>(sheet.dayOrder);
-  // Defensive: a day that fell out of `dayOrder` still belongs to the sheet.
-  for (const day of Object.values(workspace.days)) {
-    if (day.sheetId === sheetId) dayIds.add(day.id);
-  }
+  const dayIds = sheetDayIds(workspace, sheetId);
+  if (!dayIds) return emptySpend();
 
   const cardIds = new Set<Id>();
   for (const entry of Object.values(workspace.entries)) {
@@ -128,13 +134,8 @@ export function sheetSpend(workspace: Workspace, sheetId: Id): SpendTotals {
  * above it is worse than no list.
  */
 export function sheetCardIds(workspace: Workspace, sheetId: Id): Id[] {
-  const sheet = workspace.sheets[sheetId];
-  if (!sheet) return [];
-
-  const dayIds = new Set<Id>(sheet.dayOrder);
-  for (const day of Object.values(workspace.days)) {
-    if (day.sheetId === sheetId) dayIds.add(day.id);
-  }
+  const dayIds = sheetDayIds(workspace, sheetId);
+  if (!dayIds) return [];
 
   const cardIds = new Set<Id>();
   for (const entry of Object.values(workspace.entries)) {
@@ -248,3 +249,127 @@ export function unplacedSpend(workspace: Workspace, tripId: Id): UnplacedSpend {
 /** True when there is any money to show at all. */
 export const hasSpend = (totals: SpendTotals): boolean =>
   totals.spent > 0 || totals.budget > 0;
+
+/* ------------------------------------------------------------------ *
+ * 필요 예산 — 배치 단위 계획 합계 (M25)
+ * ------------------------------------------------------------------ */
+
+/**
+ * ## Why a second set of sums
+ *
+ * Everything above answers **"얼마 썼지?"** and therefore counts *cards*: one
+ * card is one receipt no matter how many times it appears on the grid, so
+ * 지출 must be de-duplicated or the 결산 would invent money that was never
+ * spent.
+ *
+ * The 필요 예산 바 asks the opposite question — **"이 계획대로면 얼마가 드나?"**
+ * — and there the same de-duplication is simply wrong. 2만원짜리 식사 카드를 네
+ * 날에 걸어 두었으면 밥은 네 번 먹고 돈은 네 번 나간다. So these functions count
+ * **placements**: every entry contributes its card's 예산 once, which is also
+ * the only rule under which the bar's own numbers agree — 시트 합계 = 일자 합계의
+ * 합, always.
+ *
+ * 지출 has no business here at all: a plan is not a receipt.
+ */
+
+/** One card's 예산; missing/garbled reads as 0. */
+export function cardBudget(card: Card | undefined): number {
+  const budget = card?.budget;
+  return typeof budget === 'number' && Number.isFinite(budget) ? budget : 0;
+}
+
+/**
+ * 시트에 배치된 것만으로 셈한 필요 예산 (M25).
+ *
+ * Sum of `card.budget` over **every entry** of the sheet — a card on four days
+ * counts four times. Cards nobody placed are not in it, on purpose; see
+ * {@link unplacedPlan} for the number the bar owns up to.
+ */
+export function sheetPlannedBudget(workspace: Workspace, sheetId: Id): number {
+  const dayIds = sheetDayIds(workspace, sheetId);
+  if (!dayIds) return 0;
+
+  let budget = 0;
+  for (const entry of Object.values(workspace.entries)) {
+    if (dayIds.has(entry.dayId)) budget += cardBudget(workspace.cards[entry.cardId]);
+  }
+  return budget;
+}
+
+/**
+ * 한 **창**(05시~다음 05시)의 필요 예산 — the day half of the bar (M16-B).
+ *
+ * Membership is the windowed one, like every other day-scoped figure: 새벽 2시
+ * 라멘은 전날 밤의 예산이다. Placement-counted like {@link sheetPlannedBudget},
+ * so summing this over a sheet's days gives exactly the sheet total.
+ */
+export function dayPlannedBudgetWindowed(
+  workspace: Workspace,
+  dayId: Id,
+  dayOrder: DayAxis,
+): number {
+  const axis = datedAxis(dayOrder, workspace.days);
+  let budget = 0;
+  for (const entry of Object.values(workspace.entries)) {
+    if (visualPlacement(entry, axis).renderDayId === dayId) {
+      budget += cardBudget(workspace.cards[entry.cardId]);
+    }
+  }
+  return budget;
+}
+
+/**
+ * 시트의 필요 예산을 보드 칼럼별로 나눈 것 — the 카테고리별 popover (M25).
+ *
+ * Keyed by `columnId`, and the values add up to {@link sheetPlannedBudget}
+ * exactly: a breakdown that does not match the number above it is worse than
+ * no breakdown. A column with nothing placed is simply absent.
+ */
+export function sheetPlannedByColumn(
+  workspace: Workspace,
+  sheetId: Id,
+): Record<Id, number> {
+  const dayIds = sheetDayIds(workspace, sheetId);
+  const byColumn: Record<Id, number> = {};
+  if (!dayIds) return byColumn;
+
+  for (const entry of Object.values(workspace.entries)) {
+    if (!dayIds.has(entry.dayId)) continue;
+    const card = workspace.cards[entry.cardId];
+    if (!card) continue;
+    byColumn[card.columnId] = (byColumn[card.columnId] ?? 0) + cardBudget(card);
+  }
+  return byColumn;
+}
+
+/** What the 필요 예산 총계 leaves out: the 미배치 cards that carry a 예산. */
+export interface UnplacedPlan {
+  /** Their 예산 sum — money the plan would need if they were placed. */
+  budget: number;
+  /** How many of them there are — the `N` of the bar's hint line. */
+  count: number;
+}
+
+/**
+ * 여행의 어느 타임라인에도 없는 카드들의 예산 (M25, B14의 계획판).
+ *
+ * {@link unplacedSpend} counts a card that only ever had a 지출; this one is
+ * about the plan, so a card with no 예산 is not a missing 예산 — it is an idea
+ * with no price on it yet, and the hint must not claim to have excluded it.
+ */
+export function unplacedPlan(workspace: Workspace, tripId: Id): UnplacedPlan {
+  if (!workspace.trips[tripId]) return { budget: 0, count: 0 };
+
+  const placed = new Set<Id>(tripCardIds(workspace, tripId));
+
+  let budget = 0;
+  let count = 0;
+  for (const card of Object.values(workspace.cards)) {
+    if (card.tripId !== tripId || placed.has(card.id)) continue;
+    const cardsBudget = cardBudget(card);
+    if (cardsBudget <= 0) continue;
+    budget += cardsBudget;
+    count += 1;
+  }
+  return { budget, count };
+}

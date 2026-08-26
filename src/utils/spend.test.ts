@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { emptyWorkspace, type Card, type Id, type Workspace } from '../types/models';
 import {
+  cardBudget,
   cardCommentCount,
   cardSpent,
   daySpend,
   daySpendWindowed,
+  dayPlannedBudgetWindowed,
   emptySpend,
   hasSpend,
   sheetCardIds,
+  sheetPlannedBudget,
+  sheetPlannedByColumn,
   sheetSpend,
   sheetSpendByColumn,
   tripCardIds,
   tripSpend,
+  unplacedPlan,
   unplacedSpend,
 } from './spend';
 
@@ -448,5 +453,201 @@ describe('sheetSpendByColumn', () => {
     addCard(ws, 'k1', { budget: 30_000 });
     expect(sheetSpendByColumn(ws, 's1')).toEqual({});
     expect(sheetCardIds(ws, 's1')).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M25 — 필요 예산 (배치 단위)
+ * ------------------------------------------------------------------ */
+
+describe('cardBudget', () => {
+  it('없거나 망가진 예산은 0으로 읽는다', () => {
+    const ws = scaffold();
+    expect(cardBudget(addCard(ws, 'k1', { budget: 20_000 }))).toBe(20_000);
+    expect(cardBudget(addCard(ws, 'k2'))).toBe(0);
+    expect(cardBudget(addCard(ws, 'k3', { budget: Number.NaN }))).toBe(0);
+    expect(cardBudget(undefined)).toBe(0);
+  });
+});
+
+describe('sheetPlannedBudget', () => {
+  it('배치한 만큼 센다 — 같은 카드를 네 날에 걸면 네 번이다', () => {
+    const ws = scaffold(4);
+    addCard(ws, 'meal', { budget: 20_000, expenses: [5_000] });
+    place(ws, 'e1', 'meal', 'd1');
+    place(ws, 'e2', 'meal', 'd2');
+    place(ws, 'e3', 'meal', 'd3');
+    place(ws, 'e4', 'meal', 'd4');
+
+    expect(sheetPlannedBudget(ws, 's1')).toBe(80_000);
+    // 지출 합계는 예전 그대로 카드 단위다 — 밥값은 네 번 들지만 영수증은 하나다.
+    expect(sheetSpend(ws, 's1')).toEqual({ budget: 20_000, spent: 5_000 });
+  });
+
+  it('하루에 두 번 놓아도 두 번 센다', () => {
+    const ws = scaffold();
+    addCard(ws, 'cafe', { budget: 6_000 });
+    place(ws, 'e1', 'cafe', 'd1', 540);
+    place(ws, 'e2', 'cafe', 'd1', 1_200);
+
+    expect(sheetPlannedBudget(ws, 's1')).toBe(12_000);
+  });
+
+  it('시트 합계는 일자 합계의 합이다', () => {
+    const ws = scaffold(3);
+    addCard(ws, 'meal', { budget: 20_000 });
+    addCard(ws, 'ticket', { budget: 30_000 });
+    place(ws, 'e1', 'meal', 'd1');
+    place(ws, 'e2', 'meal', 'd2');
+    place(ws, 'e3', 'ticket', 'd2');
+    place(ws, 'e4', 'meal', 'd3');
+
+    const order = ['d1', 'd2', 'd3'];
+    const days = order.map((dayId) => dayPlannedBudgetWindowed(ws, dayId, order));
+    expect(days).toEqual([20_000, 50_000, 20_000]);
+    expect(days.reduce((sum, value) => sum + value, 0)).toBe(sheetPlannedBudget(ws, 's1'));
+  });
+
+  it('예산 없는 카드와 사라진 카드는 0을 보탠다', () => {
+    const ws = scaffold();
+    addCard(ws, 'free');
+    place(ws, 'e1', 'free', 'd1');
+    place(ws, 'e2', 'ghost', 'd1');
+
+    expect(sheetPlannedBudget(ws, 's1')).toBe(0);
+  });
+
+  it('미배치 카드는 들어오지 않고, 모르는 시트는 0이다', () => {
+    const ws = scaffold();
+    addCard(ws, 'idea', { budget: 30_000 });
+    expect(sheetPlannedBudget(ws, 's1')).toBe(0);
+    expect(sheetPlannedBudget(ws, 'nope')).toBe(0);
+  });
+
+  it('dayOrder에서 빠진 일자의 배치도 시트 합계에 남는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 7_000 });
+    place(ws, 'e1', 'k1', 'd2');
+    ws.sheets.s1.dayOrder = ['d1'];
+
+    expect(sheetPlannedBudget(ws, 's1')).toBe(7_000);
+  });
+});
+
+describe('dayPlannedBudgetWindowed', () => {
+  const ORDER = ['d1', 'd2'];
+
+  it('새벽 배치는 전날 창의 예산이다', () => {
+    const ws = scaffold();
+    addCard(ws, 'ramen', { budget: 12_000 });
+    place(ws, 'e1', 'ramen', 'd2', 120); // 2일차 02:00 = 1일차 밤
+
+    expect(dayPlannedBudgetWindowed(ws, 'd1', ORDER)).toBe(12_000);
+    expect(dayPlannedBudgetWindowed(ws, 'd2', ORDER)).toBe(0);
+  });
+
+  it('05:00 정각은 제 날에 남는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'ramen', { budget: 12_000 });
+    place(ws, 'e1', 'ramen', 'd2', 300);
+
+    expect(dayPlannedBudgetWindowed(ws, 'd2', ORDER)).toBe(12_000);
+    expect(dayPlannedBudgetWindowed(ws, 'd1', ORDER)).toBe(0);
+  });
+
+  it('첫날 새벽은 갈 곳이 없어 첫날에 남는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'ramen', { budget: 12_000 });
+    place(ws, 'e1', 'ramen', 'd1', 120);
+
+    expect(dayPlannedBudgetWindowed(ws, 'd1', ORDER)).toBe(12_000);
+  });
+
+  it('한 창에 두 번 놓으면 두 번 센다 — 지출 트윈과 갈리는 지점이다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 20_000, expenses: [15_000] });
+    place(ws, 'e1', 'k1', 'd1', 600); // 1일차 10:00
+    place(ws, 'e2', 'k1', 'd2', 60); // 2일차 01:00 → 같은 창
+
+    expect(dayPlannedBudgetWindowed(ws, 'd1', ORDER)).toBe(40_000);
+    expect(daySpendWindowed(ws, 'd1', ORDER)).toEqual({ budget: 20_000, spent: 15_000 });
+  });
+
+  it('모르는 일자는 0이다', () => {
+    expect(dayPlannedBudgetWindowed(scaffold(), 'nope', ORDER)).toBe(0);
+  });
+});
+
+describe('sheetPlannedByColumn', () => {
+  it('카테고리별로 나누고, 합은 시트 필요 예산과 같다', () => {
+    const ws = scaffold();
+    ws.columns.c2 = {
+      id: 'c2',
+      tripId: 't1',
+      name: '먹거리',
+      color: 'amber',
+      icon: '🍜',
+      cardOrder: [],
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    addCard(ws, 'k1', { budget: 20_000 });
+    const k2 = addCard(ws, 'k2', { budget: 15_000 });
+    k2.columnId = 'c2';
+    place(ws, 'e1', 'k1', 'd1');
+    place(ws, 'e2', 'k2', 'd1');
+    place(ws, 'e3', 'k2', 'd2'); // 같은 카드, 다른 날 → 한 번 더
+
+    const byColumn = sheetPlannedByColumn(ws, 's1');
+    expect(byColumn).toEqual({ c1: 20_000, c2: 30_000 });
+    expect(byColumn.c1 + byColumn.c2).toBe(sheetPlannedBudget(ws, 's1'));
+  });
+
+  it('배치가 없으면 비어 있고, 모르는 시트도 비어 있다', () => {
+    const ws = scaffold();
+    addCard(ws, 'k1', { budget: 30_000 });
+    expect(sheetPlannedByColumn(ws, 's1')).toEqual({});
+    expect(sheetPlannedByColumn(ws, 'nope')).toEqual({});
+  });
+});
+
+describe('unplacedPlan', () => {
+  it('어느 타임라인에도 없는 카드의 예산만 센다', () => {
+    const ws = scaffold();
+    addCard(ws, 'placed', { budget: 10_000 });
+    addCard(ws, 'idea', { budget: 20_000 });
+    addCard(ws, 'wishlist', { budget: 5_000 });
+    place(ws, 'e1', 'placed', 'd1');
+
+    expect(unplacedPlan(ws, 't1')).toEqual({ budget: 25_000, count: 2 });
+  });
+
+  it('예산이 없는 카드는 빠뜨린 예산이 아니다 — 지출만 있어도 세지 않는다', () => {
+    const ws = scaffold();
+    addCard(ws, 'blank');
+    addCard(ws, 'zero', { budget: 0 });
+    addCard(ws, 'spent-only', { expenses: [700] });
+
+    expect(unplacedPlan(ws, 't1')).toEqual({ budget: 0, count: 0 });
+    // 지출판 트윈은 영수증이 있는 카드를 여전히 센다 (결산은 그쪽을 쓴다).
+    expect(unplacedSpend(ws, 't1').count).toBe(1);
+  });
+
+  it('다른 시트에 놓인 카드는 배치된 것이고, 모르는 여행은 비어 있다', () => {
+    const ws = scaffold();
+    ws.sheets.s2 = {
+      id: 's2',
+      tripId: 't1',
+      name: '플랜 B',
+      dayOrder: ['d9'],
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    ws.days.d9 = { id: 'd9', tripId: 't1', sheetId: 's2', createdAt: AT, updatedAt: AT };
+    addCard(ws, 'k1', { budget: 10_000 });
+    place(ws, 'e1', 'k1', 'd9');
+
+    expect(unplacedPlan(ws, 't1')).toEqual({ budget: 0, count: 0 });
+    expect(unplacedPlan(ws, 'nope')).toEqual({ budget: 0, count: 0 });
   });
 });

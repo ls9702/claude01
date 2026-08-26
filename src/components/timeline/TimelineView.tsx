@@ -27,11 +27,12 @@ import { dayGapsWindowed, type DayGap } from '../../timeline/gap';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
 import { currentAndNextWindowed, nowMin, todayFocus } from '../../timeline/today';
 import {
+  dayPlannedBudgetWindowed,
   daySpendWindowed,
   emptySpend,
-  sheetSpend,
-  sheetSpendByColumn,
-  unplacedSpend,
+  sheetPlannedBudget,
+  sheetPlannedByColumn,
+  unplacedPlan,
   type SpendTotals,
 } from '../../utils/spend';
 import { formatTimeRange, minToY } from '../../utils/time';
@@ -279,14 +280,11 @@ export default function TimelineView() {
   }, [workspace.entries, trip, dayOrder]);
 
   /**
-   * dayId → 예산/지출 of that day, and the sheet's own totals (M6).
+   * dayId → 예산/지출 of that day, for the 일자 지출 칩 (M6).
    *
-   * Both count **cards**, not placements — see `utils/spend.ts`; the sheet
-   * total is therefore not the sum of its days when one card spans two of them.
-   *
-   * The day figures are **windowed** (M16-B) so the chip agrees with the column
-   * under it; the sheet figure is not, because a window shift never moves money
-   * out of a sheet.
+   * Counts **cards**, not placements — a card scheduled twice is one receipt;
+   * see `utils/spend.ts`. **Windowed** (M16-B) so the chip agrees with the
+   * column under it.
    */
   const spendByDay = useMemo<Record<Id, SpendTotals>>(() => {
     const byDay: Record<Id, SpendTotals> = {};
@@ -294,8 +292,20 @@ export default function TimelineView() {
     return byDay;
   }, [days, workspace, dayOrder]);
 
-  const sheetTotals = useMemo<SpendTotals>(
-    () => (sheet ? sheetSpend(workspace, sheet.id) : emptySpend()),
+  /**
+   * dayId → 그 창에 배치된 것들의 **필요 예산** (M25).
+   *
+   * 지출판(`spendByDay`)과 나란히 사는 계획판이다: 요약 바만 이것을 쓰고, 일자
+   * 칩·카드 원장·결산은 예전 그대로 지출을 말한다. 창은 같은 05시 창이다.
+   */
+  const plannedByDay = useMemo<Record<Id, number>>(() => {
+    const byDay: Record<Id, number> = {};
+    for (const day of days) byDay[day.id] = dayPlannedBudgetWindowed(workspace, day.id, dayOrder);
+    return byDay;
+  }, [days, workspace, dayOrder]);
+
+  const sheetPlanned = useMemo(
+    () => (sheet ? sheetPlannedBudget(workspace, sheet.id) : 0),
     [sheet, workspace],
   );
 
@@ -352,12 +362,12 @@ export default function TimelineView() {
    * Sheet scope, because that is the scope of the number it hangs under.
    */
   const categories = useMemo(
-    () => (sheet ? categoryRows(columns, sheetSpendByColumn(workspace, sheet.id)) : []),
+    () => (sheet ? categoryRows(columns, sheetPlannedByColumn(workspace, sheet.id)) : []),
     [sheet, columns, workspace],
   );
 
   const unplaced = useMemo(
-    () => unplacedSpend(workspace, trip?.id ?? ''),
+    () => unplacedPlan(workspace, trip?.id ?? ''),
     [workspace, trip?.id],
   );
 
@@ -752,15 +762,16 @@ export default function TimelineView() {
         </div>
       ) : (
         <>
-          {/* M16-A: money at a glance, pinned above everything the grid does.
+          {/* M16-A → M25: 「이 계획대로면 얼마가 드나」 한 줄, 그리드 위에 고정.
               Full-bleed and `h-10` so it costs exactly one hairline-bounded row
-              — see SpendSummaryBar for why it is not a floating card. */}
-          {/* M18: the second of the two rows 접기 takes away. The numbers are
-              a *glance*, not navigation — and the same two are one tap away in
-              the pager's 지출 칩 and in 카테고리별. */}
+              — see SpendSummaryBar for why it is not a floating card, and why
+              it stopped talking about 지출. */}
+          {/* M18: the second of the two rows 접기 takes away. The number is
+              a *glance*, not navigation — and it is one tap away in 카테고리별
+              (지출은 페이저의 지출 칩과 결산이 계속 말한다). */}
           {collapsed ? null : (
           <SpendSummaryBar
-            sheetTotals={sheetTotals}
+            sheetBudget={sheetPlanned}
             // Desktop scrolls many columns at once, so "the visible day" is only
             // an honest phrase when 오늘 is one of them; otherwise the bar says
             // nothing rather than guessing which column the eye is on.
@@ -769,13 +780,14 @@ export default function TimelineView() {
                 ? {
                     id: summaryDay.id,
                     label: dayTitle(summaryDay, days.indexOf(summaryDay)),
-                    totals: spendByDay[summaryDay.id] ?? emptySpend(),
+                    budget: plannedByDay[summaryDay.id] ?? 0,
                   }
                 : undefined
             }
             categories={categories}
             unplaced={unplaced}
             currency={trip.currency}
+            rate={{ localCurrency: trip.localCurrency, fxRate: trip.fxRate }}
           />
           )}
 
