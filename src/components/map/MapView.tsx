@@ -3,6 +3,13 @@ import { latLngBounds } from 'leaflet';
 import { MapContainer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
+import {
+  emptyFilterHint,
+  scopeCards,
+  type MapFilter,
+  type MapScopeKind,
+} from '../../map/filter';
+import { loadMapFilter, saveMapFilter } from '../../stores/mapFilterPref';
 import { loadRouteChoice, saveRouteChoice, storedDayId } from '../../stores/mapRoutePref';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
@@ -16,11 +23,14 @@ import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
 import Icon, { EmojiIcon } from '../common/Icon';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
+  BTN_SIZE_SM,
+  CHIP_BUTTON,
   CHIP_MONEY,
   CHIP_NEUTRAL,
   DANGER_TEXT_BUTTON_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
+  withBtnSize,
 } from '../common/formStyles';
 import MapReady from './MapReady';
 import RouteLayer, { type RouteDrawing } from './RouteLayer';
@@ -163,13 +173,16 @@ function CenterReport({ onCenter }: CenterReportProps) {
 }
 
 /**
- * Frames the picked day's route, once per selection.
+ * Frames a chosen subset once per choice — the day's route, and the filter's
+ * pins (M27).
  *
- * Unlike {@link FitPins} an empty input is a no-op: turning the route off, or
- * picking a day with nothing located on it, must leave the user's view alone
- * rather than throwing them back out to the world.
+ * Unlike {@link FitPins} an empty input is a no-op: turning the route off,
+ * picking a day with nothing located on it, or filtering down to nothing must
+ * leave the user's view alone rather than throwing them back out to the world.
+ * `fitKey` is the *choice*, not the content, so panning around inside one
+ * selection is never undone.
  */
-function FitRoute({ points, fitKey, ready }: FitPinsProps) {
+function FitOnce({ points, fitKey, ready }: FitPinsProps) {
   const map = useMap();
   const fittedRef = useRef<string | null>(null);
 
@@ -209,6 +222,29 @@ function useOnline(): boolean {
   }, []);
 
   return online;
+}
+
+/**
+ * A one-line chip strip that wears its right-hand fade only while it has more.
+ *
+ * Two rows need this now — 표시 and 경로 (M27) — and a second copy of the
+ * measurement is a second place for the fade to go stale. The measure runs
+ * after *every* render on purpose: chips appear and disappear with the trip's
+ * days and sheets, and none of that goes through a scroll event.
+ */
+function useStripFade() {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [overflow, setOverflow] = useState(false);
+
+  const measure = () => {
+    const node = ref.current;
+    if (!node) return;
+    const more = node.scrollWidth - node.clientWidth - node.scrollLeft > 4;
+    setOverflow((current) => (current === more ? current : more));
+  };
+  useEffect(measure);
+
+  return { ref, overflow, measure };
 }
 
 /** Which day(s) the route control is drawing: nothing, one day, or all. */
@@ -263,22 +299,24 @@ export default function MapView() {
   const [size, setSize] = useState({ x: 0, y: 0 });
   /** The map's settled center, mirrored onto `map-root` for tests (M12). */
   const [center, setCenter] = useState<{ lat: number; lng: number } | null>(null);
-  /** Column ids toggled off in the legend. */
+  /**
+   * 카테고리 필터 — 꺼 둔 칼럼들 (M3의 범례 칩, M27에서 기억까지 한다).
+   *
+   * 이 화면의 카테고리 컨트롤은 범례 칩 **하나뿐**이다. 「맛집만 보기」를 위한
+   * 두 번째 줄을 따로 만들면 같은 일을 하는 버튼이 두 벌이 되고, 어느 쪽이
+   * 이기는지를 사용자가 외워야 한다.
+   */
   const [mutedColumns, setMutedColumns] = useState<readonly Id[]>([]);
+  /** 일정 범위 필터 (M27) — 무엇을 지도에 올릴 것인가. */
+  const [scope, setScope] = useState<MapScopeKind>('all');
+  /** 「일자별」이 보고 있는 일자. 일자 칩 줄이 곧 이 선택의 피커다. */
+  const [scopeDayId, setScopeDayId] = useState<Id | undefined>(undefined);
   /** 경로 controls: which sheet is being read, and what is drawn from it. */
   const [routeSheetId, setRouteSheetId] = useState<Id | undefined>(undefined);
   const [selection, setSelection] = useState<RouteSelection>({ kind: 'off' });
 
-  /** The day-chip strip only wears its right-hand fade while it has more. */
-  const routeStripRef = useRef<HTMLDivElement | null>(null);
-  const [routeOverflow, setRouteOverflow] = useState(false);
-  const measureRouteStrip = () => {
-    const node = routeStripRef.current;
-    if (!node) return;
-    const more = node.scrollWidth - node.clientWidth - node.scrollLeft > 4;
-    setRouteOverflow((current) => (current === more ? current : more));
-  };
-  useEffect(measureRouteStrip);
+  const scopeStrip = useStripFade();
+  const routeStrip = useStripFade();
 
   const onSize = useCallback((next: { x: number; y: number }) => {
     setSize((current) => (current.x === next.x && current.y === next.y ? current : next));
@@ -320,11 +358,7 @@ export default function MapView() {
     return columns;
   }, [pins]);
 
-  const visiblePins = useMemo(
-    () => pins.filter((pin) => !mutedColumns.includes(pin.column.id)),
-    [pins, mutedColumns],
-  );
-
+  /** Every located pin of the trip — what {@link FitPins} frames (M12). */
   const fitPoints = useMemo(() => pins.map((pin) => pin.card.location!), [pins]);
 
   /**
@@ -424,6 +458,61 @@ export default function MapView() {
       ? 'off'
       : `${routeSheet?.id ?? ''}:${selection.kind === 'all' ? 'all' : selection.dayId}`;
 
+  /* --- 필터 (M27) ---------------------------------------------------- */
+
+  /**
+   * 범위 필터가 읽는 일자 — 경로가 고른 그 일자다.
+   *
+   * 「일자별」에 두 번째 일자 피커를 붙이지 않는 이유: 이 화면에는 이미 일자
+   * 칩 줄이 있고, 그 줄이 고른 날과 지도가 보여 주는 날이 서로 다를 수 있다면
+   * 그건 컨트롤이 하나 더 생긴 게 아니라 화면이 두 개로 갈라진 것이다.
+   */
+  const scopeDay = useMemo(
+    () => routeDays.find((day) => day.id === scopeDayId),
+    [routeDays, scopeDayId],
+  );
+
+  const filter = useMemo<MapFilter>(
+    () => ({
+      scope: scope === 'day' ? { kind: 'day', dayId: scopeDay?.id } : { kind: scope },
+      sheetId: routeSheet?.id,
+      mutedColumns,
+    }),
+    [scope, scopeDay?.id, routeSheet?.id, mutedColumns],
+  );
+
+  /** 범위만 통과한 카드들 — 카테고리를 끄기 *전*의 집합 (빈 화면 안내용). */
+  const scopedIds = useMemo(
+    () => new Set(scopeCards(workspace, trip?.id, filter).map((card) => card.id)),
+    [workspace, trip?.id, filter],
+  );
+
+  /** 실제로 그리는 핀 — 범위 ∩ 카테고리. */
+  const visiblePins = useMemo(
+    () => pins.filter((pin) => scopedIds.has(pin.card.id) && !mutedColumns.includes(pin.column.id)),
+    [pins, scopedIds, mutedColumns],
+  );
+
+  const filterPoints = useMemo(
+    () => visiblePins.map((pin) => pin.card.location!),
+    [visiblePins],
+  );
+
+  /**
+   * 다시 맞출 이유가 되는 것들만 — **선택**이지 내용이 아니다.
+   *
+   * 필터를 좁히면 남은 곳들이 화면에 꽉 차야 한다. 반대로 같은 필터 안에서
+   * 지도를 끌어다 놓은 사용자를 다시 끌어다 놓는 일은 없어야 해서, 핀의 좌표는
+   * 이 열쇠에 들어가지 않는다 (`FitOnce`의 계약).
+   */
+  const filterKey = [
+    trip?.id ?? '',
+    routeSheet?.id ?? '',
+    scope,
+    scope === 'day' ? (scopeDay?.id ?? '') : '',
+    [...mutedColumns].sort().join(','),
+  ].join('|');
+
   // A day (or a whole sheet) that disappears must not leave a dangling route.
   useEffect(() => {
     if (selection.kind !== 'day') return;
@@ -482,16 +571,57 @@ export default function MapView() {
     });
   }, [legendColumns]);
 
+  /**
+   * 필터도 이 기기가 기억한다 (M27) — 경로 선택과 똑같은 방식으로.
+   *
+   * 여행을 바꾸면 먼저 기본값으로 비운다: 앞 여행의 일자 id나 카테고리 id가
+   * 다음 여행까지 따라가면 그건 기억이 아니라 오작동이다. 바로 아래 효과가 같은
+   * 커밋에서 이 여행의 기억을 넣는다.
+   *
+   * 이 효과는 범례 정리 효과 **뒤에** 온다. 두 효과가 한 커밋에서 같이 돌 때
+   * 위쪽의 함수형 갱신은 여기서 넣은 값 위에 얹히므로, 순서가 뒤집히면 방금
+   * 불러온 카테고리 선택이 지워질 수 있다.
+   */
+  const filterTripRef = useRef<Id | null>(null);
+  useEffect(() => {
+    setScope('all');
+    setScopeDayId(undefined);
+    setMutedColumns([]);
+    filterTripRef.current = null;
+  }, [trip?.id]);
+
+  useEffect(() => {
+    const tripId = trip?.id;
+    if (!tripId || filterTripRef.current === tripId) return;
+
+    const stored = loadMapFilter(tripId);
+    // 기억한 일자는 일자 목록이 손에 들어온 다음에야 확인할 수 있다.
+    if (stored.scope === 'day' && routeDays.length === 0) return;
+
+    filterTripRef.current = tripId;
+    setMutedColumns(stored.muted);
+    if (stored.dayId && routeDays.some((day) => day.id === stored.dayId)) {
+      setScopeDayId(stored.dayId);
+    }
+    // 사라진 일자를 가리키는 「일자별」은 전체로 연다 — 빈 지도보다 낫다.
+    if (stored.scope !== 'day' || routeDays.some((day) => day.id === stored.dayId)) {
+      setScope(stored.scope);
+    }
+  }, [trip?.id, routeDays]);
+
+  // 일자가 사라지면 「일자별」은 첫날로, 일자가 통째로 없으면 전체로 돌아온다.
+  useEffect(() => {
+    if (scope !== 'day') return;
+    if (routeDays.length === 0) {
+      setScope('all');
+      return;
+    }
+    if (!routeDays.some((day) => day.id === scopeDayId)) setScopeDayId(routeDays[0].id);
+  }, [scope, scopeDayId, routeDays]);
+
   if (!trip) return <TripPrompt />;
 
   const ready = size.x > 0 && size.y > 0;
-
-  const toggleColumn = (columnId: Id) =>
-    setMutedColumns((current) =>
-      current.includes(columnId)
-        ? current.filter((id) => id !== columnId)
-        : [...current, columnId],
-    );
 
   /** Hands the card over to the 보드 tab, which opens its edit sheet. */
   const editOnBoard = (card: Card) => {
@@ -499,12 +629,62 @@ export default function MapView() {
     setTab('board');
   };
 
+  /** Every filter pick goes through here, so every pick is remembered (M27). */
+  const rememberFilter = (next: {
+    scope?: MapScopeKind;
+    dayId?: Id | undefined;
+    muted?: readonly Id[];
+  }) => {
+    const nextScope = next.scope ?? scope;
+    const nextDay = 'dayId' in next ? next.dayId : scopeDayId;
+    const nextMuted = next.muted ?? mutedColumns;
+    setScope(nextScope);
+    setScopeDayId(nextDay);
+    setMutedColumns(nextMuted);
+    filterTripRef.current = trip.id;
+    saveMapFilter(trip.id, { scope: nextScope, dayId: nextDay, muted: [...nextMuted] });
+  };
+
+  const toggleColumn = (columnId: Id) =>
+    rememberFilter({
+      muted: mutedColumns.includes(columnId)
+        ? mutedColumns.filter((id) => id !== columnId)
+        : [...mutedColumns, columnId],
+    });
+
   /** Every route pick goes through here, so every pick is remembered. */
   const chooseRoute = (next: RouteSelection) => {
     setSelection(next);
     resolvedTripRef.current = trip.id;
     saveRouteChoice(trip.id, next.kind === 'day' ? `day:${next.dayId}` : next.kind);
+    // 일자 칩은 경로의 피커이자 「일자별」 범위의 피커다 — 한 번 누르면 둘 다.
+    if (next.kind === 'day') rememberFilter({ dayId: next.dayId });
   };
+
+  /**
+   * 범위 세그먼트 — 그날의 동선이 「일자별」의 자연스러운 짝이다.
+   *
+   * 미확정은 반대다: 일정표에 없는 곳들만 남긴 화면 위에 그 일정표의 화살표가
+   * 떠 있으면, 화살표는 지금 보이지도 않는 핀들을 잇게 된다. 그래서 경로를 끈다.
+   */
+  const chooseScope = (kind: MapScopeKind) => {
+    if (kind === 'day') {
+      const dayId = scopeDay?.id ?? routeDays[0]?.id;
+      if (!dayId) return;
+      // 경로부터 옮기고 범위를 적는다: 두 호출 다 이번 렌더의 상태를 읽으므로,
+      // 마지막에 적는 쪽이 온전한 다음 상태여야 한다.
+      if (selection.kind !== 'day' || selection.dayId !== dayId) {
+        chooseRoute({ kind: 'day', dayId });
+      }
+      rememberFilter({ scope: 'day', dayId });
+      return;
+    }
+    rememberFilter({ scope: kind });
+    if (kind === 'unscheduled' && selection.kind !== 'off') chooseRoute({ kind: 'off' });
+  };
+
+  /** 빈 화면에서 한 번에 원래대로 — 범위도 카테고리도. */
+  const resetFilter = () => rememberFilter({ scope: 'all', muted: [] });
 
   /** 끔 / 전체 / 1일차 … — one segmented control, not a chip you must find. */
   const segmentClass = (active: boolean) =>
@@ -558,6 +738,8 @@ export default function MapView() {
           role="group"
           aria-label="카테고리 필터"
         >
+          {/* 표시·경로 줄과 같은 자리에 같은 활자로 — 세 줄이 한 벌로 읽힌다. */}
+          <span className="shrink-0 text-micro font-normal text-ink-muted">카테고리</span>
           {legendColumns.map((column) => {
             const active = !mutedColumns.includes(column.id);
             const colors = colorClasses(column.color);
@@ -583,6 +765,19 @@ export default function MapView() {
               </button>
             );
           })}
+          {/* 꺼 둔 것이 있을 때만 나타나는 되돌리기 — 카테고리가 여섯인 여행에서
+              하나씩 다시 켜는 일을 시키지 않는다. 컨트롤이 하나 더 생기는 게
+              아니라, 이 줄이 스스로를 되돌리는 방법이다. */}
+          {mutedColumns.length > 0 ? (
+            <button
+              type="button"
+              data-testid="map-legend-all"
+              onClick={() => rememberFilter({ muted: [] })}
+              className={`${CHIP_BUTTON} shrink-0`}
+            >
+              전체 카테고리
+            </button>
+          ) : null}
           {/* Third-rank fact, so it sits at the end of the key rather than
               beside the h1 (M9 §4.7-7). */}
           <span
@@ -607,20 +802,101 @@ export default function MapView() {
         </div>
       )}
 
+      {/* 표시 (M27) — 지도에 무엇을 올릴 것인가.
+          일정표 선택이 여기로 온 이유: 이 줄과 아래 경로 줄이 **같은 일정표**를
+          읽는다. 고르는 자리가 아래 줄에만 있으면, 위 줄이 무엇을 기준으로
+          「일정 전체」라고 말하는지가 화면에 없다. */}
+      {pins.length > 0 && sheets.length > 0 ? (
+        <div
+          className={['relative shrink-0', scopeStrip.overflow ? 'tb-strip-fade' : ''].join(' ')}
+        >
+          <div
+            ref={scopeStrip.ref}
+            onScroll={scopeStrip.measure}
+            data-testid="map-scope-controls"
+            className="flex items-center gap-2 overflow-x-auto px-4 pb-2"
+            role="group"
+            aria-label="표시 범위"
+          >
+            <span className="shrink-0 text-micro font-normal text-ink-muted">표시</span>
+
+            <div className="relative shrink-0">
+              <select
+                data-testid="map-route-sheet-select"
+                aria-label="일정표 선택"
+                value={routeSheet?.id ?? ''}
+                onChange={(event) => {
+                  setRouteSheetId(event.target.value);
+                  // Another 일정표 is another itinerary — show all of it.
+                  chooseRoute({ kind: 'all' });
+                }}
+                className="h-9 max-w-32 appearance-none rounded-md border border-line bg-surface pl-3 pr-8 text-label text-ink outline-none transition-colors duration-[140ms] ease-quick hover:border-line-strong focus:border-ink lg:h-8"
+              >
+                {sheets.map((sheet) => (
+                  <option key={sheet.id} value={sheet.id}>
+                    {sheet.name}
+                  </option>
+                ))}
+              </select>
+              <Icon
+                name="chevron-down"
+                size={16}
+                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-faint"
+              />
+            </div>
+
+            <div
+              data-testid="map-scope-segments"
+              className="flex shrink-0 items-center gap-1 rounded-full bg-sunken p-1"
+            >
+              {(
+                [
+                  ['all', '전체 아이템', 'map-scope-all'],
+                  ['sheet', '일정 전체', 'map-scope-sheet'],
+                  ...(routeDays.length > 0
+                    ? ([['day', '일자별', 'map-scope-day']] as const)
+                    : []),
+                  ['unscheduled', '미확정', 'map-scope-unscheduled'],
+                ] as const
+              ).map(([kind, label, testId]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  data-testid={testId}
+                  data-active={scope === kind}
+                  aria-pressed={scope === kind}
+                  onClick={() => chooseScope(kind)}
+                  className={segmentClass(scope === kind)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {scope === 'day' && scopeDay ? (
+              <span
+                data-testid="map-scope-day-label"
+                data-day-id={scopeDay.id}
+                className="shrink-0 text-micro font-normal text-ink-faint"
+              >
+                {`${dayTitle(scopeDay, routeDays.indexOf(scopeDay))}만 보는 중`}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {routeDays.length > 0 ? (
         <div
           // The fade belongs to a *wrapper*, not to the scroller: an `::after`
           // pinned to the right inside an `overflow-x-auto` box is positioned
           // against the scrolled content, so it slides away with the chips
           // instead of standing at the viewport's edge (§4.7-2).
-          className={[
-            'relative shrink-0',
-            routeOverflow ? 'tb-strip-fade' : '',
-          ].join(' ')}
+          className={['relative shrink-0', routeStrip.overflow ? 'tb-strip-fade' : ''].join(' ')}
         >
           <div
-            ref={routeStripRef}
-            onScroll={measureRouteStrip}
+            ref={routeStrip.ref}
+            onScroll={routeStrip.measure}
             data-testid="map-route-controls"
             // One line that scrolls, not two lines that push the map down.
             className="flex items-center gap-2 overflow-x-auto px-4 pb-2"
@@ -628,33 +904,6 @@ export default function MapView() {
             aria-label="일자별 경로"
           >
             <span className="shrink-0 text-micro font-normal text-ink-muted">경로</span>
-
-            {sheets.length > 0 ? (
-              <div className="relative shrink-0">
-                <select
-                  data-testid="map-route-sheet-select"
-                  aria-label="일정표 선택"
-                  value={routeSheet?.id ?? ''}
-                  onChange={(event) => {
-                    setRouteSheetId(event.target.value);
-                    // Another 일정표 is another itinerary — show all of it.
-                    chooseRoute({ kind: 'all' });
-                  }}
-                  className="h-9 max-w-32 appearance-none rounded-md border border-line bg-surface pl-3 pr-8 text-label text-ink outline-none transition-colors duration-[140ms] ease-quick hover:border-line-strong focus:border-ink lg:h-8"
-                >
-                  {sheets.map((sheet) => (
-                    <option key={sheet.id} value={sheet.id}>
-                      {sheet.name}
-                    </option>
-                  ))}
-                </select>
-                <Icon
-                  name="chevron-down"
-                  size={16}
-                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-faint"
-                />
-              </div>
-            ) : null}
 
             {/* One segmented control — 끔 · 전체 · 일차 — rather than a row of
                 chips that could each be missed. `전체` no longer toggles
@@ -752,7 +1001,10 @@ export default function MapView() {
           <MapReady onSize={onSize} />
           <CenterReport onCenter={onCenter} />
           <FitPins points={fitPoints} fallback={destination} fitKey={fitKey} ready={ready} />
-          <FitRoute points={routePoints} fitKey={routeKey} ready={ready} />
+          {/* 필터를 바꾸면 남은 곳들로 화면을 다시 맞춘다 (M27). 비면 그대로 둔다 —
+              아무것도 없는 화면으로 사용자를 끌고 가지 않는 게 `FitOnce`의 계약. */}
+          <FitOnce points={filterPoints} fitKey={filterKey} ready={ready} />
+          <FitOnce points={routePoints} fitKey={routeKey} ready={ready} />
 
           {visiblePins.map(({ card, column }) => (
             <Marker
@@ -866,6 +1118,30 @@ export default function MapView() {
               <p className="mt-1 text-label font-normal text-ink-muted">
                 보드에서 카드를 열고 「검색」이나 「지도에서 선택」을 눌러보세요.
               </p>
+            </div>
+          </div>
+        ) : null}
+
+        {/* 필터가 다 걸러 낸 화면 (M27) — 회색 판이 아니라 한 줄과 되돌리기.
+            핀이 아예 없는 여행은 위쪽 안내가 이미 맡고 있으므로 둘은 겹치지
+            않는다. */}
+        {pins.length > 0 && visiblePins.length === 0 ? (
+          <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center p-6">
+            <div
+              data-testid="map-filter-empty"
+              className="pointer-events-auto max-w-[22rem] rounded-lg bg-surface/95 px-5 py-4 text-center shadow-float"
+            >
+              <p className="text-label font-normal text-ink-muted">
+                {emptyFilterHint(filter, scopedIds.size)}
+              </p>
+              <button
+                type="button"
+                data-testid="map-filter-reset"
+                onClick={resetFilter}
+                className={`${withBtnSize(SECONDARY_BUTTON_CLASS, BTN_SIZE_SM)} mt-3`}
+              >
+                전체 아이템 보기
+              </button>
             </div>
           </div>
         ) : null}
