@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PlanDndContext from '../../dnd/PlanDndContext';
-import { useIsDesktop } from '../../hooks/useMediaQuery';
+import { useIsDesktop, useMediaQuery } from '../../hooks/useMediaQuery';
 import { useNowTick } from '../../hooks/useNowTick';
 import { deleteWithUndo } from '../../stores/undoDelete';
 import { useUndoStore } from '../../stores/undoStore';
@@ -66,6 +66,7 @@ import ScheduleSheet from './ScheduleSheet';
 import SheetRenameDialog from './SheetRenameDialog';
 import SheetTabs from './SheetTabs';
 import SheetWizard from './SheetWizard';
+import SpendReportSheet from './SpendReportSheet';
 import SpendSummaryBar, { categoryRows } from './SpendSummaryBar';
 import TimeAxis from './TimeAxis';
 import TodoSheet from './TodoSheet';
@@ -354,6 +355,45 @@ export default function TimelineView() {
   );
 
   /**
+   * 지출 리포트 (M32) — 요약 바의 한 줄을 표로 펼쳐 보는 자리.
+   *
+   * 바가 답하는 것은 「얼마 드나」 하나뿐이고, 그 다음 질문(「어디에?」)은 한 줄에
+   * 들어가지 않는다. 그래서 팝오버를 키우는 대신 시트를 하나 연다 — 카테고리별과
+   * 일자별, 같은 돈의 두 모습이다. 여는 자리는 「할 일」 옆이다: 접어도 사라지지
+   * 않는 그 묶음이 이 탭의 액션들이 사는 곳이다 (M29).
+   */
+  const [reportOpen, setReportOpen] = useState(false);
+  /**
+   * 리포트 버튼이 설 수 있는 최소 폭 — 실측이고, 두 단계다 (M32).
+   *
+   * 이 헤더 줄은 이미 꽉 차 있다. 브라우저에 대고 잰 내용 폭은 이렇다:
+   *
+   * | 이 줄에 선 것 | 내용 폭 | 리포트를 얹으면 |
+   * |---|---|---|
+   * | 제목 + 프로필·동기화 + 버튼 셋 | 287px | 335px |
+   * | 거기에 AI 두 개(물어보기·검토)까지 | 375px | 423px |
+   *
+   * 넘치면 밀려나는 것은 버튼이 아니라 **페이지 전체**다: 헤더가 뷰포트보다
+   * 넓어지고 그리드까지 따라 밀린다 (M25·M31의 요약 바 스펙이 320px에서 잡아내는
+   * 그 사고다). 그래서 자리가 없으면 리포트가 물러선다 — 밀려날 수 있는 것 중
+   * 가장 늦게 아쉬운 것이기 때문이다. 할 일·일자 추가는 계획을 **바꾸는**
+   * 손잡이지만, 리포트는 이미 적어 둔 것을 **읽는** 자리다.
+   *
+   * 두 단계인 이유는 M31의 `WORDS_YIELD`와 같다: 같은 줄이라도 무엇이 서 있느냐에
+   * 따라 필요한 폭이 다르고, 하나의 기준선으로 뭉뚱그리면 둘 중 한쪽이 틀린다.
+   *
+   * ⚠️ 알려진 제한: AI를 켠 기기에서는 423px가 필요해서 390px 폰에서는 이 버튼이
+   * 서지 못한다. 그 폭에서 AI 두 개가 붙은 줄은 **M32 이전에도 이미** 360px에서
+   * 넘치고 있었다(375px) — 이 줄을 근본적으로 고치려면 기존 버튼들의 크기·간격을
+   * 손봐야 한다. 그래서 좁은 폭의 진입점은 예산 바 팝오버 맨 아래의 「전체
+   * 리포트 보기」다: 버튼이 물러나는 모든 폭에서 리포트는 여전히 두 탭 거리다.
+   */
+  const REPORT_NEEDS_PX = { plain: 360, crowded: 424 } as const;
+  const roomForReport = useMediaQuery(
+    `(min-width: ${aiOn ? REPORT_NEEDS_PX.crowded : REPORT_NEEDS_PX.plain}px)`,
+  );
+
+  /**
    * dayId → straight-line 이동 갭 between its consecutive located stops (M7b),
    * over the **windowed** sequence of the column (M16-B) — so the last hop of a
    * night is measured from 23:40 to 00:20, not across a calendar boundary.
@@ -582,6 +622,24 @@ export default function TimelineView() {
           </span>
         ) : null}
       </button>
+      {/* 「할 일」과 같은 묶음, 같은 레시피 — 접어도 남는다 (M29의 그 자리다).
+          시트가 있어야 볼 표가 있으므로, 시트가 없으면 버튼도 없다.
+
+          좁은 줄에서 물러나는 이유와 그 실측 기준선은 `roomForReport` 옆에
+          적어 두었다. */}
+      {sheet && roomForReport ? (
+        <button
+          type="button"
+          data-testid="report-open"
+          onClick={() => setReportOpen(true)}
+          aria-label="지출 리포트"
+          title="지출 리포트"
+          className={COMPACT_ACTION_BUTTON_CLASS}
+        >
+          <Icon name="chart" size={16} />
+          <span className="hidden sm:inline">리포트</span>
+        </button>
+      ) : null}
       {aiOn && sheet && sheetHasEntries ? (
         <button
           type="button"
@@ -844,6 +902,9 @@ export default function TimelineView() {
             unplaced={unplaced}
             currency={trip.currency}
             rate={{ localCurrency: trip.localCurrency, fxRate: trip.fxRate }}
+            // 헤더 버튼이 물러난 폭에서도 리포트가 닿도록 (M32) — 팝오버 맨
+            // 아래 줄이 두 번째 진입점이다.
+            onOpenReport={sheet ? () => setReportOpen(true) : undefined}
           />
           )}
 
@@ -1188,6 +1249,18 @@ export default function TimelineView() {
       ) : null}
 
       {todoOpen ? <TodoSheet tripId={trip.id} onClose={() => setTodoOpen(false)} /> : null}
+
+      {reportOpen && sheet ? (
+        <SpendReportSheet
+          sheetId={sheet.id}
+          sheetName={sheet.name}
+          // 그리드가 쓰는 그 축 그대로 — 05시 창 판정이 화면과 어긋나지 않게.
+          dayOrder={dayOrder}
+          currency={trip.currency}
+          rate={{ localCurrency: trip.localCurrency, fxRate: trip.fxRate }}
+          onClose={() => setReportOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }

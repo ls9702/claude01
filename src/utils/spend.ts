@@ -465,3 +465,148 @@ export function unplacedPlan(workspace: Workspace, tripId: Id): UnplacedPlan {
   }
   return { budget, count };
 }
+
+/* ------------------------------------------------------------------ *
+ * 줄 단위 내역 — 리포트가 표로 펼칠 재료 (M32)
+ * ------------------------------------------------------------------ */
+
+/**
+ * ## 왜 여기에 있나
+ *
+ * 지출 리포트(M32)는 요약 바가 말하는 두 숫자를 **줄로 쪼개** 보여준다. 쪼개는
+ * 일이 리포트 안에서 벌어지면 같은 셈법이 두 벌 생기고, 그 둘은 반드시 언젠가
+ * 어긋난다 — 그리고 어긋난 순간 표는 「합계가 안 맞는 표」가 되어 위쪽 바까지
+ * 같이 못 믿게 만든다. 그래서 쪼개기도 여기, 합치기와 같은 파일에서 한다.
+ *
+ * 불변식은 두 줄이다:
+ *
+ * - `Σ sheetCardMoney(...).spent === sheetSpend(...).spent`
+ * - `Σ sheetCardMoney(...).budget === sheetPlannedBudget(...)`
+ *
+ * 두 줄이 다른 규칙으로 셈해지는 이유는 위쪽 주석 그대로다 — 영수증은 카드마다
+ * 하나, 계획은 배치마다 하나(숙소만 시트마다 하나).
+ */
+
+/** 한 카드가 이 시트에서 차지하는 돈 — 지출 한 칸, 예산 한 칸. */
+export interface SheetCardMoney {
+  card: Card;
+  /** 이미 낸 돈. **카드 단위**라 배치를 몇 번 했든 영수증은 하나다 (M6). */
+  spent: number;
+  /**
+   * 이 시트가 이 카드에 필요로 하는 예산.
+   *
+   * **배치 단위**다 (M25): 2만원짜리 식사를 네 날에 걸었으면 8만원. 단
+   * {@link isBudgetOnceColumn} 칸(숙소)에 앉은 카드는 시트마다 한 번이라
+   * `cardBudget` 그대로다 (M31).
+   */
+  budget: number;
+  /** 이 시트 안에서 이 카드가 놓인 횟수. */
+  placements: number;
+  /** 예산이 시트마다 한 번만 세어지는 카드인가 — 숙소류. */
+  countsOnce: boolean;
+}
+
+/**
+ * 이 시트에 배치된 카드들을, 카드마다 한 줄씩 (M32).
+ *
+ * 순서는 엔트리를 훑다가 **처음 만난 순**이라 안정적이지도 의미 있지도 않다 —
+ * 줄 세우기는 표를 그리는 쪽의 일이다. 여기가 보장하는 것은 오직 합계다
+ * (위 불변식 두 줄).
+ */
+export function sheetCardMoney(workspace: Workspace, sheetId: Id): SheetCardMoney[] {
+  const dayIds = sheetDayIds(workspace, sheetId);
+  if (!dayIds) return [];
+
+  const placements = new Map<Id, number>();
+  const order: Id[] = [];
+  for (const entry of Object.values(workspace.entries)) {
+    if (!dayIds.has(entry.dayId) || !workspace.cards[entry.cardId]) continue;
+    if (!placements.has(entry.cardId)) order.push(entry.cardId);
+    placements.set(entry.cardId, (placements.get(entry.cardId) ?? 0) + 1);
+  }
+
+  return order.map((cardId) => {
+    const card = workspace.cards[cardId] as Card;
+    const count = placements.get(cardId) ?? 0;
+    const once = countsOnce(workspace, card);
+    return {
+      card,
+      spent: cardSpent(card),
+      budget: cardBudget(card) * (once ? 1 : count),
+      placements: count,
+      countsOnce: once,
+    };
+  });
+}
+
+/** 배치 하나 = 한 줄. 어느 **창**에 그려지는지까지 풀어 둔 것. */
+export interface SheetPlacement {
+  entryId: Id;
+  cardId: Id;
+  /** 이 배치를 실제로 그리는 창의 일자 — 05시 경계를 지난 뒤의 답 (M16-B). */
+  dayId: Id;
+  /** 그 창 안에서의 위치. 음수면 창이 열리기 전(첫날 새벽)이다. */
+  offsetMin: number;
+}
+
+/**
+ * 시트의 모든 배치를, 창 기준 일자와 함께 (M32).
+ *
+ * `dayPlannedBudgetWindowed`가 하루치를 셀 때 쓰는 그 변환({@link
+ * visualPlacement})을 시트 전체에 한 번 돌려 놓은 것이다 — 리포트는 날마다
+ * 다시 훑는 대신 이 목록을 한 번 받아 제 표를 채운다.
+ */
+export function sheetPlacements(
+  workspace: Workspace,
+  sheetId: Id,
+  dayOrder: DayAxis,
+): SheetPlacement[] {
+  const dayIds = sheetDayIds(workspace, sheetId);
+  if (!dayIds) return [];
+  const axis = datedAxis(dayOrder, workspace.days);
+
+  const rows: SheetPlacement[] = [];
+  for (const entry of Object.values(workspace.entries)) {
+    if (!dayIds.has(entry.dayId) || !workspace.cards[entry.cardId]) continue;
+    const placement = visualPlacement(entry, axis);
+    rows.push({
+      entryId: entry.id,
+      cardId: entry.cardId,
+      dayId: placement.renderDayId,
+      offsetMin: placement.rawOffsetMin,
+    });
+  }
+  return rows;
+}
+
+/**
+ * cardId → 이 시트에서 **가장 이른** 배치가 그려지는 창의 일자 (M32).
+ *
+ * 「가장 이르다」의 뜻은 숙소 예산이 체크인 날에 붙을 때와 정확히 같다: 날 순서
+ * → 창 안에서의 위치 → entry id ({@link earlier}). 리포트의 일자별 표가 **카드
+ * 단위**인 지출을 어느 날에 얹을지 정할 때 쓴다 — 네 날에 걸린 호텔의 40만원을
+ * 네 번 세면 일자 합계가 시트 합계를 넘어 버리고, 넷으로 쪼개면 어느 날에서도
+ * 본 적 없는 금액이 된다. 그래서 첫 날에 통째로 얹는다.
+ */
+export function sheetCardFirstDay(
+  workspace: Workspace,
+  sheetId: Id,
+  dayOrder: DayAxis,
+): Record<Id, Id> {
+  const axis = datedAxis(dayOrder, workspace.days);
+  const dayIndex = new Map<Id, number>(axis.map((day, index) => [day.id, index]));
+
+  const best = new Map<Id, Rank>();
+  const firstDay: Record<Id, Id> = {};
+  for (const placement of sheetPlacements(workspace, sheetId, dayOrder)) {
+    // 축 밖의 날(주문에서 떨어져 나온 잔여 행)은 맨 뒤로 — 있어도 첫 배치가
+    // 되지는 않는다.
+    const index = dayIndex.get(placement.dayId) ?? Number.MAX_SAFE_INTEGER;
+    const rank: Rank = [index, placement.offsetMin, placement.entryId];
+    const current = best.get(placement.cardId);
+    if (current && !earlier(rank, current)) continue;
+    best.set(placement.cardId, rank);
+    firstDay[placement.cardId] = placement.dayId;
+  }
+  return firstDay;
+}

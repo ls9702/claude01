@@ -46,6 +46,14 @@ interface SpendSummaryBarProps {
   currency: string;
   /** 여행의 현지 통화 쌍 (M7b) — 없으면 기준 통화만 말한다. */
   rate?: LocalRate;
+  /**
+   * 팝오버 맨 아래 「전체 리포트」가 여는 것 (M32).
+   *
+   * 헤더의 리포트 버튼은 좁은 줄에서 물러난다(`roomForReport`) — AI를 켠 390px
+   * 폰이 바로 그 경우다. 돈을 보러 이 팝오버를 연 손가락이 리포트까지 한 탭에
+   * 닿아야 하므로, 진입점은 폭과 무관하게 여기에도 산다. 없으면 줄도 없다.
+   */
+  onOpenReport?: () => void;
 }
 
 /**
@@ -141,6 +149,7 @@ export default function SpendSummaryBar({
   unplaced,
   currency,
   rate,
+  onOpenReport,
 }: SpendSummaryBarProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -350,6 +359,21 @@ export default function SpendSummaryBar({
               >
                 {`미배치 카드 ${unplaced.count}장의 예산은 빠져 있어요`}
               </p>
+            ) : null}
+
+            {onOpenReport ? (
+              <button
+                type="button"
+                data-testid="report-open-popover"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenReport();
+                }}
+                className="flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-label text-ink-muted transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink"
+              >
+                <Icon name="chart" size={16} />
+                전체 리포트 보기
+              </button>
             ) : null}
           </div>
         ) : null}
