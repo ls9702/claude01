@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { refreshAiCapability } from '../../ai/aiClient';
 import { useAiStore } from '../../ai/aiSettings';
 import { SYNC_STATUS_LABELS, useSyncStore } from '../../stores/syncStore';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { fetchMeta } from '../../sync/api';
 import {
@@ -35,6 +36,7 @@ import {
   markBootstrapOptOut,
 } from '../../sync/bootstrap';
 import { restartSync, syncNow } from '../../sync/syncEngine';
+import LocationAuditSheet from '../map/LocationAuditSheet';
 import Avatar from './Avatar';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from './Icon';
@@ -154,6 +156,21 @@ const AI_STATUS_TEXT: Record<AiStatusState, string> = {
   ready: '사용 준비 완료',
 };
 
+/**
+ * 「위치 재정비」 줄이 지금 눌릴 수 있는가 (M36).
+ *
+ * 이 도구는 두 가지가 갖춰져야 돈다: 물어볼 AI와, 훑을 여행. 둘 중 무엇이
+ * 없는지를 줄 아래 한 마디로 말한다 — 눌리지 않는 링크에 이유가 없으면 그건
+ * 고장 난 링크로 읽힌다 (`ai-status`가 같은 이유로 존재한다).
+ */
+type LocationAuditGate = 'ready' | 'ai-off' | 'no-trip';
+
+const LOCATION_AUDIT_NOTE: Record<LocationAuditGate, string> = {
+  ready: '예전에 저장한 카드 위치를 AI와 OpenStreetMap으로 다시 맞춰요',
+  'ai-off': 'AI 도우미를 켜야 쓸 수 있어요',
+  'no-trip': '여행을 연 다음에 쓸 수 있어요',
+};
+
 /** `2026-03-07 19:04` — enough to tell "just now" from "yesterday". */
 function formatSyncedAt(at?: number): string {
   if (!at) return '아직 없음';
@@ -224,6 +241,8 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const [bootstrapNote, setBootstrapNote] = useState(
     () => isBootstrapApplied() && isConfigured(),
   );
+  /** 「위치 재정비」 시트가 이 시트 위에 떠 있는가 (M36). */
+  const [auditOpen, setAuditOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -244,6 +263,9 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
 
   const configured = normalizeBaseUrl(baseUrl).length > 0;
 
+  const activeTripId = useUiStore((s) => s.activeTripId);
+  const auditTripId = activeTripId && workspace.trips[activeTripId] ? activeTripId : undefined;
+
   /**
    * Deliberately reads the *saved* settings rather than the typed ones: the
    * capability ping went to the saved server, so a half-typed address must not
@@ -258,6 +280,10 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
         : aiChecked
           ? 'no-key'
           : 'checking';
+
+  /** 물어볼 AI와 훑을 여행, 둘 다 있어야 「위치 재정비」가 눌린다 (M36). */
+  const auditGate: LocationAuditGate =
+    aiState !== 'ready' ? 'ai-off' : auditTripId ? 'ready' : 'no-trip';
 
   /** Flipping it on is also the cheapest moment to re-ask the server. */
   const handleAiToggle = (): void => {
@@ -668,7 +694,36 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
             내보내기에는 사진이 포함되지 않아요. 사진까지 옮기려면 「사진 포함 내보내기」를 쓰세요.
           </p>
         </div>
+
+        {/* 위치 재정비 (M36) — 설정의 맨 아래, 링크 한 줄.
+            일 년에 한 번 쓸까 말까 한 도구다. 지도 탭에 버튼으로 세우면 매일
+            보는 화면에 매일 쓸 일 없는 것이 하나 늘고, 「백업」처럼 섹션 제목을
+            달면 이 시트에서 세 번째로 중요한 것처럼 읽힌다. 그래서 제목도
+            버튼도 아닌, 밑줄 그은 작은 글씨 한 줄이다. */}
+        <div className="border-t border-line pt-6">
+          <button
+            type="button"
+            data-testid="location-audit-open"
+            onClick={() => setAuditOpen(true)}
+            disabled={auditGate !== 'ready'}
+            className="flex min-h-11 items-center gap-1.5 text-micro font-normal text-ink-faint underline decoration-line-strong underline-offset-4 transition-colors duration-[140ms] ease-quick hover:text-ink disabled:no-underline disabled:hover:text-ink-faint"
+          >
+            <Icon name="pin" size={16} />
+            위치 재정비
+          </button>
+          <p
+            data-testid="location-audit-note"
+            data-state={auditGate}
+            className="text-micro font-normal text-ink-faint"
+          >
+            {LOCATION_AUDIT_NOTE[auditGate]}
+          </p>
+        </div>
       </div>
+
+      {auditOpen && auditTripId ? (
+        <LocationAuditSheet tripId={auditTripId} onClose={() => setAuditOpen(false)} />
+      ) : null}
 
       {restoreAsk ? (
         <ConfirmDialog

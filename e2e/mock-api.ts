@@ -52,6 +52,20 @@ export interface MockAiCall {
 /** How the mock answers a 장소 검색 call (M28). */
 export type MockPlaceMode = 'ok' | 'empty' | 'error';
 
+/** One candidate the mock can hand back, shaped like `PLACES_SCHEMA` (M36). */
+export interface MockPlace {
+  name: string;
+  localName?: string;
+  locality?: string;
+  lat: number;
+  lng: number;
+}
+
+/** A hand-written 장소 검색 answer for one query (M36). */
+export interface MockPlaceAnswer {
+  places: MockPlace[];
+}
+
 /** Handle returned by {@link startMockApi}. */
 export interface MockApi {
   /** Base URL to paste into the app's 서버 주소 field, e.g. `http://127.0.0.1:53210`. */
@@ -86,6 +100,15 @@ export interface MockApi {
    * Nominatim); `'error'` a 502, the shape `ai.php` uses for a failed upstream.
    */
   setAiPlaceMode: (mode: MockPlaceMode) => void;
+  /**
+   * Answers 장소 검색 differently for one query (M36).
+   *
+   * `needle` is matched against the prompt, whose first line is always
+   * `찾는 장소: <query>` — so the card title is enough to pick a card out. A
+   * registered query beats {@link MockApi.setAiPlaceMode}; everything else
+   * still gets the global answer. `reset()` clears the lot.
+   */
+  setAiPlacesFor: (needle: string, answer: MockPlaceMode | MockPlaceAnswer) => void;
   /** How many photos `image.php` is currently holding. */
   photoCount: () => number;
   /** Is this photo id stored? */
@@ -216,6 +239,8 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
   let puts = 0;
   let aiAvailable = true;
   let aiPlaceMode: MockPlaceMode = 'ok';
+  /** 검색어(프롬프트 조각) → 그 검색어에만 주는 답 (M36). */
+  const placeOverrides = new Map<string, MockPlaceMode | MockPlaceAnswer>();
   let aiCalls: MockAiCall[] = [];
   /** `image.php`'s disk: photo id → the JPEG bytes. */
   const photos = new Map<string, Buffer>();
@@ -343,15 +368,20 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
         // and it stays identifiable on the grounded retry, where `ai.php` has
         // dropped the schema.
         if (typeof parsed.prompt === 'string' && parsed.prompt.includes(PLACE_PROMPT_MARKER)) {
-          if (aiPlaceMode === 'error') {
+          // 검색어별 답이 등록돼 있으면 그것이 이긴다 (M36) — 여러 카드를 한 번에
+          // 훑는 스펙은 카드마다 다른 답을 받아야 한다.
+          const override = [...placeOverrides].find(([needle]) =>
+            (parsed.prompt as string).includes(needle),
+          )?.[1];
+          const answer = override ?? aiPlaceMode;
+
+          if (answer === 'error') {
             send(res, 502, { error: 'upstream_error', detail: 'HTTP 500 — mock' });
             return;
           }
-          send(
-            res,
-            200,
-            geminiText([JSON.stringify(aiPlaceMode === 'empty' ? { places: [] } : CANNED_PLACES)]),
-          );
+          const body =
+            answer === 'empty' ? { places: [] } : answer === 'ok' ? CANNED_PLACES : answer;
+          send(res, 200, geminiText([JSON.stringify(body)]));
           return;
         }
 
@@ -467,6 +497,9 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     setAiPlaceMode: (mode: MockPlaceMode) => {
       aiPlaceMode = mode;
     },
+    setAiPlacesFor: (needle: string, answer: MockPlaceMode | MockPlaceAnswer) => {
+      placeOverrides.set(needle, answer);
+    },
     photoCount: () => photos.size,
     hasPhoto: (id: string) => photos.has(id),
     reset: () => {
@@ -477,6 +510,7 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       aiCalls = [];
       aiAvailable = true;
       aiPlaceMode = 'ok';
+      placeOverrides.clear();
       photos.clear();
     },
     stop: () =>
