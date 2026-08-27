@@ -3,10 +3,8 @@ import { useDroppable } from '@dnd-kit/core';
 import { useRegisterDayGrid } from '../../dnd/PlanDndContext';
 import { DND_DAY, dayDroppableId } from '../../dnd/planDnd';
 import type { BoardColumn, Card, Day, Id, TimelineEntry } from '../../types/models';
-import type { DayGap } from '../../timeline/gap';
 import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
 import { clockToOffset, type WindowedEntry } from '../../timeline/dayWindow';
-import { formatDistanceKm } from '../../timeline/route';
 import {
   DAY_COLUMN_PX,
   DAY_HEIGHT_PX,
@@ -57,19 +55,7 @@ interface DayColumnProps {
    * {@link import('../../timeline/today').todayFocus}.
    */
   nowOffsetMin?: number;
-  /** Straight-line gaps between consecutive located stops (M7b). */
-  gaps?: readonly DayGap[];
 }
-
-/**
- * Highest a 이동 갭 chip may be parked, in window minutes.
- *
- * The chip is `h-6` and centred on its minute (`-translate-y-1/2`), so half of
- * it — 12px — hangs above `top`; two more pixels keep it off the hairline. That
- * many minutes down, and the whole chip is inside the column instead of over
- * the day header above it.
- */
-const GAP_CHIP_MIN_MIN = Math.ceil(14 / PX_PER_MIN);
 
 /**
  * One day of the sheet: a sticky header plus the 05:00 → 05:00 grid (M16-B).
@@ -93,7 +79,6 @@ export default function DayColumn({
   fullWidth = false,
   nowMin,
   nowOffsetMin,
-  gaps,
 }: DayColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const headerRef = useRef<HTMLElement | null>(null);
@@ -131,7 +116,6 @@ export default function DayColumn({
       durationMin: row.placement.drawMin,
     })),
   );
-  const rowById = new Map(entries.map((row) => [row.entry.id, row]));
   const showNow = nowMin !== undefined && Number.isFinite(nowMin);
   /** The red line lives in window space too — 02:00 is near the bottom. */
   const nowOffset = !showNow
@@ -266,66 +250,6 @@ export default function DayColumn({
           );
         })}
 
-        {/* 이동 갭: a straight-line fact between two located stops, parked at
-            the midpoint of the empty stretch. `pointer-events-none` keeps the
-            grid's drop target underneath it intact.
-
-            When there is no empty stretch at all (`gapMin <= 0`, the back-to-back
-            case the 시간이 부족해요 chip exists for) the midpoint lands *inside*
-            the next entry. Then the chip straddles the boundary line the two
-            entries share — centred **on** it (`-translate-y-1/2`), not hung
-            above it, where it covered the previous block's time. `right-6`
-            keeps it clear of the screen edge and of the now-line's clock. */}
-        {(gaps ?? []).map((gap) => {
-          const after = rowById.get(gap.afterEntryId);
-          if (!after) return null;
-          // Window offsets, like everything else drawn here: an end that spills
-          // past the 24:00 line still hangs its chip where the block ends.
-          const endMin = after.placement.rawOffsetMin + after.entry.durationMin;
-          const spaced = gap.gapMin > 0;
-          /**
-           * …but never above the column's own top edge (B9).
-           *
-           * A first-day 새벽 stop has a **negative** `rawOffsetMin` — 02:00 is
-           * 3시간 전이다 — so its chip's honest midpoint is off the top of the
-           * grid, where it is either invisible or hidden under the sticky day
-           * header. The block itself is pinned to offset 0 by the same rule
-           * ({@link VisualPlacement.dawn}); the chip follows it down.
-           */
-          const topMin = Math.max(spaced ? endMin + gap.gapMin / 2 : endMin, GAP_CHIP_MIN_MIN);
-          const distance = formatDistanceKm(gap.distanceKm);
-          if (!distance) return null;
-
-          return (
-            <div
-              key={`gap-${gap.afterEntryId}`}
-              data-testid="gap-chip"
-              data-after={gap.afterEntryId}
-              data-km={gap.distanceKm.toFixed(2)}
-              data-impossible={gap.impossible ? 'true' : 'false'}
-              style={{ top: minToY(topMin, PX_PER_MIN) }}
-              className={[
-                'pointer-events-none absolute z-10 -translate-y-1/2',
-                spaced ? 'left-1/2 -translate-x-1/2' : 'right-6',
-              ].join(' ')}
-            >
-              <span
-                className={[
-                  'inline-flex h-6 max-w-[13rem] items-center gap-1 rounded-full px-2 text-micro tabular-nums',
-                  gap.impossible
-                    ? 'bg-warn-wash text-warn-ink ring-1 ring-warn/40'
-                    : 'bg-sunken text-ink-muted',
-                ].join(' ')}
-              >
-                <Icon name="arrow-up-down" size={16} />
-                <span className="truncate">
-                  직선 {distance}
-                  {gap.impossible ? ' · 시간이 부족해요' : ''}
-                </span>
-              </span>
-            </div>
-          );
-        })}
 
         {showNow ? (
           <div

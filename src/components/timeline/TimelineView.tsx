@@ -23,7 +23,6 @@ import {
   type DayRef,
   type WindowedEntry,
 } from '../../timeline/dayWindow';
-import { dayGapsWindowed, type DayGap } from '../../timeline/gap';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
 import { currentAndNextWindowed, nowMin, todayFocus } from '../../timeline/today';
 import {
@@ -388,17 +387,6 @@ export default function TimelineView() {
   const roomForReport = useMediaQuery(
     `(min-width: ${aiOn ? REPORT_NEEDS_PX.crowded : REPORT_NEEDS_PX.plain}px)`,
   );
-
-  /**
-   * dayId → straight-line 이동 갭 between its consecutive located stops (M7b),
-   * over the **windowed** sequence of the column (M16-B) — so the last hop of a
-   * night is measured from 23:40 to 00:20, not across a calendar boundary.
-   */
-  const gapsByDay = useMemo<Record<Id, DayGap[]>>(() => {
-    const byDay: Record<Id, DayGap[]> = {};
-    for (const day of days) byDay[day.id] = dayGapsWindowed(workspace, day.id, dayOrder);
-    return byDay;
-  }, [days, workspace, dayOrder]);
 
   /**
    * 오늘 모드 (M7b): which column the user is living in, and where its now line
@@ -1093,7 +1081,6 @@ export default function TimelineView() {
                         // The line's pixel, when it is not simply the clock's:
                         // 첫날 새벽 pins it to the top edge (B6).
                         nowOffsetMin={day.id === todayId ? focus?.nowOffsetMin : undefined}
-                        gaps={gapsByDay[day.id]}
                         onOpenEntry={(entry) => setDialog({ kind: 'entry', entry })}
                         onDeleteDay={(target) =>
                           setDialog({ kind: 'day-delete', day: target, index })

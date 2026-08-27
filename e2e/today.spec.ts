@@ -33,12 +33,6 @@ const DAY_START_MIN = 300;
 /** `INITIAL_SCROLL_MIN` — offset into the window, i.e. 08:00 at the top. */
 const INITIAL_SCROLL_MIN = 180;
 
-/** 난바 → 우메다, about 4km apart: far enough to be 시간이 부족해요. */
-const FAR_APART = [
-  { place_id: 1, lat: '34.6659', lon: '135.5011', display_name: '난바역, 오사카' },
-  { place_id: 2, lat: '34.7025', lon: '135.4959', display_name: '우메다역, 오사카' },
-];
-
 /** Creates a trip from the 여행 tab and lands on its board. */
 async function createTrip(page: Page, title: string): Promise<void> {
   await page.getByTestId('add-trip').click();
@@ -318,59 +312,6 @@ test('현지 통화를 켜면 지출을 현지 금액으로 적고 기준 통화
   await page.getByTestId('card-expense-add').click();
   await expect(page.getByTestId('card-expense-row').nth(1)).toHaveAttribute('data-amount', '3000');
   await expect(page.getByTestId('card-expense-total')).toHaveAttribute('data-total', '14160');
-});
-
-test('멀리 떨어진 두 일정 사이에 직선 거리 칩이 뜨고, 이동수단을 넣으면 사라진다', async ({
-  page,
-}) => {
-  await page.route('**/nominatim.openstreetmap.org/**', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(FAR_APART),
-    }),
-  );
-
-  await createTrip(page, '오사카 이동');
-  await addCard(page, 4, '난바 상점가');
-  await addCard(page, 4, '우메다 전망대');
-  await addCard(page, 0, '지하철');
-
-  /** Gives the open card the `index`-th stubbed location. */
-  const pickLocation = async (index: number) => {
-    await page.getByTestId('card-location-search').click();
-    await page.getByTestId('place-search-submit').click();
-    await expect(page.getByTestId('place-search-result')).toHaveCount(2);
-    await page.getByTestId('place-search-result').nth(index).click();
-    await expect(page.getByTestId('place-search')).toHaveCount(0);
-    await page.getByTestId('card-submit').click();
-    await expect(page.getByTestId('card-form')).toHaveCount(0);
-  };
-
-  await openCard(page, '난바 상점가');
-  await pickLocation(0);
-  await openCard(page, '우메다 전망대');
-  await pickLocation(1);
-
-  await page.getByTestId('tab-timeline').click();
-  await page.getByTestId('timeline-add-day-empty').click();
-  await expect(page.getByTestId('timeline-day')).toHaveCount(1);
-
-  await scheduleCard(page, '난바 상점가', 0, 600); // 10:00–11:00
-  await scheduleCard(page, '우메다 전망대', 0, 660); // 11:00–12:00 — no minute between
-
-  const chip = page.getByTestId('gap-chip');
-  await expect(chip).toHaveCount(1);
-  await expect(chip).toHaveAttribute('data-impossible', 'true');
-  await expect(chip).toContainText('직선 4');
-  await expect(chip).toContainText('시간이 부족해요');
-  // Fact only: no minute estimate and no mode guess anywhere on the chip.
-  await expect(chip).not.toContainText('분');
-
-  // Putting the ride in between answers the question, so the chip stands down.
-  await scheduleCard(page, '지하철', 0, 630);
-  await expect(page.getByTestId('timeline-entry')).toHaveCount(3);
-  await expect(page.getByTestId('gap-chip')).toHaveCount(0);
 });
 
 test.describe('모바일', () => {
