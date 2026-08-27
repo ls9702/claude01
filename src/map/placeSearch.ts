@@ -16,6 +16,10 @@
  * 안내가 「AI 토글 off」에만 없는 것은 의도다. 그건 실패가 아니라 이 기기의 평소
  * 상태이고, GitHub Pages 빌드에서는 영원히 그 상태다 — 매번 사과할 일이 아니다.
  *
+ * M35에서 한 겹이 더 붙었다: AI가 낸 후보는 화면에 나가기 전에 좌표를 한 번 더
+ * OSM에 맞춰 조인다({@link searchPlacesRefined} + `map/refine.ts`). 모델은 이름을
+ * 잘 옮기고 좌표는 블록 단위로 흘리기 때문이다.
+ *
  * OSM 경로는 M3 그대로다. {@link searchPlaces}를 감싸지도, 인자를 바꾸지도 않는다:
  * 백엔드가 없는 배포에서는 이 길이 유일한 길이라 손대지 않는 것이 안전하다.
  */
@@ -24,6 +28,7 @@ import { AiError, aiEnabled } from '../ai/aiClient';
 import { aiSearchPlaces, type PlaceCandidate } from '../ai/aiPlaces';
 import type { GeoPoint } from '../types/models';
 import { searchPlaces } from '../utils/geo';
+import { refineCandidates } from './refine';
 
 /** 결과가 어디서 왔는지. */
 export type PlaceSource = 'ai' | 'osm';
@@ -121,4 +126,26 @@ export async function searchPlacesSmart(
     reason,
     ...(note ? { note } : {}),
   };
+}
+
+/**
+ * 화면이 부르는 것 (M35) — {@link searchPlacesSmart} + 좌표 보정.
+ *
+ * 경로 선택은 위 함수가 그대로 하고, 여기서는 그 결과가 **AI에서 온 것일 때만**
+ * 한 걸음을 더 얹는다: 후보의 현지 표기로 Nominatim에 물어 좌표를 조인다
+ * (`map/refine.ts`). OSM 결과는 이미 OSM 좌표라 손댈 것이 없다.
+ *
+ * 둘을 한 함수로 합치지 않은 이유는 규칙이 서로 다르기 때문이다 — 「어디에서
+ * 찾을까」와 「찾은 좌표를 믿을까」는 따로 읽히고 따로 시험된다.
+ */
+export async function searchPlacesRefined(
+  query: string,
+  options: SmartSearchOptions = {},
+): Promise<SmartSearchResult> {
+  const found = await searchPlacesSmart(query, options);
+  if (found.source !== 'ai' || found.results.length === 0) return found;
+
+  const osmSearch = options.deps?.osmSearch ?? DEFAULT_DEPS.osmSearch;
+  const results = await refineCandidates(found.results, { osmSearch, signal: options.signal });
+  return { ...found, results };
 }

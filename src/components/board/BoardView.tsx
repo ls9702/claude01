@@ -281,6 +281,8 @@ export default function BoardView() {
   };
 
   const columnNameOf = (columnId: string) => workspace.columns[columnId]?.name ?? '';
+  /** 카드 시트의 「위치 확인」 핀이 그 카테고리 색·아이콘을 쓰도록 (M35). */
+  const columnOf = (columnId: string) => workspace.columns[columnId];
 
   return (
     <section data-testid="view-board" aria-labelledby="view-board-title" className="shrink-0">
@@ -419,6 +421,8 @@ export default function BoardView() {
       {dialog?.kind === 'card-create' ? (
         <CardEditSheet
           columnName={dialog.column.name}
+          columnColor={dialog.column.color}
+          columnIcon={dialog.column.icon}
           tripDestination={trip.destination}
           onSubmit={submitCard}
           onClose={() => setDialog(null)}
@@ -429,6 +433,8 @@ export default function BoardView() {
         <CardEditSheet
           card={dialog.card}
           columnName={columnNameOf(dialog.card.columnId)}
+          columnColor={columnOf(dialog.card.columnId)?.color}
+          columnIcon={columnOf(dialog.card.columnId)?.icon}
           currency={trip.currency}
           tripDestination={trip.destination}
           localCurrency={trip.localCurrency}

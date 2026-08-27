@@ -4,6 +4,7 @@ import { formatLatLng } from '../../utils/geo';
 import { MAX_AMOUNT, formatBudget, isValidBudget } from '../../utils/money';
 import { DURATION_PRESETS, formatDuration } from '../../utils/time';
 import { normalizeUrl } from '../../utils/url';
+import LocationPreview from '../map/LocationPreview';
 import PinPicker from '../map/PinPicker';
 import PlaceSearch from '../map/PlaceSearch';
 import CardLedger, { numberOrUndefined, type LocalMoney } from '../common/CardLedger';
@@ -33,14 +34,28 @@ export interface CardFormValues {
   defaultDurationMin?: number;
 }
 
-/** Which location picker is open on top of the sheet, if any. */
-type Picker = 'search' | 'pin' | null;
+/**
+ * Which location layer is open on top of the sheet, if any.
+ *
+ * `preview` is the odd one out: it is the only one that cannot change the
+ * card's location (M35). It is here rather than beside it because all three
+ * open over the same sheet and only one of them may be up at a time.
+ */
+type Picker = 'search' | 'pin' | 'preview' | null;
 
 interface CardEditSheetProps extends LocalMoney {
   /** Absent → create mode. */
   card?: Card;
   /** Shown in the header so the user knows which category they are in. */
   columnName: string;
+  /**
+   * The category's colour token and emoji (M35).
+   *
+   * Only 「위치 확인」 uses them, and only to draw its one pin the way the 지도
+   * tab draws it. Absent → a neutral pin; nothing else in the sheet changes.
+   */
+  columnColor?: string;
+  columnIcon?: string;
   /** Trip currency, used by the 지출 기록 section. Defaults to `KRW`. */
   currency?: string;
   /** The trip's 목적지 (M12) — where 지도에서 선택 opens for an unplaced card. */
@@ -68,6 +83,8 @@ interface CardEditSheetProps extends LocalMoney {
 export default function CardEditSheet({
   card,
   columnName,
+  columnColor = 'slate',
+  columnIcon = '📍',
   currency = 'KRW',
   tripDestination,
   localCurrency,
@@ -322,6 +339,19 @@ export default function CardEditSheet({
                 <Icon name="pin" size={16} />
                 지도에서 선택
               </button>
+              {/* 「정말 여기인가」를 카드 안에서 (M35). 위치가 있을 때만 뜬다 —
+                  없는 자리를 보여 줄 수는 없다. */}
+              {location ? (
+                <button
+                  type="button"
+                  data-testid="location-preview-open"
+                  onClick={() => setPicker('preview')}
+                  className={CHIP_BUTTON}
+                >
+                  <Icon name="map" size={16} />
+                  위치 확인
+                </button>
+              ) : null}
               {location ? (
                 <button
                   type="button"
@@ -393,6 +423,18 @@ export default function CardEditSheet({
           // 유일한 단서다 (M28). OSM 경로는 이 값을 쓰지 않는다.
           destination={tripDestination?.address}
           onPick={setLocation}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
+
+      {/* 읽기 전용이라 `onPick`이 없다 — 이 층은 카드를 바꾸지 못한다. */}
+      {picker === 'preview' && location ? (
+        <LocationPreview
+          point={location}
+          color={columnColor}
+          icon={columnIcon}
+          cardId={card?.id ?? 'new-card'}
+          columnId={card?.columnId ?? 'new-column'}
           onClose={() => setPicker(null)}
         />
       ) : null}

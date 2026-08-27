@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAiEnabled } from '../../ai/aiSettings';
 import { toGeoPoint, type PlaceCandidate } from '../../ai/aiPlaces';
-import { searchPlacesSmart, type PlaceSource } from '../../map/placeSearch';
+import { searchPlacesRefined, type PlaceSource } from '../../map/placeSearch';
 import type { GeoPoint } from '../../types/models';
 import { SEARCH_COOLDOWN_MS, SEARCH_ERROR_MESSAGE } from '../../utils/geo';
 import { INLINE_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from '../common/formStyles';
@@ -26,7 +26,11 @@ type Status = 'idle' | 'loading' | 'done';
 /**
  * 장소 검색 — AI 먼저, 안 되면 OpenStreetMap (M28).
  *
- * 규칙은 전부 `map/placeSearch.searchPlacesSmart`에 있고, 이 파일은 그 결과를
+ * M35에서 AI 결과 줄은 좌표를 한 번 더 OSM에 맞춰 조인 뒤에 나온다. 조여진 줄에는
+ * 「✓ 지도 확인됨」이 조용히 붙는다 — 그 줄의 좌표가 모델의 기억이 아니라 지도가
+ * 아는 자리라는 뜻이다.
+ *
+ * 규칙은 전부 `map/placeSearch.searchPlacesRefined`에 있고, 이 파일은 그 결과를
  * 그리기만 한다. 화면에서 달라진 것은 두 가지다: 결과 줄이 현지 표기(通天閣)를
  * 같이 보여 주고, OSM으로 내려간 경우에만 한 줄로 그 사실을 알린다.
  *
@@ -87,7 +91,7 @@ export default function PlaceSearch({
     }, SEARCH_COOLDOWN_MS);
 
     try {
-      const found = await searchPlacesSmart(trimmed, {
+      const found = await searchPlacesRefined(trimmed, {
         destination,
         signal: controller.signal,
       });
@@ -192,6 +196,9 @@ export default function PlaceSearch({
                 data-index={index}
                 data-lat={place.lat}
                 data-lng={place.lng}
+                // 좌표를 OSM에 맞춰 조인 줄인지 (M35). 조이지 못한 줄은 모델의
+                // 기억 그대로라 한 블록쯤 어긋나 있을 수 있다.
+                data-refined={place.refined ? 'true' : 'false'}
                 onClick={() => {
                   // 화면에만 쓰는 현지 표기·지역은 여기서 떨어져 나간다 —
                   // 워크스페이스에 들어가는 것은 언제나 {lat,lng,address}뿐.
@@ -210,6 +217,11 @@ export default function PlaceSearch({
                   </span>
                 ) : null}
                 <span className="mt-1 block text-micro font-normal text-ink-faint">
+                  {/* 조용한 표시 하나 (M35). 자랑이 아니라 근거다 — 이 줄의
+                      좌표는 모델의 기억이 아니라 지도가 아는 자리다. */}
+                  {place.refined ? (
+                    <span data-testid="place-search-refined">✓ 지도 확인됨 · </span>
+                  ) : null}
                   {place.locality ? (
                     <span data-testid="place-search-locality">{place.locality} · </span>
                   ) : null}

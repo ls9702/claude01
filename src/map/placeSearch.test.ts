@@ -7,6 +7,7 @@ import {
   FALLBACK_NOTES,
   fallbackReasonFor,
   osmCandidate,
+  searchPlacesRefined,
   searchPlacesSmart,
   type SmartSearchDeps,
 } from './placeSearch';
@@ -190,6 +191,61 @@ describe('fallbackReasonFor', () => {
     expect(fallbackReasonFor(new AiError('parse'))).toBe('ai-error');
     expect(fallbackReasonFor(new Error('nope'))).toBe('ai-error');
     expect(fallbackReasonFor(undefined)).toBe('ai-error');
+  });
+});
+
+describe('searchPlacesRefined — AI 좌표 조이기 (M35)', () => {
+  /** 통천각에서 30m — 반경 안. */
+  const NEAR: GeoPoint = { lat: 34.6527, lng: 135.5064, address: '通天閣, 오사카' };
+
+  it('snaps AI coordinates onto the nearby OSM hit', async () => {
+    const result = await searchPlacesRefined('츠텐카쿠', {
+      deps: deps({ osmSearch: vi.fn(async () => [NEAR]) }),
+    });
+
+    expect(result.source).toBe('ai');
+    expect(result.results[0].lat).toBe(NEAR.lat);
+    expect(result.results[0].refined).toBe(true);
+    // 줄에 보이는 이름은 사용자가 찾은 그 이름 그대로다.
+    expect(result.results[0].name).toBe('통천각');
+  });
+
+  it('keeps the AI coordinates when the OSM hit is a city away', async () => {
+    const result = await searchPlacesRefined('츠텐카쿠', { deps: deps() });
+
+    expect(result.results).toEqual([AI_HIT]);
+    expect(result.results[0].refined).toBeUndefined();
+  });
+
+  it('keeps the AI coordinates, and the results, when the refine call fails', async () => {
+    const result = await searchPlacesRefined('츠텐카쿠', {
+      deps: deps({
+        osmSearch: async () => {
+          throw new Error(SEARCH_ERROR_MESSAGE);
+        },
+      }),
+    });
+
+    expect(result.source).toBe('ai');
+    expect(result.results).toEqual([AI_HIT]);
+  });
+
+  it('leaves the OSM path alone — those coordinates are already OSM', async () => {
+    const osmSearch = vi.fn(async () => [OSM_HIT]);
+    const result = await searchPlacesRefined('시부야', {
+      deps: deps({ isAiEnabled: () => false, osmSearch }),
+    });
+
+    expect(result.source).toBe('osm');
+    expect(osmSearch).toHaveBeenCalledTimes(1);
+    expect(result.results).toEqual([osmCandidate(OSM_HIT)]);
+  });
+
+  it('hands the abort signal to the refine requests too', async () => {
+    const osmSearch = vi.fn(async () => [NEAR]);
+    const signal = new AbortController().signal;
+    await searchPlacesRefined('츠텐카쿠', { signal, deps: deps({ osmSearch }) });
+    expect(osmSearch).toHaveBeenCalledWith('通天閣', signal);
   });
 });
 

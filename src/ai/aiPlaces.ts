@@ -51,6 +51,13 @@ export interface PlaceCandidate extends GeoPoint {
   localName?: string;
   /** 도시·동네 한 줄(오사카). */
   locality?: string;
+  /**
+   * 좌표를 OpenStreetMap에 맞춰 조였는지 (M35 — `map/refine.ts`).
+   *
+   * `localName`·`locality`와 같은 부류다: 결과 줄에만 사는 값이고 저장되지 않는다.
+   * 없거나 `false`면 좌표가 모델의 기억 그대로라는 뜻이다.
+   */
+  refined?: boolean;
 }
 
 /** 후보 하나를 저장 가능한 {@link GeoPoint}로 좁힌다. */

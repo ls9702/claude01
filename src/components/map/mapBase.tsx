@@ -69,10 +69,18 @@ export function cardPinIcon(
    * longer competing with the day being read.
    */
   dimmed = false,
+  /**
+   * 이 핀이 대는 이름표 (M35).
+   *
+   * 지도 탭의 핀은 계속 `map-marker`다 — 스펙 절반이 그 이름으로 핀을 센다.
+   * 카드 안의 「위치 확인」 미리보기는 자기 이름을 쓴다: 지도 위의 핀이 아니라
+   * 그 카드 하나를 보여 주는 그림이라, 같은 이름으로 세어지면 곤란하다.
+   */
+  testId = 'map-marker',
 ): DivIcon {
   const hex = colorHex(color);
   const html = [
-    `<div data-testid="map-marker" data-card-id="${escapeHtml(cardId)}"`,
+    `<div data-testid="${escapeHtml(testId)}" data-card-id="${escapeHtml(cardId)}"`,
     ` data-column-id="${escapeHtml(columnId)}"`,
     ` data-dimmed="${dimmed ? 'true' : 'false'}"`,
     ` style="width:${PIN_PX}px;height:${PIN_PX}px;background:${hex};border:2px solid #fff;`,

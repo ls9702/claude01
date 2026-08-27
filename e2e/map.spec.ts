@@ -614,3 +614,87 @@ test('검색 결과가 없으면 그렇게 알려준다', async ({ page }) => {
   await expect(page.getByTestId('place-search-empty')).toContainText('검색 결과가 없어요');
   await expect(page.getByTestId('card-location-address')).toHaveText('없음');
 });
+
+/**
+ * 「위치 확인」 — 카드 안에서 핀을 눈으로 확인한다 (M35).
+ *
+ * 그전까지 카드가 위치에 대해 보여 주던 것은 주소 한 줄뿐이라, 그게 맞는지 보려면
+ * 저장하고 지도 탭으로 건너가야 했다. 이 스펙이 지키는 것은 세 가지다: 위치가
+ * 있을 때만 뜬다 · 지도가 실제로 그려진다 · 그 창은 카드를 바꾸지 않는다.
+ */
+test('카드 안에서 위치를 지도로 확인할 수 있다', async ({ page }) => {
+  await stubNetwork(page);
+  await page.goto('/');
+  await createTrip(page, '도쿄 5일');
+  await addCard(page, 4, '시부야 스크램블');
+  await openCard(page, '시부야 스크램블');
+
+  // 위치가 없는 동안에는 확인할 것도 없다.
+  await expect(page.getByTestId('location-preview-open')).toHaveCount(0);
+
+  await pickFirstSearchResult(page);
+  await expect(page.getByTestId('location-preview-open')).toBeVisible();
+
+  await page.getByTestId('location-preview-open').click();
+  const preview = page.getByTestId('location-preview');
+  await expect(preview).toBeVisible();
+
+  // 시트 안의 지도도 제 크기를 재고 타일을 받아 온다.
+  const map = page.getByTestId('location-preview-map');
+  await expect(map).toHaveAttribute('data-ready', 'true');
+  await expect(map).toHaveAttribute('data-lat', '35.6595');
+  await expect.poll(() => preview.locator('.leaflet-tile').count()).toBeGreaterThan(0);
+
+  // 카테고리 핀 하나. 지도 탭의 핀과 이름이 달라서 서로 세어지지 않는다.
+  await expect(page.getByTestId('location-preview-pin')).toHaveCount(1);
+  await expect(page.getByTestId('map-marker')).toHaveCount(0);
+
+  await expect(page.getByTestId('location-preview-address')).toContainText(
+    '시부야 스크램블 교차로',
+  );
+  await expect(page.getByTestId('location-preview-gmaps')).toHaveAttribute(
+    'href',
+    'https://www.google.com/maps/search/?api=1&query=35.6595,139.7005',
+  );
+  await expect(page.getByTestId('location-preview-gmaps')).toHaveAttribute('target', '_blank');
+  await expect(page.getByTestId('location-preview-gmaps')).toHaveAttribute(
+    'rel',
+    'noopener noreferrer',
+  );
+
+  // 닫으면 카드 시트는 그대로 열려 있고, 위치도 그대로다 — 보기 전용이다.
+  await page.getByTestId('map-modal-close').click();
+  await expect(page.getByTestId('location-preview')).toHaveCount(0);
+  await expect(page.getByTestId('card-form')).toBeVisible();
+  await expect(page.getByTestId('card-location-address')).toHaveAttribute('data-lat', '35.6595');
+
+  // 위치를 지우면 확인 버튼도 같이 사라진다.
+  await page.getByTestId('card-location-clear').click();
+  await expect(page.getByTestId('location-preview-open')).toHaveCount(0);
+});
+
+test('폰 폭에서도 위치 확인 시트가 넘치지 않는다', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await stubNetwork(page);
+  await page.goto('/');
+  await createTrip(page, '도쿄 5일');
+  await addCard(page, 4, '시부야 스크램블');
+  await openCard(page, '시부야 스크램블');
+  await pickFirstSearchResult(page);
+
+  await page.getByTestId('location-preview-open').click();
+  await expect(page.getByTestId('location-preview-map')).toHaveAttribute('data-ready', 'true');
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+
+  const box = await page.getByTestId('location-preview-map').boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeLessThanOrEqual(390);
+  // 40vh — 손바닥 안에서도 한 블록이 보일 만큼은 된다.
+  expect(box!.height).toBeGreaterThan(200);
+
+  await expect(page.getByTestId('location-preview-gmaps')).toBeVisible();
+});

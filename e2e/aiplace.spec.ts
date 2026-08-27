@@ -164,8 +164,10 @@ test('AI가 켜져 있으면 프록시로 찾고, 현지 표기까지 보여준�
   expect(calls[0].prompt).toContain('여행지: 오사카시, 오사카부, 일본');
   expect(calls[0].schema).toBeTruthy();
   expect(calls[0].grounding).toBeUndefined();
-  // 목적지를 잡을 때 쓴 한 번 말고는 Nominatim에 가지 않았다.
-  expect(osmHits).toBe(1);
+  // 목적지를 잡을 때 한 번, 그리고 M35의 좌표 보정이 후보 둘에 두 번씩.
+  // 이 목의 Nominatim은 두 후보 모두에게 4km 넘게 떨어진 곳을 주므로 —
+  // 아래에서 보듯 — 좌표는 AI 것 그대로 남는다.
+  expect(osmHits).toBe(5);
 
   // 고르면 Nominatim 결과와 똑같이 카드 위치가 된다.
   await page.getByTestId('place-search-result').first().click();
@@ -179,6 +181,84 @@ test('AI가 켜져 있으면 프록시로 찾고, 현지 표기까지 보여준�
   await page.getByTestId('card-submit').click();
   await expect(page.getByTestId('card-form')).toHaveCount(0);
   await expect(page.getByTestId('card-chip-location')).toContainText('통천각');
+});
+
+/**
+ * M35 — AI 좌표를 OSM에 맞춰 조인다.
+ *
+ * 「通天閣」을 물었을 때 Nominatim이 AI가 말한 자리 바로 옆(30m)을 주면 그 좌표를
+ * 쓰고, 두 번째 후보처럼 도쿄를 주면 무시한다. 사용자가 신고한 증상(한 블록
+ * 어긋남)은 앞의 경우이고, 뒤의 경우까지 갈아끼우면 여행이 다른 나라로 간다.
+ */
+const TSUTENKAKU_OSM = [
+  {
+    place_id: 21,
+    lat: '34.6527',
+    lon: '135.5064',
+    display_name: '통천각, 나니와구, 오사카시, 일본',
+  },
+];
+
+/** 400km 밖 — 이름만 같고 자리는 다른 곳. */
+const SHIBUYA_OSM = [
+  {
+    place_id: 22,
+    lat: '35.6595',
+    lon: '139.7005',
+    display_name: '시부야 스크램블 교차로, 도쿄도, 일본',
+  },
+];
+
+test('AI 결과의 좌표를 근처 OSM 자리로 조여 준다', async ({ page }) => {
+  osmHits = 0;
+  await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+    osmHits += 1;
+    const query = new URL(route.request().url()).searchParams.get('q') ?? '';
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(query.includes('通天閣') ? TSUTENKAKU_OSM : SHIBUYA_OSM),
+    });
+  });
+  await page.route(/tile\.openstreetmap\.org/, (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }),
+  );
+
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+
+  await createTrip(page, '오사카 3박');
+  await configureSync(page);
+  await enableAi(page);
+
+  await addCard(page, '츠텐카쿠');
+  await searchFromCard(page, '츠텐카쿠');
+
+  const rows = page.getByTestId('place-search-result');
+  await expect(rows).toHaveCount(2);
+
+  // 첫 줄은 현지 표기로 물어본 한 번에 맞았다 — 좌표가 OSM 것으로 바뀌었다.
+  await expect(rows.first()).toHaveAttribute('data-refined', 'true');
+  await expect(rows.first()).toHaveAttribute('data-lat', '34.6527');
+  await expect(page.getByTestId('place-search-refined')).toHaveCount(1);
+  await expect(rows.first()).toContainText('지도 확인됨');
+  // 조여도 이름은 사용자가 찾은 그 이름이다.
+  await expect(rows.first()).toContainText('통천각');
+
+  // 둘째 줄은 400km 밖이라 손대지 않는다 — 목이 준 좌표를 그대로 쓰면 도쿄로 간다.
+  await expect(rows.nth(1)).toHaveAttribute('data-refined', 'false');
+  await expect(rows.nth(1)).toHaveAttribute('data-lat', '34.6519');
+
+  // 카드에 들어가는 것도 조여진 좌표다.
+  await rows.first().click();
+  await expect(page.getByTestId('place-search')).toHaveCount(0);
+  const address = page.getByTestId('card-location-address');
+  await expect(address).toHaveAttribute('data-lat', '34.6527');
+  await expect(address).toHaveAttribute('data-lng', '135.5064');
+  await expect(address).toContainText('통천각');
+
+  // 보정에 쓴 요청은 첫 후보 1건 + 둘째 후보 2건. 예산(6) 안이다.
+  expect(osmHits).toBe(3);
 });
 
 test('AI가 꺼져 있으면 예전처럼 OpenStreetMap으로 찾는다', async ({ page }) => {
