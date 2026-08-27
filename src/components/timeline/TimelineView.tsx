@@ -458,15 +458,24 @@ export default function TimelineView() {
    * 미배치 = no entry on the **active** sheet. A card placed on another sheet
    * is still up for grabs here, which is the whole point of several sheets.
    */
-  const unscheduledCards = useMemo<Card[]>(() => {
-    const placed = new Set<Id>();
+  const { unscheduledCards, scheduledTrayCards } = useMemo(() => {
+    const placedCount = new Map<Id, number>();
     const dayIds = new Set(days.map((day) => day.id));
     for (const entry of Object.values(workspace.entries)) {
-      if (dayIds.has(entry.dayId)) placed.add(entry.cardId);
+      if (dayIds.has(entry.dayId)) {
+        placedCount.set(entry.cardId, (placedCount.get(entry.cardId) ?? 0) + 1);
+      }
     }
-    return columns.flatMap((column) =>
-      (cardsByColumn[column.id] ?? []).filter((card) => !placed.has(card.id)),
-    );
+    const all = columns.flatMap((column) => cardsByColumn[column.id] ?? []);
+    return {
+      unscheduledCards: all.filter((card) => !placedCount.has(card.id)),
+      // 배치된 카드도 트레이에 남는다 (M33): 모바일에서는 트레이가 유일한 드래그
+      // 소스라, 여기서 사라지는 순간 「한 번 놓은 카드는 다시 놓을 수 없다」가
+      // 되어 버린다 — 사용자가 같은 이름의 카드를 또 만들던 바로 그 버그다.
+      scheduledTrayCards: all
+        .filter((card) => placedCount.has(card.id))
+        .map((card) => ({ card, count: placedCount.get(card.id) ?? 0 })),
+    };
   }, [columns, cardsByColumn, days, workspace.entries]);
 
   // The pager index must survive a day being deleted.
@@ -1103,6 +1112,7 @@ export default function TimelineView() {
             {!isDesktop ? (
               <UnscheduledTray
                 cards={unscheduledCards}
+                scheduled={scheduledTrayCards}
                 columns={columns}
                 currency={trip.currency}
                 onOpenCard={(card) => setDialog({ kind: 'schedule', card })}

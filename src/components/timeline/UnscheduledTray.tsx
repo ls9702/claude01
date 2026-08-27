@@ -14,6 +14,8 @@ interface TrayCardProps {
   currency: string;
   color: string;
   onOpen: (card: Card) => void;
+  /** Entries this card already has on the active sheet — 0 = 미배치 (M33). */
+  placedCount?: number;
 }
 
 /**
@@ -22,7 +24,7 @@ interface TrayCardProps {
  * exists. `useDraggable` rather than `useSortable` — the tray is a source, not
  * a sortable list.
  */
-function TrayCard({ card, currency, color, onOpen }: TrayCardProps) {
+function TrayCard({ card, currency, color, onOpen, placedCount = 0 }: TrayCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: card.id,
     data: { type: DND_CARD, columnId: card.columnId },
@@ -37,6 +39,7 @@ function TrayCard({ card, currency, color, onOpen }: TrayCardProps) {
       data-testid="tray-card"
       data-card-id={card.id}
       data-column-id={card.columnId}
+      data-placed={placedCount > 0 ? 'true' : undefined}
       // Touch scrolling of the strip must survive — including when the finger
       // lands *on* a card, which is most of the strip. The 250 ms long-press
       // is what separates a scroll from a lift, so the card only takes the
@@ -45,9 +48,18 @@ function TrayCard({ card, currency, color, onOpen }: TrayCardProps) {
       className={[
         'w-36 shrink-0 cursor-grab select-none outline-none focus-visible:ring-2 focus-visible:ring-line-strong',
         isDragging ? 'opacity-40' : '',
+        // 이미 배치된 카드는 반 톤 물러난다 — 다시 끌 수 있되, 아직 갈 곳이
+        // 없는 카드들 사이에서 목소리를 높이지는 않게 (M33).
+        !isDragging && placedCount > 0 ? 'opacity-60' : '',
       ].join(' ')}
     >
-      <CardSurface card={card} currency={currency} color={color} terse />
+      <CardSurface
+        card={card}
+        currency={currency}
+        color={color}
+        terse
+        scheduledCount={placedCount}
+      />
     </div>
   );
 }
@@ -55,6 +67,15 @@ function TrayCard({ card, currency, color, onOpen }: TrayCardProps) {
 interface UnscheduledTrayProps {
   /** Cards with no entry on the **active** sheet, in board order. */
   cards: readonly Card[];
+  /**
+   * Cards that **do** have entries on the active sheet, with how many (M33).
+   *
+   * They stay in the tray, dimmed, after the 미배치 ones: on a phone this strip
+   * is the only drag source, and a card that vanished on first placement could
+   * never be placed a second time — users worked around it by cloning the card
+   * under a similar name, which is exactly the report that created this prop.
+   */
+  scheduled: readonly { card: Card; count: number }[];
   columns: readonly BoardColumn[];
   currency: string;
   /** Tap-to-schedule fallback — opens {@link ScheduleSheet}. */
@@ -75,6 +96,7 @@ interface UnscheduledTrayProps {
  */
 export default function UnscheduledTray({
   cards,
+  scheduled,
   columns,
   currency,
   onOpenCard,
@@ -88,14 +110,21 @@ export default function UnscheduledTray({
     return map;
   }, [columns]);
 
-  /** Only categories that actually have a 미배치 card get a chip. */
+  /** Only categories that actually have a card in the tray get a chip. */
   const chips = useMemo(
-    () => columns.filter((column) => cards.some((card) => card.columnId === column.id)),
-    [columns, cards],
+    () =>
+      columns.filter(
+        (column) =>
+          cards.some((card) => card.columnId === column.id) ||
+          scheduled.some(({ card }) => card.columnId === column.id),
+      ),
+    [columns, cards, scheduled],
   );
 
   const visible =
     filter === 'all' ? cards : cards.filter((card) => card.columnId === filter);
+  const visibleScheduled =
+    filter === 'all' ? scheduled : scheduled.filter(({ card }) => card.columnId === filter);
 
   return (
     <div
@@ -129,7 +158,7 @@ export default function UnscheduledTray({
       </button>
 
       {open ? (
-        cards.length === 0 ? (
+        cards.length === 0 && scheduled.length === 0 ? (
           <p data-testid="tray-empty" className="px-4 pb-3 text-label font-normal text-ink-faint">
             모든 카드를 이 시트에 배치했어요.
           </p>
@@ -164,7 +193,7 @@ export default function UnscheduledTray({
 
             <div
               data-testid="tray-strip"
-              className="flex max-h-[38dvh] gap-2 overflow-x-auto px-4 pb-3"
+              className="flex max-h-[38dvh] items-stretch gap-2 overflow-x-auto px-4 pb-3"
             >
               {visible.map((card) => (
                 <TrayCard
@@ -173,6 +202,23 @@ export default function UnscheduledTray({
                   currency={currency}
                   color={colorOf[card.columnId] ?? 'slate'}
                   onOpen={onOpenCard}
+                />
+              ))}
+
+              {/* 이미 배치된 카드들 — 미배치 뒤에, 반 톤 낮게, 📅 배지째로.
+                  같은 카드를 또 끌면 항목이 하나 더 놓인다 (규카츠 4번의 그
+                  동작이 이제 폰에서도 된다, M33). */}
+              {visible.length > 0 && visibleScheduled.length > 0 ? (
+                <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-line" />
+              ) : null}
+              {visibleScheduled.map(({ card, count }) => (
+                <TrayCard
+                  key={card.id}
+                  card={card}
+                  currency={currency}
+                  color={colorOf[card.columnId] ?? 'slate'}
+                  onOpen={onOpenCard}
+                  placedCount={count}
                 />
               ))}
             </div>

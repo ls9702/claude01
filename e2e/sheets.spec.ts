@@ -285,6 +285,16 @@ test.describe('모바일', () => {
     await expect(page.getByTestId('timeline-entry')).toHaveCount(1);
     // Placed on the active sheet → out of the tray.
     await expect(tray.getByTestId('tray-count')).toHaveAttribute('data-count', '0');
+
+    // M33: 미배치 수에서는 빠지지만 **트레이에서 사라지지는 않는다** — 반 톤
+    // 낮게 남아 같은 카드를 한 번 더 놓을 수 있다. 이게 사라지면 폰에서는
+    // 재배치할 길이 없어서, 같은 이름의 카드를 또 만들게 된다(실사용 리포트).
+    await expect(tray.getByTestId('tray-card')).toHaveCount(1);
+    await expect(tray.getByTestId('tray-card')).toHaveAttribute('data-placed', 'true');
+    await tray.getByTestId('tray-card').first().click();
+    await expect(page.getByTestId('schedule-sheet')).toBeVisible();
+    await page.getByTestId('schedule-submit').click();
+    await expect(page.getByTestId('timeline-entry')).toHaveCount(2);
   });
 
   /**
