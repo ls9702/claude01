@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PlanDndContext from '../../dnd/PlanDndContext';
 import { useIsDesktop, useMediaQuery } from '../../hooks/useMediaQuery';
 import { useNowTick } from '../../hooks/useNowTick';
+import { deleteEntryWithUndo } from '../../stores/entryDelete';
 import { deleteWithUndo } from '../../stores/undoDelete';
-import { useUndoStore } from '../../stores/undoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useTimelineChromeStore } from '../../stores/timelineChrome';
 import { FIRST_SHEET_NAME, useWorkspaceStore } from '../../stores/workspaceStore';
@@ -150,15 +150,11 @@ export default function TimelineView() {
   const deleteSheet = useWorkspaceStore((s) => s.deleteSheet);
   const addDay = useWorkspaceStore((s) => s.addDay);
   const deleteDay = useWorkspaceStore((s) => s.deleteDay);
-  const deleteEntry = useWorkspaceStore((s) => s.deleteEntry);
-  const scheduleCard = useWorkspaceStore((s) => s.scheduleCard);
-  const updateEntry = useWorkspaceStore((s) => s.updateEntry);
 
   const activeTripId = useUiStore((s) => s.activeTripId);
   const activeSheetId = useUiStore((s) => s.activeSheetId);
   const setActiveSheet = useUiStore((s) => s.setActiveSheet);
   const setTab = useUiStore((s) => s.setTab);
-  const offer = useUndoStore((s) => s.offer);
 
   const isDesktop = useIsDesktop();
 
@@ -591,16 +587,16 @@ export default function TimelineView() {
       ? sheet
       : undefined;
 
-  /** Deletes an entry and offers to put an identical one back. */
+  /**
+   * Deletes an entry and offers to put an identical one back.
+   *
+   * The doing of it moved to `stores/entryDelete` in M34, because the 휴지통 a
+   * drag summons has to delete the *same* way this sheet does — same sentence,
+   * same undo, same untouched card.
+   */
   const removeEntry = (entry: TimelineEntry) => {
-    const { cardId, dayId, startMin, durationMin, note } = entry;
-    const title = workspace.cards[cardId]?.title ?? '일정';
-    deleteEntry(entry.id);
+    deleteEntryWithUndo(entry);
     setDialog(null);
-    offer(`'${title}' 삭제됨`, () => {
-      const restored = scheduleCard(cardId, dayId, startMin, durationMin);
-      if (restored && note) updateEntry(restored, { note });
-    });
   };
 
   /**

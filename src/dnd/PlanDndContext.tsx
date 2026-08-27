@@ -21,6 +21,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import { deleteEntryWithUndo } from '../stores/entryDelete';
 import { useUndoStore } from '../stores/undoStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import type { BoardColumn, Id, Trip, Workspace } from '../types/models';
@@ -29,8 +30,14 @@ import { DAY_COLUMN_PX, PX_PER_MIN } from '../timeline/layout';
 import { yToMin } from '../utils/time';
 import { CardSurface } from '../components/board/CardItem';
 import { EntryGhost } from '../components/timeline/EntryBlock';
+import EntryTrash from '../components/timeline/EntryTrash';
 import { resolveBoardDrop, snapshotBoard } from './boardDnd';
-import { parseDayDroppableId, parseEntryDraggableId } from './planDnd';
+import {
+  parseDayDroppableId,
+  parseEntryDraggableId,
+  planPointerPriority,
+  resolveEntryDrop,
+} from './planDnd';
 
 /* ------------------------------------------------------------------ *
  * Day-grid registry — lets a DayColumn hand its element to the context
@@ -69,12 +76,16 @@ function activatorClientY(activatorEvent: Event | null): number | null {
 }
 
 /**
- * Day columns win over board columns whenever the pointer is inside one; the
- * board keeps M1's `closestCorners` behaviour everywhere else, so card
- * sorting inside the rail feels exactly like the 보드 tab.
+ * 휴지통 wins over day columns, and day columns win over board columns,
+ * whenever the pointer is inside one; the board keeps M1's `closestCorners`
+ * behaviour everywhere else, so card sorting inside the rail feels exactly like
+ * the 보드 tab.
+ *
+ * The ranking itself lives in {@link planPointerPriority} — see there for why
+ * 휴지통 has to be named first rather than left to the hit-test order.
  */
 const planCollisionDetection: CollisionDetection = (args) => {
-  const hits = pointerWithin(args).filter((hit) => parseDayDroppableId(String(hit.id)) !== null);
+  const hits = planPointerPriority(pointerWithin(args), (hit) => String(hit.id));
   return hits.length > 0 ? hits : closestCorners(args);
 };
 
@@ -200,6 +211,17 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
     const entryId = parseEntryDraggableId(active);
     if (entryId) {
       const entry = workspace.entries[entryId];
+      const drop = resolveEntryDrop(over);
+
+      // 휴지통 (M34) — before any geometry: this drop is not a placement, so
+      // the minute under the pointer is nothing to it. The card stays on the
+      // board; only this placement goes, and 실행 취소 puts an identical one
+      // back (see `deleteEntryWithUndo`).
+      if (drop.kind === 'trash') {
+        if (entry) deleteEntryWithUndo(entry);
+        return;
+      }
+
       const grid = dayId ? grids.current.get(dayId) : undefined;
       if (!entry || !dayId || !grid || clientY == null) return;
       const top = clientY - (grabOffset ?? 0) - grid.getBoundingClientRect().top;
@@ -263,6 +285,12 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
         onDragCancel={() => setActiveId(null)}
       >
         {children}
+
+        {/* Only while an **entry** is in the air (M34): a card being placed for
+            the first time has nothing to take off the schedule yet, so the bar
+            would be an offer with nothing behind it. Mounted here, at the top
+            of the context, so it floats over the grid instead of moving it. */}
+        {draggingEntry ? <EntryTrash /> : null}
 
         <DragOverlay dropAnimation={null}>
           {draggingEntry && ghostCard ? (
