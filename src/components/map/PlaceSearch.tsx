@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAiEnabled } from '../../ai/aiSettings';
 import { toGeoPoint, type PlaceCandidate } from '../../ai/aiPlaces';
+import { parseCoordInput, SHORT_LINK_HINT } from '../../map/coordInput';
 import { searchPlacesRefined, type PlaceSource } from '../../map/placeSearch';
 import type { GeoPoint } from '../../types/models';
-import { SEARCH_COOLDOWN_MS, SEARCH_ERROR_MESSAGE } from '../../utils/geo';
+import { SEARCH_COOLDOWN_MS, SEARCH_ERROR_MESSAGE, formatLatLng, pinAddress } from '../../utils/geo';
 import { INLINE_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from '../common/formStyles';
 import MapModal from './MapModal';
 
@@ -37,6 +38,11 @@ type Status = 'idle' | 'loading' | 'done';
  * 여전히 **submit-only**다: OSM 경로는 M3 그대로 초당 1건 정책 아래 있고, AI
  * 경로는 한 번에 2~4초·분당 20건짜리 퓨즈 아래 있다. 둘 다 타이핑마다 부를
  * 것이 못 된다. 검색 버튼은 요청 후 {@link SEARCH_COOLDOWN_MS} 동안 잠긴다.
+ *
+ * M37에서 **엔진을 통째로 건너뛰는 길** 하나가 생겼다(`map/coordInput.ts`): 입력이
+ * 좌표이거나 구글 지도 링크이면 이미 답이 손에 있다는 뜻이므로, 아무에게도 묻지
+ * 않고 그 자리를 줄 하나로 내놓는다. 이름으로 다시 찾는 것은 틀릴 기회를 한 번 더
+ * 주는 것이다. 이 길은 요청을 하나도 쓰지 않아서 타이핑마다 판정해도 안전하다.
  */
 export default function PlaceSearch({
   initialQuery = '',
@@ -70,7 +76,16 @@ export default function PlaceSearch({
 
   const trimmed = query.trim();
   const busy = status === 'loading';
-  const canSearch = trimmed.length > 0 && !busy && !cooling;
+  /**
+   * 지금 입력이 좌표(또는 펼칠 수 없는 단축 링크)인가 (M37).
+   *
+   * 순수 함수 한 번이라 타이핑마다 돌아도 공짜다. 값이 있으면 이 화면은 검색
+   * 화면이 아니라 **확인 화면**이 된다: 검색 버튼은 잠기고, 지난 검색의 결과·안내는
+   * 물러나고, 붙여넣은 그 자리 한 줄만 남는다.
+   */
+  const coord = useMemo(() => parseCoordInput(query), [query]);
+  const direct = coord !== null;
+  const canSearch = trimmed.length > 0 && !busy && !cooling && !direct;
 
   const submit = async () => {
     if (!canSearch) return;
@@ -142,10 +157,48 @@ export default function PlaceSearch({
             ? 'AI가 먼저 찾고, 못 찾으면 OpenStreetMap(Nominatim)에서 찾아요. 검색 버튼을 눌러야 요청해요.'
             : 'OpenStreetMap(Nominatim)에서 찾아요. 검색 버튼을 눌러야 요청해요.'}
         </p>
+        {/* 있는 줄을 고치지 않고 한 줄을 더한다 (M37) — 이건 다른 이야기다. */}
+        <p
+          data-testid="place-search-paste-hint"
+          className="text-micro font-normal text-ink-faint"
+        >
+          구글 지도의 주소나 「위도, 경도」를 붙여넣으면 그 자리를 그대로 써요.
+        </p>
       </form>
 
+      {/* 붙여넣은 좌표 한 줄 (M37). 요청은 하나도 나가지 않았다 — 이 줄의 자리는
+          사용자가 가져온 것이고, 우리가 할 일은 그대로 꽂아 주는 것뿐이다. */}
+      {coord?.kind === 'coords' ? (
+        <button
+          type="button"
+          data-testid="place-search-coord"
+          data-lat={coord.lat}
+          data-lng={coord.lng}
+          onClick={() => {
+            onPick({ lat: coord.lat, lng: coord.lng, address: pinAddress(coord.lat, coord.lng) });
+            onClose();
+          }}
+          className="mt-3 w-full rounded-md border border-line bg-surface px-3 py-3 text-left transition-colors duration-[140ms] ease-quick hover:border-line-strong hover:bg-sunken"
+        >
+          <span className="block text-label text-ink">좌표로 지정</span>
+          <span className="mt-1 block text-micro font-normal tabular-nums text-ink-faint">
+            {formatLatLng(coord.lat, coord.lng)}
+          </span>
+        </button>
+      ) : null}
+
+      {/* 단축 링크는 여기서 펼칠 수 없다. 조용히 못 찾는 대신 그렇게 말한다. */}
+      {coord?.kind === 'short-link' ? (
+        <p
+          data-testid="place-search-shortlink"
+          className="mt-3 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-muted"
+        >
+          {SHORT_LINK_HINT}
+        </p>
+      ) : null}
+
       {/* AI 경로는 2~4초 걸린다. 버튼 하나만 바뀌면 멈춘 것처럼 보인다. */}
-      {busy ? (
+      {busy && !direct ? (
         <p
           data-testid="place-search-busy"
           className="mt-3 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-muted"
@@ -154,7 +207,7 @@ export default function PlaceSearch({
         </p>
       ) : null}
 
-      {error ? (
+      {error && !direct ? (
         <p
           data-testid="place-search-error"
           role="alert"
@@ -164,7 +217,7 @@ export default function PlaceSearch({
         </p>
       ) : null}
 
-      {note && !error ? (
+      {note && !error && !direct ? (
         <p
           data-testid="place-search-note"
           className="mt-3 text-micro font-normal text-ink-faint"
@@ -173,7 +226,7 @@ export default function PlaceSearch({
         </p>
       ) : null}
 
-      {status === 'done' && !error && results.length === 0 ? (
+      {status === 'done' && !error && results.length === 0 && !direct ? (
         <p
           data-testid="place-search-empty"
           className="mt-3 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-faint"
@@ -182,7 +235,7 @@ export default function PlaceSearch({
         </p>
       ) : null}
 
-      {results.length > 0 ? (
+      {results.length > 0 && !direct ? (
         <ul
           data-testid="place-search-results"
           data-source={source}
@@ -199,6 +252,9 @@ export default function PlaceSearch({
                 // 좌표를 OSM에 맞춰 조인 줄인지 (M35). 조이지 못한 줄은 모델의
                 // 기억 그대로라 한 블록쯤 어긋나 있을 수 있다.
                 data-refined={place.refined ? 'true' : 'false'}
+                // 이름으로 조였는지 주소로 조였는지 (M37). 화면에는 어느 쪽도
+                // 「✓ 지도 확인됨」 한 마디로만 보인다.
+                data-refined-by={place.refinedBy}
                 onClick={() => {
                   // 화면에만 쓰는 현지 표기·지역은 여기서 떨어져 나간다 —
                   // 워크스페이스에 들어가는 것은 언제나 {lat,lng,address}뿐.

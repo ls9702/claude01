@@ -74,6 +74,16 @@ export const AUDIT_MAX_CANDIDATES = 3;
  */
 export const AUDIT_REFINE_QUERIES = 3;
 
+/**
+ * 카드 하나가 주소 경유 스냅(M37)에 쓸 수 있는 grounded 호출 수.
+ *
+ * 검색창은 앞의 두 후보에 그 계단을 허락하지만(`ADDRESS_FALLBACK_CANDIDATES`),
+ * 여기서는 **가장 앞 후보 하나**다. 카드 서른 장이 순차로 도는 길이고 grounded
+ * 호출은 2~8초라, 후보마다 붙이면 훑기가 분 단위로 늘어지고 분당 20건 퓨즈가
+ * 중간에 터진다. 한 장당 한 번이면 서른 장이 여전히 퓨즈 안이다.
+ */
+export const AUDIT_ADDRESS_CANDIDATES = 1;
+
 /** 카드 한 줄의 판정. */
 export type AuditStatus =
   /** OSM이 확인해 준 다른 자리가 있고, 옮길 만큼 멀다 — 유일하게 적용되는 줄. */
@@ -274,12 +284,19 @@ export function restoreSnapshot(
  * 제안 만들기 — M35 기계를 그대로 돌린다
  * ------------------------------------------------------------------ */
 
-/** {@link proposeLocation}이 갈아끼울 수 있는 두 개. */
+/** {@link proposeLocation}이 갈아끼울 수 있는 것들. */
 export interface ProposeDeps {
   /** 실제로는 `ai/aiPlaces.aiSearchPlaces`. */
   aiSearch: (query: string, hint?: string) => Promise<PlaceCandidate[]>;
   /** 실제로는 `utils/geo.searchPlaces`. */
   osmSearch: (query: string, signal?: AbortSignal) => Promise<GeoPoint[]>;
+  /**
+   * 실제로는 `ai/aiPlaces.aiPlaceAddress` (M37).
+   *
+   * 없으면 주소 경유 계단 없이 M36 그대로 돈다 — 이름으로 확인되지 않는 카드는
+   * 「제안 없음」이 된다.
+   */
+  aiAddress?: (candidate: PlaceCandidate) => Promise<string | null>;
 }
 
 /** {@link proposeLocation}이 받는 것. */
@@ -303,8 +320,16 @@ export interface ProposeOptions extends ProposeDeps {
  *    찍힌 좌표」를 고치는 것인데, 그 자리에 또 다른 기억을 넣으면 아무것도 나아지지
  *    않는다.
  *
+ * M37의 주소 경유 계단은 **그대로 따라 들어온다**. 검색창과 같은 기계를 부르므로
+ * 이름으로 확인되지 않는 카드(=OSM에 없는 작은 가게)도 주소로 한 번 더 확인되고,
+ * 그렇게 확인된 좌표는 위의 셋째 규칙을 통과한다 — `refined`가 붙어 있으니까.
+ * 다른 것은 예산뿐이다: 카드 한 장에 grounded 호출은 {@link AUDIT_ADDRESS_CANDIDATES}번.
+ *
  * 던지는 것은 AI 쪽 실패(`AiError`)와 취소(`AbortError`)뿐이다 — 둘 다
- * {@link scanAudit}이 받아 준다.
+ * {@link scanAudit}이 받아 준다. 주소 되묻기의 실패도 그중 **훑기를 멈춰야 할
+ * 것만**({@link isFatalScanError}) 밖으로 내보낸다. `refineCandidates`는 이 계단의
+ * 실패를 조용히 삼키도록 되어 있는데(검색창에서는 그게 맞다), 카드 서른 장을 도는
+ * 자리에서 429를 삼키면 남은 카드가 전부 같은 벽에 8초씩 부딪친다.
  */
 export async function proposeLocation(
   target: AuditTarget,
@@ -316,11 +341,29 @@ export async function proposeLocation(
   const found = await options.aiSearch(query, target.hint);
   if (found.length === 0) return null;
 
+  const { aiAddress } = options;
+  /** 삼켜진 실패 중 훑기를 멈춰야 할 것 — 아래에서 다시 던진다. */
+  let fatal: unknown = null;
+
   const refined = await refineCandidates(found.slice(0, AUDIT_MAX_CANDIDATES), {
     osmSearch: options.osmSearch,
     signal: options.signal,
     maxQueries: AUDIT_REFINE_QUERIES,
+    maxAddressCandidates: AUDIT_ADDRESS_CANDIDATES,
+    ...(aiAddress
+      ? {
+          askAddress: async (candidate: PlaceCandidate) => {
+            try {
+              return await aiAddress(candidate);
+            } catch (failure) {
+              if (isFatalScanError(failure)) fatal = failure;
+              throw failure;
+            }
+          },
+        }
+      : {}),
   });
+  if (fatal) throw fatal;
 
   return nearestCandidate(
     target.from,

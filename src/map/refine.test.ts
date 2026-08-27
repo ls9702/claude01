@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { AiError } from '../ai/aiClient';
 import type { PlaceCandidate } from '../ai/aiPlaces';
 import type { GeoPoint } from '../types/models';
 import { SEARCH_ERROR_MESSAGE } from '../utils/geo';
 import {
+  ADDRESS_FALLBACK_CANDIDATES,
   MAX_REFINE_QUERIES,
   REFINE_RADIUS_KM,
   haversineKm,
@@ -249,6 +251,209 @@ describe('refineCandidates — 목록 다루기', () => {
 
     await refineCandidates(many, { osmSearch });
     expect(osmSearch.mock.calls.length).toBeLessThanOrEqual(MAX_REFINE_QUERIES);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 주소 경유 스냅 (M37)
+ * ------------------------------------------------------------------ */
+
+describe('refineCandidates — 이름으로 못 찾으면 주소로 (M37)', () => {
+  /** OSM의 POI 색인에 없는 작은 체인점 — 이 계단이 존재하는 이유. */
+  const IPPUDO: PlaceCandidate = {
+    name: '잇푸도 난바점',
+    localName: '一風堂 なんば店',
+    locality: '오사카',
+    lat: 34.6659,
+    lng: 135.5013,
+  };
+
+  /** 그 가게가 든 건물 — 이름으로는 못 찾아도 번지로는 찾힌다. 300m쯤 옆. */
+  const BUILDING: GeoPoint = {
+    lat: 34.6632,
+    lng: 135.5009,
+    address: '大阪府大阪市中央区難波1-4-16',
+  };
+
+  const ADDRESS = '大阪府大阪市中央区難波1-4-16';
+
+  /** 이름은 모르고 주소만 아는 Nominatim. */
+  const osmKnowsOnlyTheAddress = () =>
+    vi.fn(async (query: string) => (query === ADDRESS ? [BUILDING] : []));
+
+  it('asks for an address only after every name query has missed', async () => {
+    const osmSearch = osmKnowsOnlyTheAddress();
+    const askAddress = vi.fn(async () => ADDRESS);
+
+    const [row] = await refineCandidates([IPPUDO], { osmSearch, askAddress });
+
+    expect(osmSearch).toHaveBeenNthCalledWith(1, '一風堂 なんば店', undefined);
+    expect(osmSearch).toHaveBeenNthCalledWith(2, '一風堂 なんば店, 오사카', undefined);
+    // 그다음에야 주소를 물었고, 그 주소로 한 번 더 물었다.
+    expect(askAddress).toHaveBeenCalledTimes(1);
+    expect(askAddress).toHaveBeenCalledWith(IPPUDO);
+    expect(osmSearch).toHaveBeenNthCalledWith(3, ADDRESS, undefined);
+    expect(row.lat).toBe(BUILDING.lat);
+    expect(row.lng).toBe(BUILDING.lng);
+    expect(row.refined).toBe(true);
+    expect(row.refinedBy).toBe('address');
+    // 바뀐 것은 좌표 두 칸뿐 — 줄에 보이는 이름도 주소도 그대로다.
+    expect(row.name).toBe('잇푸도 난바점');
+    expect(row.localName).toBe('一風堂 なんば店');
+  });
+
+  it('never asks when the name already hit', async () => {
+    const askAddress = vi.fn(async () => ADDRESS);
+    const [row] = await refineCandidates([TSUTENKAKU], {
+      osmSearch: async () => [NEAR],
+      askAddress,
+    });
+
+    expect(askAddress).not.toHaveBeenCalled();
+    expect(row.refinedBy).toBe('name');
+  });
+
+  it('keeps the AI coordinates when the address lands in another city', async () => {
+    const osmSearch = vi.fn(async (query: string) => (query === ADDRESS ? [FAR] : []));
+    const [row] = await refineCandidates([IPPUDO], { osmSearch, askAddress: async () => ADDRESS });
+
+    // 같은 3km 반경이 여기서도 마지막 벽이다 — 주소를 잘못 짚어도 도쿄로 가지 않는다.
+    expect(row.lat).toBe(IPPUDO.lat);
+    expect(row.lng).toBe(IPPUDO.lng);
+    expect(row.refined).toBeUndefined();
+  });
+
+  it('keeps the AI coordinates when the address geocodes to nothing', async () => {
+    const [row] = await refineCandidates([IPPUDO], {
+      osmSearch: async () => [],
+      askAddress: async () => ADDRESS,
+    });
+    expect(row).toEqual(IPPUDO);
+  });
+
+  it('keeps the AI coordinates, silently, when the grounded ask fails', async () => {
+    const osmSearch = osmKnowsOnlyTheAddress();
+    const [row] = await refineCandidates([IPPUDO], {
+      osmSearch,
+      askAddress: async () => {
+        throw new AiError('rate');
+      },
+    });
+
+    expect(row).toEqual(IPPUDO);
+    // 물어보지 못한 주소를 지오코딩하지도 않았다.
+    expect(osmSearch).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the AI coordinates when the model has no address to give', async () => {
+    const askAddress = vi.fn(async () => null);
+    const [row] = await refineCandidates([IPPUDO], {
+      osmSearch: osmKnowsOnlyTheAddress(),
+      askAddress,
+    });
+    expect(row).toEqual(IPPUDO);
+    expect(askAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up on the rest of the list after one grounded failure', async () => {
+    const askAddress = vi.fn(async () => {
+      throw new AiError('rate');
+    });
+    const rows = await refineCandidates([IPPUDO, { ...IPPUDO, name: '잇푸도 우메다점' }], {
+      osmSearch: async () => [],
+      askAddress,
+      maxQueries: 20,
+    });
+
+    expect(rows).toHaveLength(2);
+    // 429는 다음 후보에게도 429다. 8초를 한 번 더 기다릴 이유가 없다.
+    expect(askAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets an abort through instead of swallowing it', async () => {
+    await expect(
+      refineCandidates([IPPUDO], {
+        osmSearch: async () => [],
+        askAddress: async () => {
+          throw new DOMException('aborted', 'AbortError');
+        },
+      }),
+    ).rejects.toThrow(DOMException);
+  });
+
+  it('does not start a slow grounded call after the search was cancelled', async () => {
+    const controller = new AbortController();
+    const askAddress = vi.fn(async () => ADDRESS);
+    const osmSearch = vi.fn(async () => {
+      controller.abort();
+      return [];
+    });
+
+    await refineCandidates([IPPUDO], { osmSearch, askAddress, signal: controller.signal });
+    expect(askAddress).not.toHaveBeenCalled();
+  });
+});
+
+describe('refineCandidates — 주소 계단의 예산 (M37)', () => {
+  const missing = (index: number): PlaceCandidate => ({
+    name: `가게 ${index}`,
+    locality: '오사카',
+    lat: 34.6659,
+    lng: 135.5013,
+  });
+
+  it(`climbs it for the first ${ADDRESS_FALLBACK_CANDIDATES} candidates only`, async () => {
+    const askAddress = vi.fn(async (_candidate: PlaceCandidate): Promise<string | null> => null);
+    await refineCandidates(
+      Array.from({ length: 5 }, (_, index) => missing(index)),
+      { osmSearch: async () => [], askAddress, maxQueries: 100 },
+    );
+
+    expect(askAddress).toHaveBeenCalledTimes(ADDRESS_FALLBACK_CANDIDATES);
+    expect(askAddress.mock.calls.map(([row]) => row.name)).toEqual([
+      '가게 0',
+      '가게 1',
+    ]);
+  });
+
+  it('honours a caller-supplied candidate cap — the audit uses one per card', async () => {
+    const askAddress = vi.fn(async () => null);
+    await refineCandidates([missing(0), missing(1)], {
+      osmSearch: async () => [],
+      askAddress,
+      maxQueries: 100,
+      maxAddressCandidates: 1,
+    });
+    expect(askAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not make the slow call when there is no request left to geocode it', async () => {
+    const askAddress = vi.fn(async () => '大阪市中央区難波1-4-16');
+    const osmSearch = vi.fn(async () => []);
+
+    // 이름 질의 둘로 예산이 끝난다 — 주소를 받아도 넣을 곳이 없다.
+    await refineCandidates([missing(0)], { osmSearch, askAddress, maxQueries: 2 });
+
+    expect(osmSearch).toHaveBeenCalledTimes(2);
+    expect(askAddress).not.toHaveBeenCalled();
+  });
+
+  it('spends the default budget on the two names and the address', async () => {
+    const osmSearch = vi.fn(async () => []);
+    const askAddress = vi.fn(async () => '大阪市中央区難波1-4-16');
+
+    await refineCandidates([missing(0), missing(1), missing(2)], { osmSearch, askAddress });
+
+    // 후보 하나에 이름 2 + 주소 1 = 3건. 기본 예산 6은 딱 두 후보까지다.
+    expect(osmSearch).toHaveBeenCalledTimes(MAX_REFINE_QUERIES);
+    expect(askAddress).toHaveBeenCalledTimes(2);
+  });
+
+  it('stays out of the way entirely when no ask is wired up (M35 그대로)', async () => {
+    const osmSearch = vi.fn(async () => []);
+    const rows = await refineCandidates([missing(0)], { osmSearch });
+    expect(rows[0].refined).toBeUndefined();
+    expect(osmSearch).toHaveBeenCalledTimes(2);
   });
 });
 

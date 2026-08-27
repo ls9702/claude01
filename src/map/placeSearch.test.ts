@@ -28,6 +28,9 @@ function deps(overrides: Partial<SmartSearchDeps> = {}): Partial<SmartSearchDeps
     isAiEnabled: () => true,
     aiSearch: vi.fn(async () => [AI_HIT]),
     osmSearch: vi.fn(async () => [OSM_HIT]),
+    // 주소 되묻기(M37)의 기본값은 「모르겠다」다 — 이 파일의 관심사는 경로 선택이고,
+    // 그 계단 자체는 `refine.test.ts`가 시험한다.
+    aiAddress: vi.fn(async () => null),
     ...overrides,
   };
 }
@@ -246,6 +249,34 @@ describe('searchPlacesRefined — AI 좌표 조이기 (M35)', () => {
     const signal = new AbortController().signal;
     await searchPlacesRefined('츠텐카쿠', { signal, deps: deps({ osmSearch }) });
     expect(osmSearch).toHaveBeenCalledWith('通天閣', signal);
+  });
+
+  /* 주소 경유 계단이 이 화면까지 이어져 있는가 (M37). */
+
+  it('falls through to the address ask when the name finds nothing', async () => {
+    const address = '大阪府大阪市中央区難波1-4-16';
+    const aiAddress = vi.fn(async () => address);
+    const osmSearch = vi.fn(async (query: string) =>
+      query === address ? [{ lat: 34.6527, lng: 135.5064, address }] : [],
+    );
+
+    const result = await searchPlacesRefined('잇푸도 난바점', {
+      deps: deps({ osmSearch, aiAddress }),
+    });
+
+    expect(aiAddress).toHaveBeenCalledWith(AI_HIT);
+    expect(result.source).toBe('ai');
+    expect(result.results[0].lat).toBe(34.6527);
+    expect(result.results[0].refined).toBe(true);
+    expect(result.results[0].refinedBy).toBe('address');
+  });
+
+  it('never asks for an address on the OSM path — those coordinates are already OSM', async () => {
+    const aiAddress = vi.fn(async () => '大阪市中央区難波1-4-16');
+    await searchPlacesRefined('시부야', {
+      deps: deps({ isAiEnabled: () => false, aiAddress }),
+    });
+    expect(aiAddress).not.toHaveBeenCalled();
   });
 });
 

@@ -58,7 +58,18 @@ export interface PlaceCandidate extends GeoPoint {
    * 없거나 `false`면 좌표가 모델의 기억 그대로라는 뜻이다.
    */
   refined?: boolean;
+  /**
+   * 무엇으로 조였는지 (M37). `refined`가 참일 때만 있다.
+   *
+   * 화면에는 둘 다 「✓ 지도 확인됨」 한 마디로 보인다 — 사용자에게는 「지도가 아는
+   * 자리」라는 사실만 중요하고, 그 자리를 이름으로 찾았는지 주소로 찾았는지는
+   * 우리 사정이다. 구분해 두는 것은 테스트와 디버깅을 위해서다.
+   */
+  refinedBy?: RefinedBy;
 }
+
+/** 좌표를 조인 방법 — 후보의 이름으로 찾았나, 되물은 주소로 찾았나 (M37). */
+export type RefinedBy = 'name' | 'address';
 
 /** 후보 하나를 저장 가능한 {@link GeoPoint}로 좁힌다. */
 export function toGeoPoint(candidate: PlaceCandidate): GeoPoint {
@@ -266,4 +277,122 @@ export async function aiSearchPlaces(
     grounding: true,
   });
   return parsePlaceAnswer(grounded);
+}
+
+/* ------------------------------------------------------------------ *
+ * 주소 되묻기 (M37)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 주소 한 줄로 받아들일 최대 길이.
+ *
+ * 「大阪府大阪市中央区難波1-4-16」은 20자쯤이다. 이보다 서너 배 긴 답은 주소가
+ * 아니라 설명이고, 그런 문장을 Nominatim에 넣으면 아무것도 맞지 않는다.
+ */
+export const MAX_PLACE_ADDRESS = 120;
+
+/** 주소 답에 번지 숫자가 하나는 있어야 한다 — 반각·전각 둘 다 센다. */
+const HAS_DIGIT = /[0-9０-９]/;
+
+/** 목록 기호와 「주소:」·「Address:」 같은 머리표 — 앞에서부터 한 겹씩 벗긴다. */
+const ADDRESS_BULLET = /^\s*[-*•]\s*/;
+const ADDRESS_LABEL = /^\s*(?:주소|address|住所)\s*[:：]?\s*/i;
+
+/** 이 프롬프트를 알아보는 표시 — e2e의 목도 이 줄로 주소 질문을 가려낸다. */
+export const ADDRESS_PROMPT_MARKER = '주소 확인 장소:';
+
+/** 주소를 되물을 때의 상시 규칙. */
+export const ADDRESS_SYSTEM =
+  '당신은 장소의 정식 주소를 찾아 주는 도우미예요. 검색으로 확인한 주소만 답하고, ' +
+  '그 나라에서 실제로 쓰는 표기(일본이면 일본어, 한국이면 한국어)로 한 줄만 줘요. ' +
+  '확실하지 않으면 빈 문자열로 답해요 — 지어낸 주소는 없는 것만 못해요.';
+
+/**
+ * 「이 가게의 정식 주소가 뭔가요」를 묻는 프롬프트 (M37).
+ *
+ * 이름으로 물었을 때 OSM이 모르는 가게가 있다. 「一風堂 なんば店」 같은 작은
+ * 체인점은 OSM의 POI 색인에 아예 없어서 이름 스냅이 빈손으로 끝나고, 모델의
+ * 기억 좌표가 몇백 미터 어긋난 채 남는다 — 사용자가 신고한 바로 그 증상이다.
+ *
+ * 그런데 **주소는 다르다.** 건물·블록·번지는 OSM에 촘촘히 들어 있어서, 가게가
+ * 색인에 없어도 그 가게가 든 건물은 찍을 수 있다. 그래서 이 한 번은 좌표가 아니라
+ * **주소 문자열**을 물어본다. 좌표를 다시 물어봐야 같은 기억이 또 나올 뿐이다.
+ */
+export function buildAddressPrompt(candidate: PlaceCandidate): string {
+  const name = candidate.name?.trim() ?? '';
+  const local = candidate.localName?.trim() ?? '';
+  const locality = candidate.locality?.trim() ?? '';
+  if (name === '' && local === '') return '';
+
+  const lines = [
+    `${ADDRESS_PROMPT_MARKER} ${truncate(local || name, MAX_PLACE_QUERY)}`,
+    local && name && local !== name ? `한국어 표기: ${truncate(name, MAX_PLACE_QUERY)}` : '',
+    locality ? `지역: ${locality}` : '',
+    `대략 위치: ${candidate.lat}, ${candidate.lng}`,
+    '',
+    '이 장소의 정식 주소를 현지 표기로 알려 주세요.',
+    '- 도·시·구·동·번지까지 들어간 도로명 또는 지번 주소예요 (예: 大阪府大阪市中央区難波1-4-16).',
+    '- 우편번호·건물 층수·전화번호는 빼요.',
+    '- 답은 {"address":"…"} 한 줄 JSON으로만 줘요.',
+    '- 확실하지 않으면 {"address":""} 로 답해요.',
+  ];
+  return lines.filter((line) => line !== '').join('\n');
+}
+
+const addressFromJson = (json: unknown): string | null => {
+  if (!isRecord(json)) return null;
+  const value = text(json.address);
+  return value !== '' && value.length <= MAX_PLACE_ADDRESS && HAS_DIGIT.test(value) ? value : null;
+};
+
+/**
+ * JSON이 안 왔을 때, 산문에서 주소로 보이는 첫 줄.
+ *
+ * grounding 답에는 스키마가 없어서(서버가 떨군다) 「검색해 보니 주소는 … 입니다」
+ * 같은 문장이 그대로 올 수 있다. 번지 숫자가 있는 짧은 줄 하나만 받아들이는 것이
+ * 규칙 전부다 — 「확실하지 않아요」 같은 거절 문장은 숫자가 없어서 저절로 걸러지고,
+ * 잘못 골라도 손해는 Nominatim 한 번이지 틀린 좌표가 아니다(반경이 막는다).
+ */
+const addressFromProse = (raw: string): string | null => {
+  for (const line of raw.split('\n')) {
+    const value = line
+      .replace(/[`"'“”「」]/g, '')
+      .replace(ADDRESS_BULLET, '')
+      .replace(ADDRESS_LABEL, '')
+      .trim();
+    if (value === '' || value.length > MAX_PLACE_ADDRESS) continue;
+    if (HAS_DIGIT.test(value)) return value;
+  }
+  return null;
+};
+
+/** 주소 답 하나를 문자열로. 읽어낼 것이 없으면 `null`. */
+export function parseAddressAnswer(result: AiResult): string | null {
+  return (
+    addressFromJson(result.json) ??
+    addressFromJson(extractJsonObject(result.text)) ??
+    addressFromProse(result.text)
+  );
+}
+
+/**
+ * 후보 하나의 정식 주소를 **검색을 붙여** 한 번 물어본다 (M37).
+ *
+ * grounding을 쓰는 이유는 이 질문이 기억이 아니라 사실을 묻는 질문이기 때문이다.
+ * 모델이 아는 이름은 이미 첫 호출에서 나왔고, 여기서 필요한 것은 그 가게의 번지다 —
+ * 그건 검색이 아는 것이지 모델이 외우는 것이 아니다. 대신 느리므로, 부르는 쪽이
+ * 후보 몇 개까지 물을지를 정한다(`map/refine.ts`).
+ *
+ * 던지는 것은 `AiError` 하나뿐이고, 그 처리는 호출자의 몫이다.
+ */
+export async function aiPlaceAddress(candidate: PlaceCandidate): Promise<string | null> {
+  const prompt = buildAddressPrompt(candidate);
+  if (prompt === '') return null;
+
+  const grounded = await callAi('ask', {
+    prompt,
+    system: ADDRESS_SYSTEM,
+    grounding: true,
+  });
+  return parseAddressAnswer(grounded);
 }

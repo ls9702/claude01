@@ -121,13 +121,18 @@ async function addCard(page: Page, title: string): Promise<void> {
   await expect(page.getByTestId('card-form')).toHaveCount(0);
 }
 
-/** Opens the card's 장소 검색 modal and searches for whatever is prefilled. */
-async function searchFromCard(page: Page, title: string): Promise<void> {
+/** Opens the card's 장소 검색 modal, with the card title already in the box. */
+async function openCardSearch(page: Page, title: string): Promise<void> {
   await page.getByTestId('board-card').filter({ hasText: title }).click();
   await expect(page.getByTestId('card-form')).toBeVisible();
   await page.getByTestId('card-location-search').click();
   await expect(page.getByTestId('place-search')).toBeVisible();
   await expect(page.getByTestId('place-search-input')).toHaveValue(title);
+}
+
+/** Opens the card's 장소 검색 modal and searches for whatever is prefilled. */
+async function searchFromCard(page: Page, title: string): Promise<void> {
+  await openCardSearch(page, title);
   await page.getByTestId('place-search-submit').click();
 }
 
@@ -159,7 +164,12 @@ test('AI가 켜져 있으면 프록시로 찾고, 현지 표기까지 보여준�
 
   // 요청은 정말 프록시로 갔고, 여행지가 문맥으로 실려 있다.
   const calls = api.aiCalls();
-  expect(calls).toHaveLength(1);
+  // 장소 한 번 + 주소 되묻기 두 번 (M37): 이 목의 Nominatim은 두 후보 모두에게
+  // 4km 밖을 주므로 이름 스냅이 둘 다 빗나가고, 앞의 두 후보가 주소 계단에 오른다.
+  // 목은 등록되지 않은 장소에 「모르겠다」고 답하므로 좌표는 그대로 남는다.
+  expect(calls).toHaveLength(3);
+  expect(calls.slice(1).every((call) => call.grounding === true)).toBe(true);
+  expect(calls[1].prompt).toContain('주소 확인 장소: 通天閣');
   expect(calls[0].prompt).toContain('찾는 장소: 츠텐카쿠');
   expect(calls[0].prompt).toContain('여행지: 오사카시, 오사카부, 일본');
   expect(calls[0].schema).toBeTruthy();
@@ -343,4 +353,265 @@ test('AI가 못 찾으면 검색을 한 번 더 붙여 보고, 그래도 없으�
   expect(calls[1].grounding).toBe(true);
   expect(calls[1].schema).toBeUndefined();
   expect(osmHits).toBe(1);
+});
+
+/* ------------------------------------------------------------------ *
+ * M37 — 이름으로 못 찾는 가게를 주소로 잡는다
+ * ------------------------------------------------------------------ */
+
+/**
+ * 사용자의 신고는 이랬다: *「잇푸도 난바점을 구글 지도에서 검색했을 때랑 지금 위치랑
+ * 차이가 많이 남. 뭔가 못 찾는 것 같음.」*
+ *
+ * 원인은 M35의 구멍이었다. 작은 체인점은 OSM의 POI 색인에 아예 없어서 현지 표기로
+ * 되물어도 0건이 나오고, 그러면 모델의 기억 좌표가 표시 없이 살아남는다. 그래서
+ * 한 계단을 더 둔다 — 좌표가 아니라 **주소**를 되묻고, 그 주소를 지오코딩한다.
+ * 가게는 색인에 없어도 그 가게가 든 번지는 색인에 있다.
+ */
+const IPPUDO_ADDRESS = '大阪府大阪市中央区難波1-4-16';
+
+/** 그 번지가 진짜로 있는 자리 — 모델의 기억에서 900m쯤 떨어져 있다. */
+const IPPUDO_BUILDING = [
+  {
+    place_id: 51,
+    lat: '34.6659',
+    lon: '135.5013',
+    display_name: '1-4-16, 난바, 주오구, 오사카시, 일본',
+  },
+];
+
+test('OSM에 없는 가게는 주소로 되물어 좌표를 잡는다', async ({ page }) => {
+  osmHits = 0;
+  await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+    osmHits += 1;
+    const query = new URL(route.request().url()).searchParams.get('q') ?? '';
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      // 이름으로는 아무것도 모른다 — 아는 것은 번지뿐이다.
+      body: JSON.stringify(query.includes(IPPUDO_ADDRESS) ? IPPUDO_BUILDING : []),
+    });
+  });
+  await page.route(/tile\.openstreetmap\.org/, (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }),
+  );
+
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+
+  await createTrip(page, '오사카 3박');
+  await configureSync(page);
+  await enableAi(page);
+
+  api.setAiPlacesFor('찾는 장소: 잇푸도 난바점', {
+    places: [
+      // 동네까지는 맞고 블록은 틀린 좌표 — 신고된 그 증상.
+      { name: '잇푸도 난바점', localName: '一風堂 なんば店', locality: '오사카', lat: 34.67, lng: 135.51 },
+    ],
+  });
+  api.setAiAddressFor('一風堂', IPPUDO_ADDRESS);
+
+  await addCard(page, '잇푸도 난바점');
+  await searchFromCard(page, '잇푸도 난바점');
+
+  const rows = page.getByTestId('place-search-result');
+  await expect(rows).toHaveCount(1);
+  // 이름으로는 빈손이었지만 주소가 이 줄을 지도 위에 올려놓았다.
+  await expect(rows.first()).toHaveAttribute('data-refined', 'true');
+  await expect(rows.first()).toHaveAttribute('data-refined-by', 'address');
+  await expect(rows.first()).toHaveAttribute('data-lat', '34.6659');
+  await expect(rows.first()).toHaveAttribute('data-lng', '135.5013');
+  await expect(page.getByTestId('place-search-refined')).toHaveCount(1);
+  // 바뀐 것은 좌표뿐 — 줄에는 사용자가 찾은 이름과 현지 표기가 그대로 있다.
+  await expect(rows.first()).toContainText('잇푸도 난바점');
+  await expect(page.getByTestId('place-search-local').first()).toHaveText('一風堂 なんば店');
+
+  // 두 번째 호출은 검색을 붙인 주소 질문이다 — 스키마는 서버가 떨구므로 없다.
+  const calls = api.aiCalls();
+  expect(calls).toHaveLength(2);
+  expect(calls[1].grounding).toBe(true);
+  expect(calls[1].schema).toBeUndefined();
+  expect(calls[1].prompt).toContain('주소 확인 장소: 一風堂 なんば店');
+  expect(calls[1].prompt).toContain('대략 위치: 34.67, 135.51');
+  // 이름 둘로 빈손, 그리고 주소로 한 번 — 예산(6) 안이다.
+  expect(osmHits).toBe(3);
+
+  // 카드에 들어가는 것도, 「위치 확인」이 보여 주는 것도 그 번지의 좌표다.
+  await rows.first().click();
+  await expect(page.getByTestId('place-search')).toHaveCount(0);
+  const address = page.getByTestId('card-location-address');
+  await expect(address).toHaveAttribute('data-lat', '34.6659');
+  await expect(address).toHaveAttribute('data-lng', '135.5013');
+  await expect(address).toContainText('잇푸도 난바점');
+
+  await page.getByTestId('location-preview-open').click();
+  await expect(page.getByTestId('location-preview-map')).toHaveAttribute('data-lat', '34.6659');
+  await expect(page.getByTestId('location-preview-map')).toHaveAttribute('data-lng', '135.5013');
+});
+
+test('주소를 모른다고 하면 AI 좌표를 그대로 둔다', async ({ page }) => {
+  osmHits = 0;
+  await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+    osmHits += 1;
+    void route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+  });
+  await page.route(/tile\.openstreetmap\.org/, (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }),
+  );
+
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+
+  await createTrip(page, '오사카 3박');
+  await configureSync(page);
+  await enableAi(page);
+
+  api.setAiPlacesFor('찾는 장소: 잇푸도 난바점', {
+    places: [
+      { name: '잇푸도 난바점', localName: '一風堂 なんば店', locality: '오사카', lat: 34.67, lng: 135.51 },
+    ],
+  });
+  // 주소 답을 등록하지 않는다 → 목이 「확실하지 않다」고 답한다.
+
+  await addCard(page, '잇푸도 난바점');
+  await searchFromCard(page, '잇푸도 난바점');
+
+  const rows = page.getByTestId('place-search-result');
+  await expect(rows).toHaveCount(1);
+  // 조용히 실패한다. 오류 화면도, 사과도 없다 — 한 블록 틀린 좌표가 남을 뿐이다.
+  await expect(rows.first()).toHaveAttribute('data-refined', 'false');
+  await expect(rows.first()).toHaveAttribute('data-lat', '34.67');
+  await expect(page.getByTestId('place-search-refined')).toHaveCount(0);
+  await expect(page.getByTestId('place-search-error')).toHaveCount(0);
+  expect(api.aiCalls()).toHaveLength(2);
+  // 주소를 못 받았으므로 지오코딩도 하지 않았다 — 이름 두 번이 전부다.
+  expect(osmHits).toBe(2);
+});
+
+/* ------------------------------------------------------------------ *
+ * M37 — 좌표·구글 지도 주소 붙여넣기
+ * ------------------------------------------------------------------ */
+
+/**
+ * 사용자가 이미 자리를 알고 있을 때는 아무에게도 묻지 않는다.
+ *
+ * 구글 지도에서 가게를 찾아 놓고 주소창을 복사해 왔다면 답은 이미 손에 있고,
+ * 그 이름으로 다시 찾는 것은 틀릴 기회를 한 번 더 주는 것이다. 이 세 스펙이 지키는
+ * 것은 그 지름길이다 — 요청 0건, 좌표 그대로, 그리고 못 하는 것(단축 링크)은
+ * 조용히 실패하는 대신 말한다.
+ */
+async function seedCardForPaste(page: Page, title: string): Promise<void> {
+  osmHits = 0;
+  await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+    osmHits += 1;
+    void route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+  });
+  await page.route(/tile\.openstreetmap\.org/, (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }),
+  );
+
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+  await createTrip(page, '오사카 3박');
+  await addCard(page, title);
+  await openCardSearch(page, title);
+}
+
+test('구글 지도 주소를 붙여넣으면 그 자리를 그대로 꽂는다', async ({ page }) => {
+  await seedCardForPaste(page, '잇푸도 난바점');
+
+  // 화면 중심(@)은 손으로 끌어 밀려 있고, 가게의 점(!3d!4d)은 밀리지 않는다.
+  await page
+    .getByTestId('place-search-input')
+    .fill(
+      'https://www.google.com/maps/place/一風堂+難波店/@34.6700,135.5100,17z/' +
+        'data=!4m6!3m5!1s0x6000e1f0!8m2!3d34.6659!4d135.5013!16s%2Fg%2F1td',
+    );
+
+  const direct = page.getByTestId('place-search-coord');
+  await expect(direct).toBeVisible();
+  await expect(direct).toHaveAttribute('data-lat', '34.6659');
+  await expect(direct).toHaveAttribute('data-lng', '135.5013');
+  await expect(direct).toContainText('좌표로 지정');
+  await expect(direct).toContainText('34.6659, 135.5013');
+  // 검색할 것이 없다 — 버튼은 잠기고 요청은 나가지 않는다.
+  await expect(page.getByTestId('place-search-submit')).toBeDisabled();
+  expect(osmHits).toBe(0);
+
+  await direct.click();
+  await expect(page.getByTestId('place-search')).toHaveCount(0);
+
+  const address = page.getByTestId('card-location-address');
+  await expect(address).toHaveAttribute('data-lat', '34.6659');
+  await expect(address).toHaveAttribute('data-lng', '135.5013');
+  // 손으로 찍은 핀과 같은 주소 표기 — 「위도, 경도」.
+  await expect(address).toHaveText('34.6659, 135.5013');
+
+  await page.getByTestId('location-preview-open').click();
+  await expect(page.getByTestId('location-preview-map')).toHaveAttribute('data-lat', '34.6659');
+  await expect(page.getByTestId('location-preview-map')).toHaveAttribute('data-lng', '135.5013');
+  expect(osmHits).toBe(0);
+});
+
+test('좌표를 그대로 붙여넣어도 똑같이 동작한다', async ({ page }) => {
+  await seedCardForPaste(page, '잇푸도 난바점');
+
+  await page.getByTestId('place-search-input').fill('34.6659, 135.5013');
+  const direct = page.getByTestId('place-search-coord');
+  await expect(direct).toHaveAttribute('data-lat', '34.6659');
+  await expect(direct).toHaveAttribute('data-lng', '135.5013');
+
+  await direct.click();
+  await expect(page.getByTestId('card-location-address')).toHaveAttribute('data-lat', '34.6659');
+  expect(osmHits).toBe(0);
+
+  // 좌표가 아닌 글자로 되돌리면 그 줄은 사라지고 다시 평범한 검색 화면이 된다.
+  await page.getByTestId('card-location-search').click();
+  await page.getByTestId('place-search-input').fill('잇푸도 난바점');
+  await expect(page.getByTestId('place-search-coord')).toHaveCount(0);
+  await expect(page.getByTestId('place-search-submit')).toBeEnabled();
+});
+
+test('단축 링크는 못 편다고 말하고 무엇을 하면 되는지 알려 준다', async ({ page }) => {
+  await seedCardForPaste(page, '잇푸도 난바점');
+
+  await page.getByTestId('place-search-input').fill('https://maps.app.goo.gl/abcDEF123');
+
+  await expect(page.getByTestId('place-search-shortlink')).toHaveText(
+    '단축 링크는 열어서 주소창의 전체 주소를 복사해 주세요',
+  );
+  await expect(page.getByTestId('place-search-coord')).toHaveCount(0);
+  await expect(page.getByTestId('place-search-submit')).toBeDisabled();
+  await expect(page.getByTestId('place-search-error')).toHaveCount(0);
+  expect(osmHits).toBe(0);
+});
+
+test.describe('모바일', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('390px에서 긴 주소를 붙여넣어도 화면이 넘치지 않는다', async ({ page }) => {
+    await seedCardForPaste(page, '잇푸도 난바점');
+
+    await page
+      .getByTestId('place-search-input')
+      .fill(
+        'https://www.google.com/maps/place/一風堂+難波店/@34.6700,135.5100,17z/' +
+          'data=!4m6!3m5!1s0x6000e1f0!8m2!3d34.6659!4d135.5013!16s%2Fg%2F1td',
+      );
+
+    const direct = page.getByTestId('place-search-coord');
+    await expect(direct).toBeVisible();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    const box = await direct.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.width ?? 0).toBeLessThanOrEqual(390);
+
+    // 붙여넣기 안내도 한 줄로 얌전히 있는다.
+    await expect(page.getByTestId('place-search-paste-hint')).toBeVisible();
+  });
 });

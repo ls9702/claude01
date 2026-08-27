@@ -20,9 +20,30 @@
  *
  * 이름·지역·주소는 손대지 않는다. 사용자가 「츠텐카쿠」를 찾았으면 줄에는 계속
  * 「통천각」이 있어야 하고, 저장되는 주소도 그대로다 — 바뀌는 것은 좌표 두 칸뿐.
+ *
+ * ## 두 번째 계단: 주소 경유 (M37)
+ *
+ * 위의 규칙에는 구멍이 하나 있었다. **OSM에 그 가게가 없으면** 이름으로 아무리
+ * 물어도 답이 없고, 그러면 규칙 2에 따라 모델의 기억 좌표가 표시 없이 살아남는다.
+ * 사용자의 신고가 정확히 그 구멍이었다: *「잇푸도 난바점이 구글 지도와 많이 다르다.
+ * 뭔가 못 찾는 것 같다.」* 작은 체인점은 OSM의 POI 색인에 없다.
+ *
+ * 그래서 이름 스냅이 빗나간 후보에게 한 계단을 더 준다:
+ *
+ *  1. AI에게 **좌표가 아니라 주소**를 묻는다(`ai/aiPlaces.aiPlaceAddress`, 검색을
+ *     붙인 grounded 호출 한 번). 좌표를 다시 물으면 같은 기억이 또 나오지만,
+ *     번지는 검색이 아는 사실이다.
+ *  2. 그 **주소 문자열**을 Nominatim에 넣는다. 가게가 색인에 없어도 그 가게가 든
+ *     건물·블록은 색인에 있다.
+ *  3. 나온 자리가 여전히 {@link REFINE_RADIUS_KM} 안이면 그때만 스냅한다 —
+ *     규칙 1과 같은 반경, 같은 판단이다.
+ *
+ * 이 계단은 **비싸다**(grounded 호출은 느리고 분당 퓨즈를 나눠 쓴다). 그래서 앞의
+ * {@link ADDRESS_FALLBACK_CANDIDATES}개 후보에만, 후보당 한 번만 오른다. 실패는
+ * 규칙 3 그대로 — 조용히 AI 좌표를 남긴다.
  */
 
-import type { PlaceCandidate } from '../ai/aiPlaces';
+import type { PlaceCandidate, RefinedBy } from '../ai/aiPlaces';
 import type { GeoPoint } from '../types/models';
 
 /**
@@ -42,6 +63,16 @@ export const REFINE_RADIUS_KM = 3;
  * 없으면 안 되는 것이 아니다.
  */
 export const MAX_REFINE_QUERIES = 6;
+
+/**
+ * 주소 경유 스냅(M37)을 시도할 후보 수 — 목록 앞에서부터 이만큼만.
+ *
+ * 이 계단의 값은 grounded AI 호출 한 번이다: 2~8초가 걸리고, 분당 20건짜리 퓨즈를
+ * 다른 기능과 나눠 쓴다. 다섯 후보 전부에 붙이면 검색 한 번이 30초가 되고 퓨즈는
+ * 한 검색으로 넘어간다. 사람이 실제로 고르는 줄은 거의 언제나 앞의 한둘이므로,
+ * 비싼 확인은 거기에만 쓴다.
+ */
+export const ADDRESS_FALLBACK_CANDIDATES = 2;
 
 /** 지구 반지름(km, IUGG 평균). */
 const EARTH_RADIUS_KM = 6371.0088;
@@ -112,11 +143,36 @@ export function refineQueries(candidate: PlaceCandidate): string[] {
 export interface RefineOptions {
   /** Nominatim 한 번. 실제로는 `utils/geo.searchPlaces`가 들어온다. */
   osmSearch: (query: string, signal?: AbortSignal) => Promise<GeoPoint[]>;
+  /**
+   * 이름 스냅이 빗나갔을 때 그 후보의 정식 주소를 한 번 되묻는다 (M37).
+   *
+   * 실제로는 `ai/aiPlaces.aiPlaceAddress`(grounded 호출)가 들어온다. 넘기지 않으면
+   * 주소 경유 계단 자체가 없다 — M35 그대로의 동작이다.
+   */
+  askAddress?: (candidate: PlaceCandidate) => Promise<string | null>;
   /** 검색 화면의 취소 신호 — 보정도 같이 멈춘다. */
   signal?: AbortSignal;
   radiusKm?: number;
   maxQueries?: number;
+  /** 주소 경유를 시도할 후보 수. 기본 {@link ADDRESS_FALLBACK_CANDIDATES}. */
+  maxAddressCandidates?: number;
 }
+
+/** 좌표 두 칸만 갈아끼운 새 후보 — 이름·지역·주소는 손대지 않는다. */
+const snapped = (
+  candidate: PlaceCandidate,
+  point: { lat: number; lng: number },
+  by: RefinedBy,
+): PlaceCandidate => ({
+  ...candidate,
+  lat: point.lat,
+  lng: point.lng,
+  refined: true,
+  refinedBy: by,
+});
+
+const isAbortError = (failure: unknown): boolean =>
+  failure instanceof DOMException && failure.name === 'AbortError';
 
 /**
  * 후보 목록의 좌표를 OSM에 맞춰 조인다. **순서와 개수는 그대로**다.
@@ -133,6 +189,7 @@ export async function refineCandidates(
   options: RefineOptions,
 ): Promise<PlaceCandidate[]> {
   const radiusKm = options.radiusKm ?? REFINE_RADIUS_KM;
+  const maxAddress = options.maxAddressCandidates ?? ADDRESS_FALLBACK_CANDIDATES;
   let budget = options.maxQueries ?? MAX_REFINE_QUERIES;
 
   /** 이번 검색 안에서만 사는 캐시 — 같은 검색어를 두 번 묻지 않는다. */
@@ -140,8 +197,35 @@ export async function refineCandidates(
   const out: PlaceCandidate[] = [];
   /** Nominatim이 한 번 넘어지면 나머지도 넘어진다. 줄줄이 기다릴 이유가 없다. */
   let broken = false;
+  /** AI 쪽도 마찬가지다 — 429 하나에 후보마다 8초씩 기다릴 이유가 없다 (M37). */
+  let addressBroken = false;
 
-  for (const candidate of candidates) {
+  /**
+   * Nominatim 한 번 — 캐시·예산·고장을 여기 한곳에서 다룬다.
+   *
+   * `null`은 「물어보지 못했다」는 뜻이다(예산이 없거나 방금 넘어졌거나). 빈 배열과
+   * 구분되는 것이 중요하다: 빈 배열은 「물어봤는데 없다」이고, 그때는 다음 검색어로
+   * 넘어갈 이유가 있다.
+   */
+  const askOsm = async (query: string): Promise<GeoPoint[] | null> => {
+    const cached = asked.get(query);
+    if (cached !== undefined) return cached;
+    if (budget <= 0) return null;
+    budget -= 1;
+
+    let hits: GeoPoint[];
+    try {
+      hits = await options.osmSearch(query, options.signal);
+    } catch (failure) {
+      if (isAbortError(failure)) throw failure;
+      broken = true;
+      return null;
+    }
+    asked.set(query, hits);
+    return hits;
+  };
+
+  for (const [index, candidate] of candidates.entries()) {
     if (broken || budget <= 0) {
       out.push(candidate);
       continue;
@@ -149,26 +233,43 @@ export async function refineCandidates(
 
     let refined = candidate;
     for (const query of refineQueries(candidate)) {
-      let hits = asked.get(query);
-      if (hits === undefined) {
-        if (budget <= 0) break;
-        budget -= 1;
-        try {
-          hits = await options.osmSearch(query, options.signal);
-        } catch (failure) {
-          if (failure instanceof DOMException && failure.name === 'AbortError') throw failure;
-          broken = true;
-          break;
-        }
-        asked.set(query, hits);
-      }
+      const hits = await askOsm(query);
+      if (hits === null) break;
 
       const near = nearestWithin(candidate, hits, radiusKm);
       if (near) {
-        refined = { ...candidate, lat: near.lat, lng: near.lng, refined: true };
+        refined = snapped(candidate, near, 'name');
         break;
       }
     }
+
+    // 이름으로는 못 찾았다 — OSM에 없는 가게일 수 있으니 주소로 한 계단 더 (M37).
+    // 앞의 몇 후보에만, 후보당 한 번만, 그리고 지오코딩할 예산이 남아 있을 때만
+    // 오른다. 느린 호출을 해 놓고 그 답을 못 쓰는 것이 가장 나쁜 경우다.
+    if (
+      refined === candidate &&
+      options.askAddress &&
+      !broken &&
+      !addressBroken &&
+      index < maxAddress &&
+      budget > 0 &&
+      options.signal?.aborted !== true
+    ) {
+      let address: string | null = null;
+      try {
+        address = await options.askAddress(candidate);
+      } catch (failure) {
+        if (isAbortError(failure)) throw failure;
+        addressBroken = true;
+      }
+
+      if (address !== null && address.trim() !== '') {
+        const hits = await askOsm(address.trim());
+        const near = hits ? nearestWithin(candidate, hits, radiusKm) : null;
+        if (near) refined = snapped(candidate, near, 'address');
+      }
+    }
+
     out.push(refined);
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { aiSearchPlaces } from '../../ai/aiPlaces';
+import { aiPlaceAddress, aiSearchPlaces } from '../../ai/aiPlaces';
 import {
   applyPlan,
   auditTargets,
@@ -106,6 +106,9 @@ export default function LocationAuditSheet({ tripId, onClose }: LocationAuditShe
             aiSearch: (query, hint) =>
               aiSearchPlaces(query, { destination: hint, retryGrounded: false }),
             osmSearch: searchPlaces,
+            // 이름으로 확인되지 않는 카드에만, 한 장에 한 번 (M37). OSM에 없는
+            // 작은 가게가 이 도구에서 늘 「제안 없음」이던 이유가 그것이었다.
+            aiAddress: aiPlaceAddress,
             signal,
           }),
       });

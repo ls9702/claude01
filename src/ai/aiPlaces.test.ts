@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ADDRESS_PROMPT_MARKER,
+  MAX_PLACE_ADDRESS,
   MAX_PLACE_CANDIDATES,
   MAX_PLACE_QUERY,
   PLACES_SCHEMA,
+  buildAddressPrompt,
   buildPlacesPrompt,
   extractJsonObject,
+  parseAddressAnswer,
   parsePlaceAnswer,
   parsePlaceCandidates,
   toGeoPoint,
@@ -183,6 +187,116 @@ describe('parsePlaceAnswer', () => {
   it('is empty when neither half holds anything usable', () => {
     expect(parsePlaceAnswer({ text: '못 찾았어요', json: { places: [] }, citations: [] })).toEqual(
       [],
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 주소 되묻기 (M37)
+ * ------------------------------------------------------------------ */
+
+/** OSM에 없는 작은 체인점 — 이름 스냅이 빗나가는 그 자리. */
+const IPPUDO: PlaceCandidate = {
+  name: '잇푸도 난바점',
+  localName: '一風堂 なんば店',
+  locality: '오사카',
+  lat: 34.6659,
+  lng: 135.5013,
+};
+
+describe('buildAddressPrompt', () => {
+  it('leads with the marker the mock and the model both key on', () => {
+    expect(buildAddressPrompt(IPPUDO).startsWith(`${ADDRESS_PROMPT_MARKER} 一風堂 なんば店`)).toBe(
+      true,
+    );
+  });
+
+  it('asks for an address, in the local script — not for coordinates again', () => {
+    const prompt = buildAddressPrompt(IPPUDO);
+    expect(prompt).toContain('정식 주소를 현지 표기로');
+    expect(prompt).toContain('{"address":"…"}');
+    expect(prompt).not.toContain('lat');
+  });
+
+  it('carries the Korean name, the locality and the rough position as context', () => {
+    const prompt = buildAddressPrompt(IPPUDO);
+    expect(prompt).toContain('한국어 표기: 잇푸도 난바점');
+    expect(prompt).toContain('지역: 오사카');
+    expect(prompt).toContain('대략 위치: 34.6659, 135.5013');
+  });
+
+  it('leaves out the lines it has nothing to put on', () => {
+    const prompt = buildAddressPrompt({ name: '통천각', lat: 34.65, lng: 135.5 });
+    expect(prompt.startsWith(`${ADDRESS_PROMPT_MARKER} 통천각`)).toBe(true);
+    expect(prompt).not.toContain('한국어 표기:');
+    expect(prompt).not.toContain('지역:');
+  });
+
+  it('has nothing to ask about a nameless candidate', () => {
+    expect(buildAddressPrompt({ name: '  ', lat: 34.65, lng: 135.5 })).toBe('');
+  });
+
+  it('caps an absurd name rather than forwarding it whole', () => {
+    const first = buildAddressPrompt({ name: '가'.repeat(400), lat: 34.65, lng: 135.5 }).split(
+      '\n',
+    )[0];
+    expect(first.length).toBeLessThanOrEqual(ADDRESS_PROMPT_MARKER.length + 1 + MAX_PLACE_QUERY);
+  });
+});
+
+describe('parseAddressAnswer', () => {
+  const answer = (text: string, json?: unknown) => ({ text, json, citations: [] });
+
+  it('reads the one-line JSON it asked for', () => {
+    expect(parseAddressAnswer(answer('{"address":"大阪府大阪市中央区難波1-4-16"}'))).toBe(
+      '大阪府大阪市中央区難波1-4-16',
+    );
+  });
+
+  it('reads it out of a ```json fence, which grounded answers love', () => {
+    expect(
+      parseAddressAnswer(answer('```json\n{"address":"大阪府大阪市中央区難波1-4-16"}\n```')),
+    ).toBe('大阪府大阪市中央区難波1-4-16');
+  });
+
+  it('digs it out of a sentence wrapped around it', () => {
+    expect(
+      parseAddressAnswer(answer('검색해 보니 {"address":"大阪市中央区難波1-4-16"} 였어요.')),
+    ).toBe('大阪市中央区難波1-4-16');
+  });
+
+  it('falls back to a bare address line with a label on it', () => {
+    expect(parseAddressAnswer(answer('주소: 大阪府大阪市中央区難波1-4-16'))).toBe(
+      '大阪府大阪市中央区難波1-4-16',
+    );
+    expect(parseAddressAnswer(answer('- 「大阪市中央区難波1-4-16」'))).toBe(
+      '大阪市中央区難波1-4-16',
+    );
+  });
+
+  it('skips the chatty first line and takes the address line', () => {
+    expect(
+      parseAddressAnswer(answer('네, 찾았어요!\n大阪府大阪市中央区難波1-4-16\n영업시간은 별개예요')),
+    ).toBe('大阪府大阪市中央区難波1-4-16');
+  });
+
+  it('treats a refusal as no address — there is no 번지 in it', () => {
+    expect(parseAddressAnswer(answer('{"address":""}'))).toBeNull();
+    expect(parseAddressAnswer(answer('확실하지 않아서 알려 드릴 수 없어요'))).toBeNull();
+    expect(parseAddressAnswer(answer('{"address":"확실하지 않아요"}'))).toBeNull();
+    expect(parseAddressAnswer(answer('   '))).toBeNull();
+  });
+
+  it('refuses a paragraph pretending to be an address', () => {
+    const essay = `${'설명 '.repeat(60)}1번지`;
+    expect(essay.length).toBeGreaterThan(MAX_PLACE_ADDRESS);
+    expect(parseAddressAnswer(answer(essay))).toBeNull();
+    expect(parseAddressAnswer(answer(JSON.stringify({ address: essay })))).toBeNull();
+  });
+
+  it('prefers a schema-parsed body when there somehow is one', () => {
+    expect(parseAddressAnswer(answer('무시되는 본문 1', { address: '서울시 중구 세종대로 110' }))).toBe(
+      '서울시 중구 세종대로 110',
     );
   });
 });

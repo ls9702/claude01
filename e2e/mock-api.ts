@@ -109,6 +109,17 @@ export interface MockApi {
    * still gets the global answer. `reset()` clears the lot.
    */
   setAiPlacesFor: (needle: string, answer: MockPlaceMode | MockPlaceAnswer) => void;
+  /**
+   * Answers the 주소 되묻기 call for one place (M37).
+   *
+   * That call is the grounded second stage of the refine pipeline: it fires
+   * only when the name snap missed, and it asks for a street address rather
+   * than for coordinates. `needle` is matched against the prompt, whose first
+   * line is always `주소 확인 장소: <local name>`. Anything not registered here
+   * gets "I am not sure" — which the client's parser reads as no address, so
+   * the AI coordinates survive untouched. `'error'` answers a 502.
+   */
+  setAiAddressFor: (needle: string, answer: string | 'error') => void;
   /** How many photos `image.php` is currently holding. */
   photoCount: () => number;
   /** Is this photo id stored? */
@@ -184,6 +195,12 @@ const CANNED_PLACES = {
 /** The marker `buildPlacesPrompt` always leads with — how the mock spots one. */
 const PLACE_PROMPT_MARKER = '찾는 장소:';
 
+/** The same, for `buildAddressPrompt`'s grounded 주소 되묻기 call (M37). */
+const ADDRESS_PROMPT_MARKER = '주소 확인 장소:';
+
+/** What the model says when it has no address to give — no 번지, so no address. */
+const NO_ADDRESS_ANSWER = '확실하지 않아서 정확한 주소를 알려 드리기 어려워요.';
+
 const CANNED_REVIEW = [
   '- 첫날 오전에 일정이 세 개 겹쳐 있어요. 하나를 오후로 옮기면 숨통이 트여요.',
   '- 난바에서 우메다로 갔다가 다시 난바로 돌아와요. 순서를 묶으면 이동이 한 번 줄어요.',
@@ -241,6 +258,8 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
   let aiPlaceMode: MockPlaceMode = 'ok';
   /** 검색어(프롬프트 조각) → 그 검색어에만 주는 답 (M36). */
   const placeOverrides = new Map<string, MockPlaceMode | MockPlaceAnswer>();
+  /** 장소(프롬프트 조각) → 주소 되묻기에 주는 답 (M37). */
+  const addressOverrides = new Map<string, string | 'error'>();
   let aiCalls: MockAiCall[] = [];
   /** `image.php`'s disk: photo id → the JPEG bytes. */
   const photos = new Map<string, Buffer>();
@@ -363,6 +382,31 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
           return;
         }
         aiCalls = [...aiCalls, parsed];
+
+        // 주소 되묻기 (M37) — 이름 스냅이 빗나간 뒤에만 오는, 검색을 붙인 호출.
+        // 장소 검색보다 **먼저** 가려낸다: 둘 다 `ask`를 타고 오므로 표시로만
+        // 구분되고, 여기서 순서를 잘못 두면 주소 질문이 장소 답을 받는다.
+        if (typeof parsed.prompt === 'string' && parsed.prompt.includes(ADDRESS_PROMPT_MARKER)) {
+          const answer = [...addressOverrides].find(([needle]) =>
+            (parsed.prompt as string).includes(needle),
+          )?.[1];
+
+          if (answer === 'error') {
+            send(res, 502, { error: 'upstream_error', detail: 'HTTP 500 — mock' });
+            return;
+          }
+          // grounding이 켜진 호출이라 서버가 스키마를 떨군다 — 답은 산문 속 JSON이다.
+          send(
+            res,
+            200,
+            geminiText([
+              answer === undefined
+                ? NO_ADDRESS_ANSWER
+                : `\`\`\`json\n${JSON.stringify({ address: answer })}\n\`\`\``,
+            ]),
+          );
+          return;
+        }
 
         // 장소 검색 (M28) rides on `ask`, so the prompt is what identifies it —
         // and it stays identifiable on the grounded retry, where `ai.php` has
@@ -500,6 +544,9 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     setAiPlacesFor: (needle: string, answer: MockPlaceMode | MockPlaceAnswer) => {
       placeOverrides.set(needle, answer);
     },
+    setAiAddressFor: (needle: string, answer: string | 'error') => {
+      addressOverrides.set(needle, answer);
+    },
     photoCount: () => photos.size,
     hasPhoto: (id: string) => photos.has(id),
     reset: () => {
@@ -511,6 +558,7 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       aiAvailable = true;
       aiPlaceMode = 'ok';
       placeOverrides.clear();
+      addressOverrides.clear();
       photos.clear();
     },
     stop: () =>

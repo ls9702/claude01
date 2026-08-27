@@ -25,7 +25,7 @@
  */
 
 import { AiError, aiEnabled } from '../ai/aiClient';
-import { aiSearchPlaces, type PlaceCandidate } from '../ai/aiPlaces';
+import { aiPlaceAddress, aiSearchPlaces, type PlaceCandidate } from '../ai/aiPlaces';
 import type { GeoPoint } from '../types/models';
 import { searchPlaces } from '../utils/geo';
 import { refineCandidates } from './refine';
@@ -67,18 +67,21 @@ export function osmCandidate(point: GeoPoint): PlaceCandidate {
   return { ...point, name: point.address ?? `${point.lat}, ${point.lng}` };
 }
 
-/** 테스트가 갈아끼우는 세 개. 기본값은 진짜 AI와 진짜 Nominatim이다. */
+/** 테스트가 갈아끼우는 넷. 기본값은 진짜 AI와 진짜 Nominatim이다. */
 export interface SmartSearchDeps {
   /** 토글·동기화·서버 키 세 조건(M11). */
   isAiEnabled: () => boolean;
   aiSearch: (query: string, destination?: string) => Promise<PlaceCandidate[]>;
   osmSearch: (query: string, signal?: AbortSignal) => Promise<GeoPoint[]>;
+  /** 이름 스냅이 빗나간 후보의 정식 주소를 되묻는다 (M37 — `map/refine.ts`). */
+  aiAddress: (candidate: PlaceCandidate) => Promise<string | null>;
 }
 
 const DEFAULT_DEPS: SmartSearchDeps = {
   isAiEnabled: aiEnabled,
   aiSearch: (query, destination) => aiSearchPlaces(query, { destination }),
   osmSearch: searchPlaces,
+  aiAddress: aiPlaceAddress,
 };
 
 /** {@link searchPlacesSmart}가 받는 것. */
@@ -137,6 +140,10 @@ export async function searchPlacesSmart(
  *
  * 둘을 한 함수로 합치지 않은 이유는 규칙이 서로 다르기 때문이다 — 「어디에서
  * 찾을까」와 「찾은 좌표를 믿을까」는 따로 읽히고 따로 시험된다.
+ *
+ * M37에서 그 보정에 두 번째 계단이 붙었다: 이름으로 못 찾은 앞 후보들에 한해
+ * AI에게 **정식 주소**를 되묻고 그 주소를 지오코딩한다. OSM에 없는 작은 가게가
+ * 그래도 자기 건물 위에는 앉게 하는 길이다.
  */
 export async function searchPlacesRefined(
   query: string,
@@ -146,6 +153,11 @@ export async function searchPlacesRefined(
   if (found.source !== 'ai' || found.results.length === 0) return found;
 
   const osmSearch = options.deps?.osmSearch ?? DEFAULT_DEPS.osmSearch;
-  const results = await refineCandidates(found.results, { osmSearch, signal: options.signal });
+  const askAddress = options.deps?.aiAddress ?? DEFAULT_DEPS.aiAddress;
+  const results = await refineCandidates(found.results, {
+    osmSearch,
+    askAddress,
+    signal: options.signal,
+  });
   return { ...found, results };
 }

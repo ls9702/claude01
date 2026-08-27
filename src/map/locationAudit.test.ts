@@ -4,6 +4,7 @@ import type { PlaceCandidate } from '../ai/aiPlaces';
 import { emptyWorkspace, type Card, type GeoPoint, type Id, type Workspace } from '../types/models';
 import { SEARCH_ERROR_MESSAGE } from '../utils/geo';
 import {
+  AUDIT_ADDRESS_CANDIDATES,
   AUDIT_MAX_CANDIDATES,
   AUDIT_MAX_MOVE_KM,
   AUDIT_MIN_MOVE_M,
@@ -399,6 +400,82 @@ describe('proposeLocation', () => {
       },
     });
     expect(proposal).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 주소 경유 스냅이 훑기까지 이어지는가 (M37)
+ * ------------------------------------------------------------------ */
+
+describe('proposeLocation — 주소 경유 (M37)', () => {
+  const ADDRESS = '大阪府大阪市浪速区恵美須東1-18-6';
+
+  it('proposes a card OSM only knows by its address', async () => {
+    const aiAddress = vi.fn(async () => ADDRESS);
+    const osmSearch = vi.fn(async (query: string) =>
+      query === ADDRESS ? [{ ...northOf(HERE, 210), address: ADDRESS }] : [],
+    );
+
+    const proposal = await proposeLocation(TARGET, {
+      aiSearch: async () => [AI_HIT],
+      osmSearch,
+      aiAddress,
+    });
+
+    // M36까지는 「제안 없음」이던 카드다 — 이름으로는 아무도 이 가게를 모른다.
+    expect(aiAddress).toHaveBeenCalledTimes(1);
+    expect(proposal?.refined).toBe(true);
+    expect(proposal?.refinedBy).toBe('address');
+    expect(proposal?.lat).toBeCloseTo(northOf(HERE, 210).lat, 6);
+  });
+
+  it(`asks at most ${AUDIT_ADDRESS_CANDIDATES} time per card, whatever the AI offered`, async () => {
+    const aiAddress = vi.fn(async () => null);
+    const many: PlaceCandidate[] = Array.from({ length: 3 }, (_, index) => ({
+      name: `후보 ${index}`,
+      localName: `현지 ${index}`,
+      ...northOf(HERE, 1_000 * (index + 1)),
+    }));
+
+    await proposeLocation(TARGET, {
+      aiSearch: async () => many,
+      osmSearch: async () => [],
+      aiAddress,
+    });
+    expect(aiAddress).toHaveBeenCalledTimes(AUDIT_ADDRESS_CANDIDATES);
+  });
+
+  it('lets a 429 from the address ask out, so the sweep can stop', async () => {
+    // `refineCandidates`는 이 실패를 조용히 삼키지만, 카드 서른 장을 도는 자리에서는
+    // 그 침묵이 곧 서른 번의 8초다. 훑기를 멈춰야 할 실패만 다시 던진다.
+    await expect(
+      proposeLocation(TARGET, {
+        aiSearch: async () => [AI_HIT],
+        osmSearch: async () => [],
+        aiAddress: async () => {
+          throw new AiError('rate');
+        },
+      }),
+    ).rejects.toBeInstanceOf(AiError);
+  });
+
+  it('swallows a one-off address failure and simply proposes nothing', async () => {
+    const proposal = await proposeLocation(TARGET, {
+      aiSearch: async () => [AI_HIT],
+      osmSearch: async () => [],
+      aiAddress: async () => {
+        throw new AiError('network');
+      },
+    });
+    expect(proposal).toBeNull();
+  });
+
+  it('stays on the M36 path when no address ask is wired up', async () => {
+    const osmSearch = vi.fn(async (_query: string): Promise<GeoPoint[]> => []);
+    expect(
+      await proposeLocation(TARGET, { aiSearch: async () => [AI_HIT], osmSearch }),
+    ).toBeNull();
+    expect(osmSearch.mock.calls.every(([query]) => query !== ADDRESS)).toBe(true);
   });
 });
 
