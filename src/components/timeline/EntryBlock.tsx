@@ -3,6 +3,7 @@ import { DND_ENTRY, entryDraggableId } from '../../dnd/planDnd';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, TimelineEntry } from '../../types/models';
 import type { VisualPlacement } from '../../timeline/dayWindow';
+import { noteHint } from '../../timeline/entryNote';
 import { PX_PER_MIN, type LaneBox } from '../../timeline/layout';
 import { colorClasses } from '../../utils/colors';
 import { FLIGHT_CARD_PREFIX } from '../../utils/flights';
@@ -24,6 +25,11 @@ interface EntrySurfaceProps {
    * what says so.
    */
   dawn?: boolean;
+  /**
+   * 이 배치에 적어 둔 메모가 있는가 (M39) — 있으면 모서리에 접힌 자국이 선다.
+   * 문자열이 아니라 참/거짓만 받는다: 이 표면은 메모를 *그리지* 않는다.
+   */
+  hasNote?: boolean;
 }
 
 /**
@@ -37,6 +43,7 @@ export function EntrySurface({
   timeRange,
   short,
   dawn,
+  hasNote,
 }: EntrySurfaceProps) {
   const colors = colorClasses(color);
   // The card title already carries ✈️ for a flight; the column's icon beside it
@@ -50,8 +57,27 @@ export function EntrySurface({
 
   return (
     <div
-      className={`h-full w-full overflow-hidden rounded-md border-l-[3px] px-2 py-1 ring-1 ring-line ${colors.accent} ${colors.surface}`}
+      className={`relative h-full w-full overflow-hidden rounded-md border-l-[3px] px-2 py-1 ring-1 ring-line ${colors.accent} ${colors.surface}`}
     >
+      {/* 메모 표시 (M39) — 엑셀 셀 모서리의 그 삼각형이 하는 일.
+
+          **겹쳐 놓는다**: 15분짜리 블록도 한 줄 높이 그대로여야 하므로 자리를
+          차지하는 것은 아무것도 더할 수 없고, 이 자국은 제목 줄의 오른쪽 여백
+          위에 얹힌다. `overflow-hidden`이 둥근 모서리를 따라 잘라 준다.
+
+          빨강이 아닌 이유는 M9다: 이 화면에서 빨강 계열은 파괴적 액션(danger)과
+          「지금」(now)이 이미 쓰고 있고, 메모는 둘 중 어느 것도 아니다. 접힌
+          종이 모서리는 색을 빌리지 않고도 같은 말을 한다.
+
+          `pointer-events-none` — 블록을 누르면 상세 시트가 열려야 하고, 메모를
+          고치는 자리도 거기다. 손가락 밑에서 표시가 탭을 가로채면 안 된다. */}
+      {hasNote ? (
+        <span
+          data-testid="entry-note-mark"
+          aria-hidden="true"
+          className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[9px] border-t-[9px] border-l-transparent border-t-ink/70"
+        />
+      ) : null}
       <p className="flex items-center gap-1 truncate text-micro text-ink">
         {dawn ? (
           <span
@@ -168,6 +194,9 @@ export default function EntryBlock({
    */
   const resizable = placement.drawMin === entry.durationMin;
 
+  /** '' when this placement carries no memo — the one test both marks use. */
+  const hint = noteHint(entry.note);
+
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     // Keep the drag sensor out of it: this gesture belongs to the handle.
     event.preventDefault();
@@ -218,7 +247,14 @@ export default function EntryBlock({
       data-offset-min={placement.offsetMin}
       data-dawn={placement.dawn ? 'true' : 'false'}
       data-clipped={placement.clipped ? 'true' : 'false'}
-      title={`${card?.title ?? ''} ${formatTimeRange(entry.startMin, entry.durationMin)}`}
+      data-note={hint === '' ? 'false' : 'true'}
+      // 데스크톱에서 거의 공짜로 얻는 미리보기 — 메모의 앞 두 줄까지만 (M39).
+      title={[
+        `${card?.title ?? ''} ${formatTimeRange(entry.startMin, entry.durationMin)}`,
+        hint,
+      ]
+        .filter((line) => line !== '')
+        .join('\n')}
       style={{
         position: 'absolute',
         top: minToY(placement.offsetMin, PX_PER_MIN),
@@ -244,6 +280,7 @@ export default function EntryBlock({
         timeRange={formatTimeRange(entry.startMin, entry.durationMin)}
         short={height < 34}
         dawn={placement.dawn}
+        hasNote={hint !== ''}
       />
 
       {resizable ? (

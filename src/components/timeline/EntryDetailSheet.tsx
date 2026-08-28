@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Card, TimelineEntry } from '../../types/models';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import {
@@ -77,11 +77,19 @@ interface EntryDetailSheetProps extends LocalMoney {
   onOpenBoard?: () => void;
 }
 
+/** Tallest the 메모 box grows before it scrolls inside itself (M39). */
+const MAX_NOTE_PX = 240;
+
 /**
  * Tap-an-entry detail sheet: card info, note, ±15분 time editors, delete.
  *
  * These steppers are the dependable path on touch devices — dragging a block
  * works, but nudging a start time by a quarter hour with a thumb does not.
+ *
+ * 메모는 이 시트에만 있다 (M39): 그리드의 블록은 15분짜리 한 줄일 수도 있어서
+ * 글이 들어갈 자리가 없고, 대신 모서리에 접힌 자국이 서서 「여기 적어 둔 것이
+ * 있다」만 말한다. 읽는 자리와 쓰는 자리가 같은 하나라는 뜻이기도 하다 —
+ * 자국이 보이면 블록을 눌러 이리로 온다.
  */
 export default function EntryDetailSheet({
   entry,
@@ -96,8 +104,28 @@ export default function EntryDetailSheet({
 }: EntryDetailSheetProps) {
   const moveEntry = useWorkspaceStore((s) => s.moveEntry);
   const resizeEntry = useWorkspaceStore((s) => s.resizeEntry);
-  const updateEntry = useWorkspaceStore((s) => s.updateEntry);
+  const updateEntryNote = useWorkspaceStore((s) => s.updateEntryNote);
   const [note, setNote] = useState(entry.note ?? '');
+  const noteRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /**
+   * Grows with the memo, capped so the sheet keeps its shape (M39).
+   *
+   * `rows`가 정한 세 줄 아래로는 **줄어들지 않는다**: `height: auto`로 되돌린
+   * 순간의 `clientHeight`가 바로 그 세 줄이고, 짧은 메모의 `scrollHeight`는 그보다
+   * 작다. 바닥을 두지 않으면 빈 메모 칸이 한 줄로 짜부라져 M39 이전보다 좁아진다.
+   */
+  const growNote = (): void => {
+    const node = noteRef.current;
+    if (!node) return;
+    node.style.height = 'auto';
+    const floor = node.clientHeight;
+    node.style.height = `${Math.min(Math.max(node.scrollHeight, floor), MAX_NOTE_PX)}px`;
+  };
+
+  // 이미 적혀 있던 메모는 처음부터 제 높이로 열린다 — 열자마자 스크롤바를
+  // 만나는 것은 세 줄짜리 메모에게 부당하다.
+  useEffect(growNote, []);
 
   const stepStart = (delta: number) => {
     const next = Math.min(Math.max(entry.startMin + delta, 0), DAY_MIN - MIN_ENTRY_MIN);
@@ -109,7 +137,9 @@ export default function EntryDetailSheet({
   };
 
   const save = () => {
-    updateEntry(entry.id, { note: note.trim() || undefined });
+    // 손질도, 비우면 필드를 키째 지우는 것도, 그대로면 아무 일도 하지 않는 것도
+    // 전부 스토어 쪽 규칙이다 — 이 화면은 「저장」과 「닫기」만 안다 (M39).
+    updateEntryNote(entry.id, note);
     onClose();
   };
 
@@ -174,10 +204,14 @@ export default function EntryDetailSheet({
           </label>
           <textarea
             id="entry-note"
+            ref={noteRef}
             data-testid="entry-note-input"
             value={note}
             rows={3}
-            onChange={(event) => setNote(event.target.value)}
+            onChange={(event) => {
+              setNote(event.target.value);
+              growNote();
+            }}
             placeholder="이 시간에 기억해 둘 것"
             className={TEXTAREA_CLASS}
           />

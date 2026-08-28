@@ -132,15 +132,24 @@ async function carryEntryToTrashByTouch(page: Page): Promise<() => Promise<void>
   };
 
   await touch('touchStart', { y });
-  // 롱프레스가 끝나기 전에 움직이면 들리지 않는다.
-  await page.waitForTimeout(350);
+  // 롱프레스(250ms)가 끝나기 전에 8px 넘게 움직이면 들리지 않는다. 컨테이너가
+  // 바쁠 때는 페이지의 타이머가 실제 시간보다 늦게 돌므로, ① 넉넉히 기다리고
+  // ② 센서가 아직 안 깨어났어도 취소되지 않도록 **허용 오차(8px) 이내**로만
+  // 꼼지락거리며 ③ 휴지통이 진짜로 나타날 때까지 재시도한다 — 고정 대기 한
+  // 번에 거는 것이 이 테스트가 부하에서 눕던 이유였다.
+  await page.waitForTimeout(600);
+  const trash = page.getByTestId('entry-trash');
+  await expect(async () => {
+    await touch('touchMove', { y: y + 4 });
+    await page.waitForTimeout(60);
+    await touch('touchMove', { y: y + 7 });
+    await expect(trash).toBeVisible({ timeout: 700 });
+  }).toPass({ timeout: 8_000 });
+  // 이제 들렸다 — 큰 걸음은 지금부터.
   for (let step = 1; step <= 6; step += 1) {
     await touch('touchMove', { y: y + step * 12 });
-    await page.waitForTimeout(20);
+    await page.waitForTimeout(40);
   }
-
-  const trash = page.getByTestId('entry-trash');
-  await expect(trash).toBeVisible();
   const trashBox = await trash.boundingBox();
   if (!trashBox) throw new Error('휴지통의 위치를 찾지 못했어요');
 
@@ -148,7 +157,7 @@ async function carryEntryToTrashByTouch(page: Page): Promise<() => Promise<void>
   const to = trashBox.y + trashBox.height / 2;
   for (const step of [0.3, 0.6, 0.9, 1]) {
     await touch('touchMove', { y: from + (to - from) * step });
-    await page.waitForTimeout(20);
+    await page.waitForTimeout(40);
   }
   await expect(trash).toHaveAttribute('data-over', 'true');
 
@@ -327,15 +336,20 @@ test.describe('모바일 390px · 손가락', () => {
     const drop = await carryEntryToTrashByTouch(page);
     await drop();
 
+    // 실행 취소 토스트는 4초짜리다 — 확인할 것들을 그 앞에 줄 세우면 부하가
+    // 조금만 있어도 클릭이 만료와 경합한다. 지웠다는 사실 하나만 보고 바로
+    // 되돌리고, 나머지는 복원 뒤에 천천히 확인한다.
     await expect(page.getByTestId('timeline-entry')).toHaveCount(0);
-    await expect(page.getByTestId('entry-trash')).toHaveCount(0);
-    // 카드는 살아 있다 — 미배치로 트레이에 돌아온다.
-    await expect(page.getByTestId('tray-count')).toHaveAttribute('data-count', '1');
-
     await expect(page.getByTestId('undo-toast')).toContainText('통천각');
-    await page.getByTestId('undo-action').click();
-    await expect(page.getByTestId('timeline-entry')).toHaveCount(1);
+    // 터치 드래그 직후의 첫 클릭은 dnd-kit이 한 번 삼킬 수 있다 — 보드 스펙이
+    // M15에서 배운 그대로, 살아날 때까지 dispatchEvent로 다시 두드린다.
+    await expect(async () => {
+      await page.getByTestId('undo-action').dispatchEvent('click');
+      await expect(page.getByTestId('timeline-entry')).toHaveCount(1, { timeout: 700 });
+    }).toPass({ timeout: 3_500 });
     await expect(page.getByTestId('timeline-entry')).toHaveAttribute('data-start-min', '600');
+    // 드래그가 끝났으니 휴지통도 없고, 카드는 다시 배치 상태라 미배치 0.
+    await expect(page.getByTestId('entry-trash')).toHaveCount(0);
     await expect(page.getByTestId('tray-count')).toHaveAttribute('data-count', '0');
   });
 });

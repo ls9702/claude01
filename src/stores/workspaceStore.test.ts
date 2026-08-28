@@ -991,6 +991,105 @@ describe('resizeEntry / updateEntry / deleteEntry', () => {
   });
 });
 
+describe('updateEntryNote (M39)', () => {
+  it('writes the note and stamps updatedAt', () => {
+    const { cardId, dayA } = timelineSetup();
+    const entryId = store().scheduleCard(cardId, dayA, 540)!;
+    expect(ws().entries[entryId].note).toBeUndefined();
+
+    store().updateEntryNote(entryId, '개장 30분 전 도착');
+
+    expect(ws().entries[entryId].note).toBe('개장 30분 전 도착');
+    expect(useWorkspaceStore.getState().dirty).toBe(true);
+  });
+
+  it('trims, and keeps the line breaks inside', () => {
+    const { cardId, dayA } = timelineSetup();
+    const entryId = store().scheduleCard(cardId, dayA, 540)!;
+
+    store().updateEntryNote(entryId, '  개장 30분 전 도착\n짐은 호텔에  \n');
+    expect(ws().entries[entryId].note).toBe('개장 30분 전 도착\n짐은 호텔에');
+  });
+
+  it('removes the field entirely when the note is blanked', () => {
+    const { cardId, dayA } = timelineSetup();
+    const entryId = store().scheduleCard(cardId, dayA, 540, 90)!;
+
+    store().updateEntryNote(entryId, '메모');
+    store().updateEntryNote(entryId, '   \n  ');
+
+    const entry = ws().entries[entryId];
+    // Not `undefined` — the key itself must be gone, so what syncs is exactly
+    // the shape an entry that never had a note has.
+    expect('note' in entry).toBe(false);
+    expect(JSON.parse(JSON.stringify(entry))).not.toHaveProperty('note');
+    // 나머지는 그대로다.
+    expect(entry.startMin).toBe(540);
+    expect(entry.durationMin).toBe(90);
+    expect(entry.dayId).toBe(dayA);
+  });
+
+  it('no-ops when the trimmed text is unchanged', () => {
+    const { cardId, dayA } = timelineSetup();
+    const entryId = store().scheduleCard(cardId, dayA, 540)!;
+    store().updateEntryNote(entryId, '표 미리 예매');
+    useWorkspaceStore.setState({ dirty: false });
+    const before = ws();
+
+    store().updateEntryNote(entryId, '  표 미리 예매  ');
+
+    expect(ws()).toBe(before);
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
+  it('no-ops on a blank note for an entry that never had one', () => {
+    const { cardId, dayA } = timelineSetup();
+    const entryId = store().scheduleCard(cardId, dayA, 540)!;
+    useWorkspaceStore.setState({ dirty: false });
+    const before = ws();
+
+    store().updateEntryNote(entryId, '   ');
+
+    expect(ws()).toBe(before);
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
+  it('no-ops for an unknown id', () => {
+    timelineSetup();
+    const before = ws();
+    store().updateEntryNote('nope', '메모');
+    expect(ws()).toBe(before);
+  });
+
+  it('메모는 배치마다 따로다 — 같은 카드를 두 번 놓으면 메모도 둘이다', () => {
+    const { cardId, dayA, dayB } = timelineSetup();
+    const morning = store().scheduleCard(cardId, dayA, 540)!;
+    const evening = store().scheduleCard(cardId, dayB, 1140)!;
+
+    store().updateEntryNote(morning, '아침엔 줄이 짧아요');
+
+    expect(ws().entries[morning].note).toBe('아침엔 줄이 짧아요');
+    expect(ws().entries[evening].note).toBeUndefined();
+    // 카드 자체는 손대지 않는다 — 보드의 메모와는 다른 것이다.
+    expect(ws().cards[cardId].memo).toBeUndefined();
+
+    store().updateEntryNote(evening, '저녁엔 예약 필수');
+    expect(ws().entries[morning].note).toBe('아침엔 줄이 짧아요');
+    expect(ws().entries[evening].note).toBe('저녁엔 예약 필수');
+  });
+
+  it('메모가 붙은 배치도 삭제는 그대로 톰스톤 하나다', () => {
+    const { cardId, dayA } = timelineSetup();
+    const entryId = store().scheduleCard(cardId, dayA, 540)!;
+    store().updateEntryNote(entryId, '표 미리 예매');
+
+    store().deleteEntry(entryId);
+
+    expect(ws().entries[entryId]).toBeUndefined();
+    expect(ws().tombstones).toEqual([expect.objectContaining({ id: entryId, entity: 'entry' })]);
+  });
+});
+
 describe('addColumn / addCard guards', () => {
   it('appends a column to columnOrder', () => {
     const tripId = store().addTrip('여행');

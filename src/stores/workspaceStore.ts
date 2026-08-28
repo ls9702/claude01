@@ -650,6 +650,23 @@ export interface WorkspaceState {
   resizeEntry: (entryId: Id, durationMin: number) => void;
   /** Patches an entry's note. */
   updateEntry: (id: Id, patch: EntryPatch) => void;
+  /**
+   * 배치 하나에 붙는 메모를 쓰거나 지운다 (M39) — 엑셀 셀의 코멘트와 같은 자리.
+   *
+   * {@link updateEntry}와 달리 **문자열 하나만** 받고, 그 대신 세 가지를 지킨다.
+   *
+   * 1. 앞뒤 공백을 손질한다.
+   * 2. 남는 것이 없으면 {@link TimelineEntry.note}를 **키째로** 없앤다
+   *    (`toggleCardDone`·`removeMemoMessage`와 같은 손질). `{ note: undefined }`를
+   *    덧쓰면 키가 `undefined`인 채로 남아, 「메모 없음」이 두 가지 모양을 갖는다.
+   * 3. 내용이 그대로면 아무 일도 하지 않는다 — 시트를 열었다 저장만 눌렀다고
+   *    워크스페이스가 더러워지고 푸시가 한 번 더 나가면 그건 저장이 아니라 잡음이다.
+   *
+   * 메모는 **카드가 아니라 배치**에 붙는다: 같은 카드를 두 번 놓으면 메모도 둘이고,
+   * 서로를 모른다. 그래서 이 화면에서만 보이고 보드·지도·결산에는 새지 않는다.
+   * No-op for an unknown id.
+   */
+  updateEntryNote: (entryId: Id, note: string) => void;
   /** Removes an entry, leaving a tombstone. */
   deleteEntry: (id: Id) => void;
 }
@@ -1380,6 +1397,24 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         updateEntry: (id, patch) => {
           run((draft, now) => touch<TimelineEntry>(draft.entries, id, patch, now));
+        },
+
+        updateEntryNote: (entryId, note) => {
+          run((draft, now) => {
+            const entry = draft.entries[entryId];
+            if (!entry) return null;
+
+            const next = note.trim();
+            if (next === (entry.note ?? '')) return null;
+
+            if (next === '') {
+              // 되지어 넣는다 — `note: undefined`가 아니라 키가 **없는** 배치로.
+              const { note: _cleared, ...rest } = entry;
+              draft.entries[entryId] = { ...rest, updatedAt: now };
+              return true;
+            }
+            return touch<TimelineEntry>(draft.entries, entryId, { note: next }, now);
+          });
         },
 
         deleteEntry: (id) => {
