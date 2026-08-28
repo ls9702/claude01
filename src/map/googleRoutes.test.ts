@@ -309,6 +309,27 @@ describe('routeLeg', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('걸을 거리가 아니면(3km 초과 직선) 도보를 묻지도 않는다 — 간사이공항 사건', async () => {
+    // 간사이공항 → 난바: 직선 ~38km. 일본은 API에 전철 경로가 없어 TRANSIT이
+    // 빈손으로 오는데, 여기서 도보로 넘어가면 「12시간, 고베 경유」가 그려졌다.
+    const kix = { lat: 34.4347, lng: 135.2441 };
+    const namba = { lat: 34.6659, lng: 135.5013 };
+    const { calls } = installFake((request) =>
+      request.mode === 'TRANSIT' ? {} : answerWith(DOC_POLYLINE, 44_880),
+    );
+    expect(await routeLeg('key-1', kix, namba)).toBeNull();
+    expect(calls.map((call) => call.mode)).toEqual(['TRANSIT']);
+  });
+
+  it('걸을 만한 거리(3km 이내)의 도보 폴백은 그대로 산다', async () => {
+    const { calls } = installFake((request) =>
+      request.mode === 'TRANSIT' ? {} : answerWith(DOC_POLYLINE, 600),
+    );
+    const result = await routeLeg('key-1', from, to);
+    expect(result!.mode).toBe('WALK');
+    expect(calls.map((call) => call.mode)).toEqual(['TRANSIT', 'WALK']);
+  });
+
   it('가짜가 던져도 조용히 null', async () => {
     installFake(() => {
       throw new Error('boom');

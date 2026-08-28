@@ -45,7 +45,7 @@ docs/                    ← deploy-synology.md(NAS 가이드)·HANDOFF.md(이 �
 2. **Playwright 1.56.1 고정** — 컨테이너의 chromium 빌드(1194)와 맞물림. 업그레이드·`playwright install` 금지.
 3. **하루 경계는 05시** (`timeline/dayWindow.ts`): 새벽(00~05시) 엔트리는 전날 창에 표시·집계. 일자 단위 UI는 반드시 windowed 트윈(daySpendWindowed 등) 사용, 달력 트윈은 결산/여행 범위용.
 4. 병합은 엔티티 LWW + 톰스톤(30일 TTL) + 정렬배열 재조정 (`sync/merge.ts`). 사진 바이트는 워크스페이스 JSON 밖(별도 idb + image.php).
-5. 완료 기준: `npm run typecheck && npm run build && npm run test && npm run e2e` **전부 그린** 후에만 커밋. 현재 기준선: **단위 1119 / e2e 192**.
+5. 완료 기준: `npm run typecheck && npm run build && npm run test && npm run e2e` **전부 그린** 후에만 커밋. 현재 기준선: **단위 1121 / e2e 192**.
 6. 테스트ID·문구는 추가만(기존 것 변경 시 해당 스펙 최소 수정 + 커밋 메시지에 기록). 드래그 e2e는 스텝 이동+`--repeat-each` 재확인.
 7. 커밋은 마일스톤 단위, 브랜치 `claude/mobile-macbook-session-sync-xs40tt`, PR 안 만듦. 모델명·세션 링크 외 AI 흔적을 저장소에 남기지 않음(커밋 트레일러는 기존 형식 유지).
 8. 사용자 워크플로우 선호: **블록 단위로 Opus 서브에이전트에 위임**, 메인 세션이 검증·커밋. 큰 변경엔 적대적 검수 패스 추가. 완료 시 NAS 덮어쓰기용 zip 패키지 제공(사용자가 File Station으로 올림).

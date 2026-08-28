@@ -39,6 +39,7 @@
 
 import { formatDuration } from '../utils/time';
 import type { RouteStop } from '../timeline/route';
+import { haversineKm } from './refine';
 
 /** 지도가 다루는 점 하나. */
 export interface RoutePoint {
@@ -304,7 +305,20 @@ async function callComputeRoutes(
 }
 
 /**
- * 한 다리의 실제 경로 — 대중교통으로, 없으면 걸어서, 그것도 없으면 `null`.
+ * 도보 폴백이 허락되는 최대 **직선** 거리, km.
+ *
+ * 구글은 일본의 전철·버스 경로를 API로 내주지 않는다(소비자 앱에만 있다 —
+ * 철도 데이터 라이선스). 그래서 이 여행의 다리 대부분은 TRANSIT이 빈손으로
+ * 오는데, 그때마다 걷는 길을 그리면 간사이공항→난바 같은 전철 구간이
+ * 「도보 12시간, 고베 경유」로 그려진다 — 실사용 신고 그대로다. 걷기는 걸을
+ * 만한 거리에서만 정직하고, 그보다 먼 다리는 점선 직선이 낫다(길찾기 버튼이
+ * 구글맵 앱을 열면 거기엔 전철 경로가 제대로 있다).
+ */
+export const WALK_FALLBACK_MAX_KM = 3;
+
+/**
+ * 한 다리의 실제 경로 — 대중교통으로, 없으면 **걸을 만한 거리에 한해** 걸어서,
+ * 그것도 없으면 `null`(점선 직선).
  *
  * 캐시는 (출발, 도착, 이동수단)마다다. 그래서 대중교통이 빈 답이었던 다리는 다음
  * 번에도 대중교통을 묻지 않고 바로 걷는 길의 기억으로 간다.
@@ -325,6 +339,10 @@ export async function routeLeg(
     legCache.set(transitKey, transit);
   }
   if (transit) return transit;
+
+  // 직선으로도 걸을 거리가 아니면 도보를 묻지도 않는다 — 요청 하나 아끼고,
+  // 오해를 하나 막는다.
+  if (haversineKm(from, to) > WALK_FALLBACK_MAX_KM) return null;
 
   const walkKey = routeCacheKey(from, to, 'WALK');
   if (legCache.has(walkKey)) return legCache.get(walkKey) ?? null;
