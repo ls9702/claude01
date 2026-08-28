@@ -41,7 +41,8 @@ export type IconName =
   | 'sparkle'
   | 'chat'
   | 'copy'
-  | 'gift';
+  | 'gift'
+  | 'locate';
 
 /** `name` → the path data drawn inside a `0 0 24 24` box. */
 const PATHS: Record<IconName, string> = {
@@ -92,6 +93,9 @@ const PATHS: Record<IconName, string> = {
   // 새 소식 = 패치노트 (M40). 리본 두른 상자 — 종(알림)은 재촉하는 물건이라
   // 이 조용한 배지와 어울리지 않고, ✨는 이미 AI 것이다.
   gift: 'M3 11h18M4 11v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8M3 8h18v3H3zM12 8v12M12 8C11 5 9.5 4 8.5 4a2 2 0 0 0 0 4H12ZM12 8c1-3 2.5-4 3.5-4a2 2 0 0 1 0 4H12Z',
+  // 내 위치 (M42). 조준선 — 지도 앱들이 쓰는 그 그림이라 설명이 필요 없다.
+  // `pin`과 헷갈릴 수 없는 것도 중요하다: 핀은 「저기 어딘가」고, 이건 「나」다.
+  locate: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM12 2v3M12 19v3M2 12h3M19 12h3',
 };
 
 interface IconProps {

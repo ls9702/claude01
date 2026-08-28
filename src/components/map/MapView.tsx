@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { latLngBounds } from 'leaflet';
-import { MapContainer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet';
+import { Circle, MapContainer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
+import { DIRECTIONS_LABEL, directionsUrl, previousStopMap } from '../../map/directions';
 import {
   emptyFilterHint,
   scopeCards,
   type MapFilter,
   type MapScopeKind,
 } from '../../map/filter';
+import { MY_LOCATION_HEX, geoOn, useMyLocation, type GeoFix } from '../../map/geolocate';
 import { useGoogleMapsKey } from '../../map/gmapsKey';
 import { loadMapFilter, saveMapFilter } from '../../stores/mapFilterPref';
 import { loadRouteChoice, saveRouteChoice, storedDayId } from '../../stores/mapRoutePref';
@@ -41,10 +43,12 @@ import {
   DESTINATION_ZOOM,
   FIT_MAX_ZOOM,
   FIT_PAD,
+  MY_LOCATION_ZOOM,
   OsmTiles,
   WORLD_CENTER,
   WORLD_ZOOM,
   cardPinIcon,
+  myLocationIcon,
 } from './mapBase';
 
 /** A located card plus the column it draws its color and icon from. */
@@ -200,6 +204,58 @@ function FitOnce({ points, fitKey, ready }: FitPinsProps) {
 }
 
 /**
+ * 「내 위치」 — 파란 점, 정확도 원, 그리고 켤 때 한 번의 이동 (M42).
+ *
+ * 갱신마다 화면을 따라 움직이지 않는 이유는 {@link FitOnce}가 필터마다 다시
+ * 맞추지 **않는** 이유와 같다: 지도를 손으로 옮겨 다른 동네를 보고 있는 사람을
+ * 앱이 계속 끌고 오면, 그건 도움이 아니라 힘겨루기다. 그래서 「이번에 켠 뒤 처음
+ * 온 좌표」에서만 움직이고(`session`), 그 뒤에는 점만 따라간다.
+ *
+ * 배율은 **낮추지 않는다** — 이미 골목까지 확대해 둔 사용자를 동네 배율로
+ * 되돌리면 그것도 같은 힘겨루기다.
+ */
+function MyLocationLayer({ fix, session }: { fix: GeoFix | null; session: number }) {
+  const map = useMap();
+  const pannedRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!fix || pannedRef.current === session) return;
+    pannedRef.current = session;
+    map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), MY_LOCATION_ZOOM), { animate: false });
+  }, [map, fix, session]);
+
+  if (!fix) return null;
+
+  return (
+    <>
+      {fix.accuracyM > 0 ? (
+        <Circle
+          center={[fix.lat, fix.lng]}
+          radius={fix.accuracyM}
+          // 정확도 원은 「이 안 어딘가」라는 사실이지 누를 것이 아니다.
+          interactive={false}
+          pathOptions={{
+            color: MY_LOCATION_HEX,
+            weight: 1,
+            opacity: 0.35,
+            fillColor: MY_LOCATION_HEX,
+            fillOpacity: 0.12,
+            className: 'tb-my-accuracy',
+          }}
+        />
+      ) : null}
+      <Marker
+        position={[fix.lat, fix.lng]}
+        icon={myLocationIcon()}
+        interactive={false}
+        keyboard={false}
+        zIndexOffset={900}
+      />
+    </>
+  );
+}
+
+/**
  * `navigator.onLine`, kept live.
  *
  * Tiles come from openstreetmap.org and nothing else on this screen does, so
@@ -297,6 +353,14 @@ export default function MapView() {
   const focusCard = useUiStore((s) => s.focusCard);
   const isDesktop = useIsDesktop();
   const online = useOnline();
+  /**
+   * 「내 위치」 (M42) — 두 지도가 나눠 쓰는 하나의 상태.
+   *
+   * 훅이 여기 사는 이유는 버튼이 여기 있기 때문이다: 지도 컨테이너 **바깥**의
+   * 오버레이라 엔진이 갈려도 자리가 같고, 그래서 Leaflet이든 구글이든 「내
+   * 위치」는 같은 버튼, 같은 파란 점, 같은 안내 한 줄이다.
+   */
+  const myLocation = useMyLocation();
   /** 이 기기가 구글 지도를 쓸 수 있는가 (M41) — 없으면 지금까지 그대로 OSM. */
   const googleKey = useGoogleMapsKey();
   /**
@@ -465,6 +529,17 @@ export default function MapView() {
   const routePoints = useMemo(
     () => drawings.flatMap((drawing) => drawing.route.stops),
     [drawings],
+  );
+
+  /**
+   * 「길찾기」의 출발지 (M42) — 한 날을 보고 있을 때 그 날의 앞 장소.
+   *
+   * 구글 지도 갈래도 같은 함수를 부른다({@link GoogleMapView}). 같은 카드의 같은
+   * 링크가 두 엔진에서 다르면 그건 두 개의 앱이다.
+   */
+  const previousStops = useMemo(
+    () => previousStopMap(selection.kind === 'day' ? drawings.map((item) => item.route.stops) : []),
+    [selection.kind, drawings],
   );
 
   const routeKey =
@@ -667,6 +742,8 @@ export default function MapView() {
   if (!trip) return <TripPrompt />;
 
   const ready = size.x > 0 && size.y > 0;
+  /** 「내 위치」 버튼이 눌린 모양으로 서 있어야 하는가. */
+  const locating = geoOn(myLocation.state);
 
   /** Hands the card over to the 보드 tab, which opens its edit sheet. */
   const editOnBoard = (card: Card) => {
@@ -1062,6 +1139,10 @@ export default function MapView() {
             fitKey={filterKey}
             routePoints={routePoints}
             routeKey={routeKey}
+            // 실제 경로를 물어보는 유일한 조건 (M42): 지금 한 날을 보고 있는가.
+            routeDayId={selection.kind === 'day' ? selection.dayId : undefined}
+            myLocation={myLocation.state.fix}
+            myLocationSession={myLocation.state.session}
             fallback={destination}
             currency={trip.currency}
             onEditCard={editOnBoard}
@@ -1087,6 +1168,7 @@ export default function MapView() {
               아무것도 없는 화면으로 사용자를 끌고 가지 않는 게 `FitOnce`의 계약. */}
           <FitOnce points={filterPoints} fitKey={filterKey} ready={ready} />
           <FitOnce points={routePoints} fitKey={routeKey} ready={ready} />
+          <MyLocationLayer fix={myLocation.state.fix} session={myLocation.state.session} />
 
           {visiblePins.map(({ card, column }) => (
             <Marker
@@ -1164,6 +1246,23 @@ export default function MapView() {
                     >
                       보드에서 편집
                     </button>
+                    {/* 실제로 그 길을 걷는 일은 구글 지도 앱이 한다 (M42).
+                        한 날을 보고 있으면 그 날의 앞 장소가 출발지로 실린다. */}
+                    {(() => {
+                      const href = directionsUrl(card.location, previousStops.get(card.id));
+                      return href ? (
+                        <a
+                          data-testid="map-popup-directions"
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`${SECONDARY_BUTTON_CLASS} w-full`}
+                        >
+                          <Icon name="route" size={16} />
+                          {DIRECTIONS_LABEL}
+                        </a>
+                      ) : null;
+                    })()}
                     {/* The same destructive action wears the same clothes here
                         as in every sheet footer (M9 §4.7-4). */}
                     <button
@@ -1189,6 +1288,39 @@ export default function MapView() {
           />
         </MapContainer>
         )}
+
+        {/* 내 위치 (M42) — 지도 컨테이너 **바깥**의 오버레이라 두 엔진에서 자리가
+            같다. Leaflet의 ＋/− 는 오른쪽 위 10px에 두 칸(≈64px)을 차지하므로 그
+            바로 아래에 선다; 구글은 자기 확대 버튼을 오른쪽 **아래**에 두어 이
+            자리가 비어 있다. Leaflet 컨트롤이 z-index 1000까지 올라오므로 그 위. */}
+        <button
+          type="button"
+          data-testid="map-locate"
+          data-active={locating}
+          aria-pressed={locating}
+          aria-label="내 위치"
+          title="내 위치"
+          onClick={myLocation.toggle}
+          className={[
+            'absolute right-2.5 top-[5.5rem] z-[1100] grid h-11 w-11 place-items-center',
+            'rounded-full border bg-surface/95 shadow-raise',
+            'transition-colors duration-[140ms] ease-quick',
+            locating ? 'border-ink text-ink' : 'border-line text-ink-muted hover:text-ink',
+          ].join(' ')}
+        >
+          <Icon name="locate" size={20} />
+        </button>
+
+        {/* 거절·불가·시간초과는 모달이 아니라 버튼 아래 한 줄이다 (M42). 방금
+            스스로 거절한 사람에게 앱이 창을 띄워 되묻는 일은 없어야 한다. */}
+        {myLocation.state.message ? (
+          <p
+            data-testid="map-locate-error"
+            className="absolute right-2.5 top-[9.25rem] z-[1100] max-w-[11rem] rounded-md bg-surface/95 px-2 py-1 text-right text-micro font-normal text-ink-muted shadow-raise"
+          >
+            {myLocation.state.message}
+          </p>
+        ) : null}
 
         {pins.length === 0 ? (
           <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center p-6">

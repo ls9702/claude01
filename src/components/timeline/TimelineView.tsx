@@ -23,6 +23,7 @@ import {
   type DayRef,
   type WindowedEntry,
 } from '../../timeline/dayWindow';
+import { dayRouteWindowed } from '../../timeline/route';
 import { summarizeSchedule } from '../../timeline/scheduleSummary';
 import { currentAndNextWindowed, nowMin, todayFocus } from '../../timeline/today';
 import {
@@ -1137,6 +1138,16 @@ export default function TimelineView() {
             const shownId = effectiveDayId(dialogEntry, dayOrder);
             const index = days.findIndex((day) => day.id === shownId);
             return index >= 0 ? dayTitle(days[index], index) : '';
+          })()}
+          // 「길찾기」의 출발지 (M42): 05시 창의 그 날 동선에서 이 카드 **앞**에
+          // 오는 장소. 지도 탭의 팝업이 쓰는 것과 같은 규칙이고, 같은 계산
+          // (`dayRouteWindowed`)에서 나온다.
+          directionsOrigin={(() => {
+            const shownId = effectiveDayId(dialogEntry, dayOrder);
+            const stops = dayRouteWindowed(workspace, shownId, dayOrder).stops;
+            const index = stops.findIndex((stop) => stop.cardId === dialogEntry.cardId);
+            if (index <= 0) return null;
+            return { lat: stops[index - 1].lat, lng: stops[index - 1].lng };
           })()}
           onClose={() => setDialog(null)}
           onDelete={removeEntry}

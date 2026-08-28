@@ -54,6 +54,17 @@ export interface GooglePolyline {
   setMap: (map: GoogleMap | null) => void;
 }
 
+/**
+ * 우리가 쓰는 만큼의 `google.maps.Circle` (M42) — 「내 위치」의 정확도 원.
+ *
+ * `Polyline`과 같은 계약이라 다루는 법도 같다: 만들 때 지도에 얹고, `setMap(null)`
+ * 로 뗀다. 선택적인 이유는 이것 하나가 없다고 지도가 서지 못할 이유는 없기
+ * 때문이다 — 원이 없으면 파란 점만 선다.
+ */
+export interface GoogleCircle {
+  setMap: (map: GoogleMap | null) => void;
+}
+
 /** 우리가 쓰는 만큼의 `google.maps.marker.AdvancedMarkerElement`. */
 export interface GoogleMarker {
   map: GoogleMap | null;
@@ -83,6 +94,8 @@ export interface GoogleMapsApi {
   Map: new (element: HTMLElement, options?: Record<string, unknown>) => GoogleMap;
   Polyline: new (options?: Record<string, unknown>) => GooglePolyline;
   LatLngBounds: new () => GoogleBounds;
+  /** 「내 위치」의 정확도 원 (M42) — 없으면 원 없이 점만 선다. */
+  Circle?: new (options?: Record<string, unknown>) => GoogleCircle;
   SymbolPath?: Record<string, unknown>;
   importLibrary?: (name: string) => Promise<unknown>;
   /** `libraries=marker`로 실은 경우의 자리 — `importLibrary`가 없을 때의 대비. */

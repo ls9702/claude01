@@ -1,5 +1,6 @@
 import { divIcon, type DivIcon } from 'leaflet';
 import { TileLayer } from 'react-leaflet';
+import { MY_LOCATION_HEX } from '../../map/geolocate';
 import type { Id } from '../../types/models';
 import { colorHex } from '../../utils/colors';
 
@@ -100,5 +101,34 @@ export function cardPinIcon(
     iconSize: [PIN_PX, PIN_PX],
     iconAnchor: [PIN_PX / 2, PIN_PX + 6],
     popupAnchor: [0, -PIN_PX - 2],
+  });
+}
+
+/** 「내 위치」 파란 점의 지름 (M42). */
+const MY_LOCATION_PX = 18;
+
+/** 「내 위치」로 이동할 때의 최소 배율 — 동네가 보이는 정도. */
+export const MY_LOCATION_ZOOM = 16;
+
+/**
+ * 「나」를 나타내는 파란 점 (M42) — 카테고리 핀과 절대 헷갈리면 안 되는 표식.
+ *
+ * 그래서 물방울이 아니라 **동그라미**이고, 팔레트의 어느 카테고리 색도 아닌
+ * 지도 앱 공통의 파랑이다. `data-testid`를 달기 위해 `CircleMarker` 대신
+ * `divIcon`을 쓴다 — SVG path에는 이름표를 붙일 자리가 마땅치 않다.
+ */
+export function myLocationIcon(): DivIcon {
+  const html = [
+    '<div data-testid="map-my-location"',
+    ` style="width:${MY_LOCATION_PX}px;height:${MY_LOCATION_PX}px;border-radius:9999px;`,
+    `background:${MY_LOCATION_HEX};border:3px solid #fff;`,
+    'box-shadow:0 1px 6px rgba(28,25,23,0.45);"></div>',
+  ].join('');
+
+  return divIcon({
+    html,
+    className: 'tb-my-location',
+    iconSize: [MY_LOCATION_PX, MY_LOCATION_PX],
+    iconAnchor: [MY_LOCATION_PX / 2, MY_LOCATION_PX / 2],
   });
 }

@@ -12,6 +12,7 @@
  */
 
 import { colorHex } from '../../utils/colors';
+import { MY_LOCATION_HEX } from '../../map/geolocate';
 
 /** M3의 핀과 같은 지름. */
 const PIN_PX = 30;
@@ -63,6 +64,52 @@ export function createPinElement({
   pin.appendChild(glyph);
 
   return pin;
+}
+
+/**
+ * 「내 위치」 파란 점 (M42) — Leaflet 쪽 `mapBase.myLocationIcon`의 쌍둥이.
+ *
+ * 같은 지름, 같은 파랑, 같은 흰 테두리. 두 지도에서 「나」가 다르게 생기면 그건
+ * 이 앱이 두 개라는 뜻이다.
+ */
+export function createMyLocationElement(testId = 'gmap-my-location'): HTMLElement {
+  const dot = document.createElement('div');
+  dot.setAttribute('data-testid', testId);
+  dot.style.cssText = [
+    'width:18px',
+    'height:18px',
+    'border-radius:9999px',
+    `background:${MY_LOCATION_HEX}`,
+    'border:3px solid #fff',
+    'box-shadow:0 1px 6px rgba(28,25,23,0.45)',
+  ].join(';');
+  return dot;
+}
+
+/**
+ * 경로 다리 가운데에 앉는 「23분」 칩 (M42).
+ *
+ * 지도 위의 활자는 타일 위에 얹히므로 배경이 필요하다 — 흰 알약에 짙은 글씨,
+ * 앱의 다른 칩들과 같은 인상이되 손가락으로 누를 것이 아니므로 더 작다.
+ */
+export function createDurationChipElement(label: string, testId = 'gmap-route-duration'): HTMLElement {
+  const chip = document.createElement('div');
+  chip.setAttribute('data-testid', testId);
+  chip.setAttribute('data-duration', label);
+  chip.style.cssText = [
+    'padding:1px 6px',
+    'border-radius:9999px',
+    'background:#fff',
+    'color:#1c1917',
+    'font-size:11px',
+    'line-height:1.5',
+    'font-weight:600',
+    'white-space:nowrap',
+    'font-variant-numeric:tabular-nums',
+    'box-shadow:0 1px 4px rgba(28,25,23,0.35)',
+  ].join(';');
+  chip.textContent = label;
+  return chip;
 }
 
 /** 보정 팝업의 두 점 (M41) — 기존은 물러나고 제안이 앞에 선다. */

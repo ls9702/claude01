@@ -28,6 +28,10 @@ export interface FakeGoogleState {
   }[];
   fits: { points: { lat: number; lng: number }[] }[];
   searches: { textQuery: string; fields: string[]; bias?: { lat: number; lng: number } }[];
+  /** `setCenter`로 옮겨 간 자리들 — 「내 위치」가 지도를 데려갔는가 (M42). */
+  centers: { lat: number; lng: number }[];
+  /** 그려진 원 — 「내 위치」의 정확도 (M42). */
+  circles: { lat: number; lng: number; radius: number }[];
 }
 
 /** 스펙이 심는 canned 결과 한 줄. */
@@ -53,6 +57,8 @@ export function installFakeGoogle(): void {
     polylines: [] as unknown[],
     fits: [] as unknown[],
     searches: [] as unknown[],
+    centers: [] as unknown[],
+    circles: [] as unknown[],
   };
 
   /** 스펙이 미리 심어 두는 검색 결과. 없으면 「못 찾음」. */
@@ -78,7 +84,10 @@ export function installFakeGoogle(): void {
     fitBounds(bounds: FakeBounds) {
       state.fits.push({ points: bounds.points.slice() });
     }
-    setCenter() {}
+    /** M42 — 「내 위치」가 지도를 데려갔는지는 이 한 줄로만 확인할 수 있다. */
+    setCenter(point: { lat: number; lng: number }) {
+      state.centers.push({ lat: point.lat, lng: point.lng });
+    }
     setZoom() {}
   }
 
@@ -131,6 +140,19 @@ export function installFakeGoogle(): void {
     setMap() {}
   }
 
+  /** 정확도 원 하나 (M42). 그리지 않고 받아 적기만 한다. */
+  class FakeCircle {
+    constructor(options: Record<string, unknown> = {}) {
+      const center = (options.center ?? { lat: 0, lng: 0 }) as { lat: number; lng: number };
+      state.circles.push({
+        lat: center.lat,
+        lng: center.lng,
+        radius: Number(options.radius ?? 0),
+      });
+    }
+    setMap() {}
+  }
+
   const places = {
     Place: {
       searchByText: (request: Record<string, unknown>) => {
@@ -166,6 +188,7 @@ export function installFakeGoogle(): void {
     maps: {
       Map: FakeMap,
       Polyline: FakePolyline,
+      Circle: FakeCircle,
       LatLngBounds: FakeBounds,
       SymbolPath: { FORWARD_CLOSED_ARROW: 'arrow' },
       importLibrary: (name: string) =>

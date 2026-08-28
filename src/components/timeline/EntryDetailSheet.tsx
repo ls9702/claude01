@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { DIRECTIONS_LABEL, directionsUrl } from '../../map/directions';
 import type { Card, TimelineEntry } from '../../types/models';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import {
@@ -70,6 +71,14 @@ interface EntryDetailSheetProps extends LocalMoney {
   dayTitle: string;
   /** Trip currency, for the 지출 기록 section. Defaults to `KRW`. */
   currency?: string;
+  /**
+   * 「길찾기」의 출발지 (M42) — 이 배치 **바로 앞**에 오는 그 날의 장소.
+   *
+   * 05시 창의 그 날 동선(`dayRouteWindowed`)에서 나온다. 앞이 없으면(그 날의 첫
+   * 장소, 또는 위치 있는 장소가 이것뿐이면) 없이 온다 — 그러면 링크는 도착지만
+   * 싣고, 구글이 현재 위치에서 길을 찾는다.
+   */
+  directionsOrigin?: { lat: number; lng: number } | null;
   onClose: () => void;
   /** Deletes with an 실행 취소 offer — owned by the view. */
   onDelete: (entry: TimelineEntry) => void;
@@ -98,6 +107,7 @@ export default function EntryDetailSheet({
   currency = 'KRW',
   localCurrency,
   fxRate,
+  directionsOrigin,
   onClose,
   onDelete,
   onOpenBoard,
@@ -135,6 +145,9 @@ export default function EntryDetailSheet({
   const stepDuration = (delta: number) => {
     resizeEntry(entry.id, entry.durationMin + delta);
   };
+
+  /** 위치가 있는 카드에만 서는 링크 — 없으면 `null`이고 버튼도 없다. */
+  const directionsHref = directionsUrl(card?.location, directionsOrigin);
 
   const save = () => {
     // 손질도, 비우면 필드를 키째 지우는 것도, 그대로면 아무 일도 하지 않는 것도
@@ -234,6 +247,21 @@ export default function EntryDetailSheet({
             localCurrency={localCurrency}
             fxRate={fxRate}
           />
+        ) : null}
+
+        {/* 「내일 여기 어떻게 가지」는 일정 화면에서 나오는 질문이다 (M42).
+            그래서 그 답으로 가는 문도 여기 있다 — 위치가 있는 카드에만. */}
+        {directionsHref ? (
+          <a
+            data-testid="entry-directions"
+            href={directionsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${SECONDARY_BUTTON_CLASS} w-full`}
+          >
+            <Icon name="route" size={16} />
+            {DIRECTIONS_LABEL}
+          </a>
         ) : null}
 
         {onOpenBoard ? (

@@ -3,12 +3,23 @@ import {
   GOOGLE_MAP_ID,
   googleMarkerLibrary,
   loadGoogleMaps,
+  type GoogleCircle,
   type GoogleMap,
   type GoogleMapsApi,
   type GoogleMarker,
   type GoogleMarkerLibrary,
   type GooglePolyline,
 } from '../../map/googleLoader';
+import { DIRECTIONS_LABEL, directionsUrl, previousStopMap } from '../../map/directions';
+import { MY_LOCATION_HEX, type GeoFix } from '../../map/geolocate';
+import {
+  formatRouteDuration,
+  pathMidpoint,
+  routeDayFingerprint,
+  routeLeg,
+  routeLegPairs,
+  type RouteLegResult,
+} from '../../map/googleRoutes';
 import type { BoardColumn, Card, Id } from '../../types/models';
 import { formatBudget } from '../../utils/money';
 import { cardCommentCount, cardSpent } from '../../utils/spend';
@@ -19,10 +30,11 @@ import {
   CHIP_NEUTRAL,
   DANGER_TEXT_BUTTON_CLASS,
   PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
 } from '../common/formStyles';
-import { createPinElement } from './googlePin';
+import { createDurationChipElement, createMyLocationElement, createPinElement } from './googlePin';
 import type { RouteDrawing } from './RouteLayer';
-import { DESTINATION_ZOOM, FIT_MAX_ZOOM, WORLD_ZOOM } from './mapBase';
+import { DESTINATION_ZOOM, FIT_MAX_ZOOM, MY_LOCATION_ZOOM, WORLD_ZOOM } from './mapBase';
 
 /** A located card plus the column it draws its color and icon from. */
 export interface GooglePin {
@@ -46,6 +58,18 @@ interface GoogleMapViewProps {
   routeKey: string;
   /** 맞출 것이 하나도 없을 때 앉을 자리 — 여행의 목적지 (M12). */
   fallback?: { lat: number; lng: number };
+  /**
+   * 지금 「일자별」로 보고 있는 **한 날** (M42) — 실제 경로를 물어볼 유일한 조건.
+   *
+   * 이 값이 있을 때만 그 날의 다리마다 Routes API를 부른다. 전체(여러 날)와
+   * 일정 전체는 값이 없고, 그래서 한 번도 부르지 않는다 — 화면 한 번에 열 개씩
+   * 나가는 유료 호출을 막는 것은 규칙이 아니라 이 한 줄의 존재다.
+   */
+  routeDayId?: Id;
+  /** 「내 위치」의 마지막 좌표 (M42). 꺼져 있으면 `null`. */
+  myLocation?: GeoFix | null;
+  /** 켠 횟수 — 이 값이 바뀐 뒤 처음 오는 좌표에서만 화면이 그리로 간다. */
+  myLocationSession?: number;
   /** 통화 — 팝업의 예산·지출 칩이 읽는다. */
   currency: string;
   onEditCard: (card: Card) => void;
@@ -59,6 +83,22 @@ const FIT_PADDING_PX = 48;
 
 /** 화살표 사이 간격 — 짧은 다리에도 하나는 서고, 긴 다리도 줄줄이 서지 않는다. */
 const ARROW_REPEAT = '80px';
+
+/**
+ * 아직 진짜 길을 모르는 다리의 점선 (M42).
+ *
+ * 구글 지도에서 점선은 「투명한 선 + 반복 심볼」로 그린다 — `strokeOpacity: 0`이
+ * 곧 「이 선은 눈금으로만 보인다」는 뜻이다. M41의 보정 팝업이 두 점을 잇는 데
+ * 쓰는 그 방식 그대로다.
+ */
+const DASH_SYMBOL = { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 };
+
+/** 점선 눈금 사이 간격. */
+const DASH_REPEAT = '12px';
+
+/** 다리 하나의 이름 — 그 날 안에서만 유일하면 된다. */
+const legKey = (index: number, fromCardId: Id, toCardId: Id): string =>
+  `${index}:${fromCardId}>${toCardId}`;
 
 /**
  * 구글 지도로 그리는 지도 탭 (M41).
@@ -85,6 +125,9 @@ export default function GoogleMapView({
   fitKey,
   routePoints,
   routeKey,
+  routeDayId,
+  myLocation,
+  myLocationSession = 0,
   fallback,
   currency,
   onEditCard,
@@ -97,10 +140,19 @@ export default function GoogleMapView({
   const markerLibRef = useRef<GoogleMarkerLibrary | null>(null);
   const markersRef = useRef<{ marker: GoogleMarker; element: HTMLElement }[]>([]);
   const linesRef = useRef<GooglePolyline[]>([]);
+  /** 다리 가운데의 「23분」 칩들 — 선과 같이 났다 같이 사라진다. */
+  const chipsRef = useRef<{ marker: GoogleMarker; element: HTMLElement }[]>([]);
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   /** 열려 있는 카드 팝업 — 핀 하나를 눌렀을 때. */
   const [openCardId, setOpenCardId] = useState<Id | null>(null);
+  /**
+   * 구글이 답해 준 실제 경로들 — 다리 이름 → 선과 시간 (M42).
+   *
+   * 한 다리씩 도착하는 대로 채워진다. 아직 없는 다리는 직선 점선으로 남고, 그
+   * 상태가 그대로 남는 것도 정상이다(대중교통도 도보도 길이 없는 다리).
+   */
+  const [routes, setRoutes] = useState<Record<string, RouteLegResult>>({});
 
   /* --- 지도 하나 만들기 ---------------------------------------------- */
 
@@ -191,48 +243,164 @@ export default function GoogleMapView({
     };
   }, [status, pins, dimmed]);
 
+  /* --- 실제 경로 물어보기 (M42) --------------------------------------- */
+
+  /**
+   * 이미 물어본 「그 날 그 정거장들」. 지문이 그대로면 두 번 묻지 않는다.
+   *
+   * 여기에 더해 `map/googleRoutes.ts`가 (출발·도착·이동수단)마다 세션 캐시를
+   * 들고 있어서, 어제 본 날을 다시 골라도 네트워크로는 나가지 않는다. 이 화면은
+   * 리렌더가 잦고(필터·팝업·핀), 그때마다 유료 호출이 나가는 것이 이 기능에서
+   * 가장 비싼 실수일 것이다.
+   */
+  const askedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (status !== 'ready') return;
+
+    // 일자별이 아니면 아무것도 묻지 않고, 들고 있던 경로도 놓는다 — 전체 모드의
+    // 화면에 어제의 선이 남아 있으면 안 된다.
+    if (!routeDayId || !apiKey) {
+      askedRef.current = null;
+      setRoutes((current) => (Object.keys(current).length === 0 ? current : {}));
+      return;
+    }
+
+    const drawing = drawings.find((item) => item.dayId === routeDayId);
+    if (!drawing) return;
+
+    const fingerprint = routeDayFingerprint(routeDayId, drawing.route.stops);
+    if (askedRef.current === fingerprint) return;
+    askedRef.current = fingerprint;
+    setRoutes({});
+
+    const pairs = routeLegPairs(drawing.route.stops);
+    if (pairs.length === 0) return;
+
+    void (async () => {
+      // **순차**로. 다리 다섯 개짜리 날이 구글에 다섯 개를 동시에 던지는 그림은
+      // 사용자가 화면을 스치기만 해도 벌어진다.
+      for (let index = 0; index < pairs.length; index += 1) {
+        const pair = pairs[index];
+        const result = await routeLeg(apiKey, pair.from, pair.to);
+        // 그만둘 이유는 하나뿐이다: **다른 날**을 물어보기 시작했다. 효과의
+        // 정리 함수로 끊지 않는 이유가 여기 있다 — 이 효과는 같은 지문으로도
+        // (부모가 다시 그리면) 여러 번 돌 수 있고, 그때마다 진행 중인 줄을
+        // 끊으면 다리 다섯 개짜리 날은 영영 두 번째 다리에서 멈춘다.
+        if (askedRef.current !== fingerprint) return;
+        if (!result) continue;
+        const key = legKey(index, pair.fromCardId, pair.toCardId);
+        setRoutes((current) => ({ ...current, [key]: result }));
+      }
+    })();
+  }, [status, routeDayId, drawings, apiKey]);
+
   /* --- 동선 -------------------------------------------------------- */
 
   useEffect(() => {
     const maps = mapsRef.current;
     const map = mapRef.current;
+    const markerLib = markerLibRef.current;
     if (status !== 'ready' || !maps || !map) return;
 
-    for (const line of linesRef.current) line.setMap(null);
-    linesRef.current = [];
-
-    for (const drawing of drawings) {
-      if (drawing.route.stops.length < 2) continue;
-      const line = new maps.Polyline({
-        map,
-        path: drawing.route.stops.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
-        strokeColor: drawing.color,
-        strokeWeight: 5,
-        strokeOpacity: 0.85,
-        // 방향 없는 선은 동선이 아니라 낙서다 (M6). Leaflet 쪽은 다리 가운데에
-        // SVG 화살촉을 세우고, 여기서는 구글이 선을 따라 같은 화살촉을 반복한다.
-        icons: [
-          {
-            icon: {
-              path: maps.SymbolPath?.FORWARD_CLOSED_ARROW ?? 1,
-              scale: 3,
-              strokeColor: drawing.color,
-              fillColor: drawing.color,
-              fillOpacity: 1,
-            },
-            repeat: ARROW_REPEAT,
-          },
-        ],
-        zIndex: 40,
-      });
-      linesRef.current.push(line);
-    }
-
-    return () => {
+    const clear = () => {
       for (const line of linesRef.current) line.setMap(null);
       linesRef.current = [];
+      for (const { marker, element } of chipsRef.current) {
+        marker.map = null;
+        element.remove();
+      }
+      chipsRef.current = [];
     };
-  }, [status, drawings]);
+    clear();
+
+    /** 방향 없는 선은 동선이 아니라 낙서다 (M6) — 선을 따라 반복되는 화살촉. */
+    const arrowIcon = (color: string) => ({
+      icon: {
+        path: maps.SymbolPath?.FORWARD_CLOSED_ARROW ?? 1,
+        scale: 3,
+        strokeColor: color,
+        fillColor: color,
+        fillOpacity: 1,
+      },
+      repeat: ARROW_REPEAT,
+    });
+
+    for (const drawing of drawings) {
+      const stops = drawing.route.stops;
+      if (stops.length < 2) continue;
+
+      // 여러 날을 한 화면에 보는 전체 모드는 M41 그대로 — 하루가 선 하나다.
+      if (!routeDayId || drawing.dayId !== routeDayId) {
+        linesRef.current.push(
+          new maps.Polyline({
+            map,
+            path: stops.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
+            strokeColor: drawing.color,
+            strokeWeight: 5,
+            strokeOpacity: 0.85,
+            icons: [arrowIcon(drawing.color)],
+            zIndex: 40,
+          }),
+        );
+        continue;
+      }
+
+      // 고른 한 날은 **다리 단위**로 그린다 (M42): 진짜 길을 아는 다리는 그 길로,
+      // 모르는 다리는 직선 점선으로. 두 종류의 선이 한눈에 구별되는 것이 핵심이다
+      // — 실선은 사실이고 점선은 짐작이다.
+      routeLegPairs(stops).forEach((pair, index) => {
+        const result = routes[legKey(index, pair.fromCardId, pair.toCardId)];
+
+        if (!result) {
+          linesRef.current.push(
+            new maps.Polyline({
+              map,
+              path: [pair.from, pair.to],
+              strokeColor: drawing.color,
+              strokeWeight: 4,
+              // 점선: 선 자체는 투명하고 눈금만 보인다.
+              strokeOpacity: 0,
+              icons: [
+                { icon: { ...DASH_SYMBOL, strokeColor: drawing.color }, repeat: DASH_REPEAT },
+                arrowIcon(drawing.color),
+              ],
+              zIndex: 40,
+            }),
+          );
+          return;
+        }
+
+        linesRef.current.push(
+          new maps.Polyline({
+            map,
+            path: result.path,
+            strokeColor: drawing.color,
+            strokeWeight: 5,
+            strokeOpacity: 0.85,
+            icons: [arrowIcon(drawing.color)],
+            zIndex: 41,
+          }),
+        );
+
+        const label = formatRouteDuration(result.durationSec);
+        const mid = pathMidpoint(result.path);
+        if (!label || !mid || !markerLib) return;
+        const element = createDurationChipElement(label);
+        element.setAttribute('data-mode', result.mode);
+        const marker = new markerLib.AdvancedMarkerElement({
+          map,
+          position: { lat: mid.lat, lng: mid.lng },
+          content: element,
+          title: label,
+          zIndex: 60,
+        });
+        chipsRef.current.push({ marker, element });
+      });
+    }
+
+    return clear;
+  }, [status, drawings, routeDayId, routes]);
 
   /* --- 화면 맞추기 --------------------------------------------------- */
 
@@ -269,12 +437,106 @@ export default function GoogleMapView({
     fitTo(routePoints);
   }, [status, routeKey, routePoints]);
 
+  /* --- 내 위치 (M42) -------------------------------------------------- */
+
+  const myMarkerRef = useRef<{ marker: GoogleMarker; element: HTMLElement } | null>(null);
+  const myCircleRef = useRef<GoogleCircle | null>(null);
+
+  useEffect(() => {
+    const maps = mapsRef.current;
+    const map = mapRef.current;
+    const markerLib = markerLibRef.current;
+    if (status !== 'ready' || !maps || !map || !markerLib) return;
+
+    const clear = () => {
+      if (myMarkerRef.current) {
+        myMarkerRef.current.marker.map = null;
+        myMarkerRef.current.element.remove();
+        myMarkerRef.current = null;
+      }
+      myCircleRef.current?.setMap(null);
+      myCircleRef.current = null;
+    };
+    clear();
+    if (!myLocation) return;
+
+    const element = createMyLocationElement();
+    const position = { lat: myLocation.lat, lng: myLocation.lng };
+    myMarkerRef.current = {
+      marker: new markerLib.AdvancedMarkerElement({
+        map,
+        position,
+        content: element,
+        title: '내 위치',
+        zIndex: 900,
+      }),
+      element,
+    };
+
+    // 정확도 원은 있으면 좋은 것이지 없으면 안 되는 것이 아니다 — `Circle`이
+    // 없는 구현에서는 점만 선다.
+    if (maps.Circle && myLocation.accuracyM > 0) {
+      myCircleRef.current = new maps.Circle({
+        map,
+        center: position,
+        radius: myLocation.accuracyM,
+        strokeColor: MY_LOCATION_HEX,
+        strokeOpacity: 0.35,
+        strokeWeight: 1,
+        fillColor: MY_LOCATION_HEX,
+        fillOpacity: 0.12,
+        clickable: false,
+        zIndex: 10,
+      });
+    }
+
+    return clear;
+  }, [status, myLocation]);
+
+  /**
+   * 켤 때 한 번만 그리로 (M42).
+   *
+   * 갱신마다 따라가면, 지도를 손으로 옮겨 다른 동네를 보던 사용자가 GPS에게
+   * 끌려 돌아온다. 그래서 「이번에 켠 뒤 처음 온 좌표」에서만 화면이 움직인다.
+   */
+  const panRef = useRef<number | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (status !== 'ready' || !map || !myLocation) return;
+    if (panRef.current === myLocationSession) return;
+    panRef.current = myLocationSession;
+    map.setCenter({ lat: myLocation.lat, lng: myLocation.lng });
+    map.setZoom(MY_LOCATION_ZOOM);
+  }, [status, myLocation, myLocationSession]);
+
   // 사라진 카드의 팝업이 화면에 남아 있으면 안 된다.
   useEffect(() => {
     if (openCardId && !pins.some((pin) => pin.card.id === openCardId)) setOpenCardId(null);
   }, [pins, openCardId]);
 
   const openCard = pins.find((pin) => pin.card.id === openCardId)?.card;
+
+  /**
+   * 「길찾기」의 출발지 (M42) — 한 날을 보고 있을 때 그 날의 **앞 장소**.
+   *
+   * 판정도 규칙도 Leaflet 지도와 같은 {@link previousStopMap} 하나다. 여러 날이
+   * 한 화면에 있을 때는 부르지 않는다: 같은 카드가 두 날에 있으면 앞 장소가 둘이
+   * 되고, 그때 링크는 절반의 확률로 거짓말이 된다.
+   */
+  const previousStops = useMemo(
+    () =>
+      previousStopMap(
+        routeDayId
+          ? drawings.filter((item) => item.dayId === routeDayId).map((item) => item.route.stops)
+          : [],
+      ),
+    [drawings, routeDayId],
+  );
+
+  const openCardDirections = directionsUrl(
+    openCard?.location,
+    openCard ? previousStops.get(openCard.id) : undefined,
+  );
 
   return (
     <div
@@ -283,6 +545,8 @@ export default function GoogleMapView({
       data-status={status}
       data-pin-count={pins.length}
       data-route-count={drawings.length}
+      // 실제 경로를 몇 다리나 그렸는가 (M42) — 나머지는 직선 점선으로 남아 있다.
+      data-real-legs={Object.keys(routes).length}
       className="relative h-full w-full"
     >
       <div ref={containerRef} data-testid="google-map-canvas" className="h-full w-full" />
@@ -370,6 +634,20 @@ export default function GoogleMapView({
             >
               보드에서 편집
             </button>
+            {/* 실제로 그 길을 걷는 일은 구글 지도 앱이 한다 (M42). 값이 들지
+                않는 링크 하나로 거기까지 넘긴다. */}
+            {openCardDirections ? (
+              <a
+                data-testid="gmap-popup-directions"
+                href={openCardDirections}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${SECONDARY_BUTTON_CLASS} w-full`}
+              >
+                <Icon name="route" size={16} />
+                {DIRECTIONS_LABEL}
+              </a>
+            ) : null}
             <button
               type="button"
               data-testid="gmap-popup-remove"
