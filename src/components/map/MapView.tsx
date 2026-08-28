@@ -21,6 +21,7 @@ import { cardCommentCount, cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
 import { dayTitle, daySubtitle } from '../../timeline/dayLabel';
 import Icon, { EmojiIcon } from '../common/Icon';
+import PatchNotesButton from '../common/PatchNotesButton';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
   BTN_SIZE_SM,
@@ -723,6 +724,7 @@ export default function MapView() {
           // 위아래로 쌓여 헤더가 두 줄이 됐다. 보드·일정 헤더는 처음부터 flex
           // 줄로 감싸고 있었고, 이 화면만 빠져 있었다.
           <span className="ml-auto flex shrink-0 items-center gap-1">
+            <PatchNotesButton />
             <SyncStatusChip variant="dot" />
           </span>
         )}

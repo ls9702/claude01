@@ -23,6 +23,7 @@ import AiAskButton from '../ai/AiAskButton';
 import AiSuggestSheet from '../ai/AiSuggestSheet';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
+import PatchNotesButton from '../common/PatchNotesButton';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
   BTN_SIZE_SM,
@@ -311,6 +312,7 @@ export default function BoardView() {
             </button>
           ) : null}
           {/* Desktop wears both of these in the top bar instead. */}
+          {isDesktop ? null : <PatchNotesButton />}
           {isDesktop ? null : <AiAskButton />}
           {isDesktop ? null : <SyncStatusChip variant="dot" />}
         </div>

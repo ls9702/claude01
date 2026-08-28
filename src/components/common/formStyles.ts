@@ -163,6 +163,17 @@ export const COUNT_BADGE_CLASS =
   'inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 ' +
   'bg-sunken text-micro tabular-nums text-ink-muted';
 
+/**
+ * 재촉하지 않는 「새 것이 있다」 점 — 새 소식 배지 (M40).
+ *
+ * {@link UNREAD_DOT_CLASS}와 모양은 같고 색만 중립이다. 이유는
+ * {@link COUNT_BADGE_CLASS}가 코랄을 물린 것과 같다: 패치노트는 상대가 지금 나를
+ * 기다리는 것이 아니라 언제 읽어도 되는 소식이고, 코랄로 칠하면 화면에서 「지금」
+ * 이라는 말이 하나 더 늘어난다. 그렇다고 `sunken`으로 그리면 아이콘 위에서 아예
+ * 보이지 않으므로, 글자와 같은 잉크를 쓴다.
+ */
+export const NEWS_DOT_CLASS = 'inline-block h-2 w-2 shrink-0 rounded-full bg-ink';
+
 /** 누를 수 있는 칩(필터·세그먼트). 터치 타깃 h-9. */
 const CHIP_PRESSABLE = `${withoutPadX(withoutHeight(CHIP_BASE))} h-9 px-3 lg:h-8`;
 

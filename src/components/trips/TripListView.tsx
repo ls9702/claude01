@@ -10,6 +10,7 @@ import { diffDaysIso, formatShortDate, isIsoDate } from '../../utils/flights';
 import { formatLatLng, shortPlace } from '../../utils/geo';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
+import PatchNotesButton from '../common/PatchNotesButton';
 import SyncStatusChip from '../common/SyncStatusChip';
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../common/formStyles';
 import TripFormDialog, { type TripFormValues } from './TripFormDialog';
@@ -162,6 +163,10 @@ export default function TripListView() {
           </p>
         </div>
         <div className="mt-1 flex shrink-0 items-center gap-2">
+          {/* 새 소식은 동기화 점과 같은 자리에 산다 (M40). 일정 탭은 그 줄이
+              이미 좁아 이 버튼을 달지 않으므로, 가장 한산한 이 화면이 배지가
+              언제나 닿는 곳이다. */}
+          {isDesktop ? null : <PatchNotesButton />}
           {isDesktop ? null : <SyncStatusChip variant="dot" />}
           {/* One primary per screen: with no trips yet the card below owns it. */}
           <button

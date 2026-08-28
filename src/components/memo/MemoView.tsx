@@ -10,6 +10,7 @@ import { flushPush } from '../../sync/syncEngine';
 import type { Id, MemoMessage } from '../../types/models';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
+import PatchNotesButton from '../common/PatchNotesButton';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
   PRIMARY_BUTTON_CLASS,
@@ -259,6 +260,7 @@ export default function MemoView() {
         </div>
         {isDesktop ? null : (
           <span className="ml-auto flex shrink-0 items-center gap-1">
+            <PatchNotesButton />
             <SyncStatusChip variant="dot" />
           </span>
         )}

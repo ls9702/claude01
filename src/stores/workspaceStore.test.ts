@@ -834,6 +834,140 @@ describe('updateSheetFlights', () => {
   });
 });
 
+/* ------------------------------------------------------------------ *
+ * 시트 복제 (M40)
+ * ------------------------------------------------------------------ */
+
+describe('duplicateSheet', () => {
+  it('deep-copies days, entries and notes into a sibling sheet', () => {
+    const { tripId, cardId, sheetId, dayA, dayB } = timelineSetup();
+    const entryA = store().scheduleCard(cardId, dayA, 540, 90)!;
+    const entryB = store().scheduleCard(cardId, dayB, 600)!;
+    store().updateEntryNote(entryA, '예약 확인함');
+
+    const copyId = store().duplicateSheet(sheetId)!;
+    expect(copyId).not.toBe(sheetId);
+
+    const copy = ws().sheets[copyId];
+    expect(copy.tripId).toBe(tripId);
+    expect(copy.name).toBe('본편 (복사)');
+    expect(ws().trips[tripId].sheetOrder).toEqual([sheetId, copyId]);
+
+    // 일자: 새 id, 같은 날짜·라벨, 같은 순서.
+    expect(copy.dayOrder).toHaveLength(2);
+    expect(copy.dayOrder).not.toContain(dayA);
+    expect(copy.dayOrder).not.toContain(dayB);
+    expect(daysOf(copyId).map((day) => day.date)).toEqual(['2026-04-01', undefined]);
+    expect(daysOf(copyId).map((day) => day.label)).toEqual([undefined, '둘째 날']);
+    expect(daysOf(copyId).every((day) => day.sheetId === copyId && day.tripId === tripId)).toBe(
+      true,
+    );
+
+    // 배치: 새 id, 새 dayId, 같은 카드·시각·길이·메모.
+    const copied = entriesOf(copyId);
+    expect(copied).toHaveLength(2);
+    expect(copied.map((entry) => entry.cardId)).toEqual([cardId, cardId]);
+    expect(copied.map((entry) => entry.startMin)).toEqual([540, 600]);
+    expect(copied.map((entry) => entry.durationMin)).toEqual([90, 60]);
+    expect(copied[0].note).toBe('예약 확인함');
+    // 메모가 없던 배치는 사본에서도 키가 없다.
+    expect('note' in copied[1]).toBe(false);
+    expect(copied.map((entry) => entry.id)).not.toContain(entryA);
+    expect(copied.map((entry) => entry.id)).not.toContain(entryB);
+
+    // 원본은 그대로. 카드/칸은 애초에 복사 대상이 아니다.
+    expect(entriesOf(sheetId)).toHaveLength(2);
+    expect(Object.keys(ws().cards)).toHaveLength(1);
+    expect(ws().trips[tripId].columnOrder).toHaveLength(5);
+    // 복제는 아무것도 지우지 않는다.
+    expect(ws().tombstones).toHaveLength(0);
+  });
+
+  it('leaves the original alone when the copy is edited or deleted', () => {
+    const { cardId, sheetId, dayA } = timelineSetup();
+    const original = store().scheduleCard(cardId, dayA, 540)!;
+    store().updateEntryNote(original, '원본 메모');
+
+    const copyId = store().duplicateSheet(sheetId)!;
+    const [copied] = entriesOf(copyId);
+
+    store().moveEntry(copied.id, copied.dayId, 780);
+    store().resizeEntry(copied.id, 30);
+    store().updateEntryNote(copied.id, '사본 메모');
+
+    expect(ws().entries[original]).toMatchObject({
+      startMin: 540,
+      durationMin: 60,
+      note: '원본 메모',
+    });
+
+    // 사본을 통째로 지워도 원본의 일자·배치는 남는다.
+    store().deleteSheet(copyId);
+    expect(ws().sheets[copyId]).toBeUndefined();
+    expect(ws().days[dayA]).toBeDefined();
+    expect(ws().entries[original]).toBeDefined();
+    expect(ws().cards[cardId]).toBeDefined();
+  });
+
+  it('copies the flights and points the ✈️ placements at the same cards', () => {
+    const tripId = store().addTrip('오사카');
+    const { sheetId } = store().createSheetFromFlights(tripId, '본 일정', {
+      outbound: OUTBOUND,
+      inbound: INBOUND,
+    })!;
+    expect(flightCards(tripId)).toHaveLength(2);
+
+    const copyId = store().duplicateSheet(sheetId)!;
+    const copy = ws().sheets[copyId];
+
+    expect(copy.outboundFlight).toEqual(OUTBOUND);
+    expect(copy.inboundFlight).toEqual(INBOUND);
+    // 다리 객체는 따로 산다 — 한쪽 시트의 항공편이 다른 쪽을 흔들지 않는다.
+    expect(copy.outboundFlight).not.toBe(ws().sheets[sheetId].outboundFlight);
+    expect(daysOf(copyId)).toHaveLength(5);
+
+    // 카드는 여행 것이라 그대로 둘이다. 사본의 배치는 그 같은 카드를 가리킨다.
+    expect(flightCards(tripId)).toHaveLength(2);
+    const originalCards = entriesOf(sheetId).map((entry) => entry.cardId);
+    expect(entriesOf(copyId).map((entry) => entry.cardId)).toEqual(originalCards);
+
+    // 그리고 그 공유가 항공편 수정을 망가뜨리지 않는다: 사본을 다시 계획해도
+    // 원본의 카드와 배치는 살아남는다 (`clearFlightPlacements`는 어디에도 배치가
+    // 남지 않은 카드만 지운다).
+    store().updateSheetFlights(copyId, { outbound: { ...OUTBOUND, date: '2026-06-01' } });
+    expect(entriesOf(sheetId)).toHaveLength(2);
+    expect(entriesOf(sheetId).map((entry) => ws().cards[entry.cardId])).not.toContain(undefined);
+  });
+
+  it('numbers repeated copies instead of colliding', () => {
+    const { sheetId } = timelineSetup();
+    const first = store().duplicateSheet(sheetId)!;
+    const second = store().duplicateSheet(sheetId)!;
+    const third = store().duplicateSheet(first)!;
+
+    expect(ws().sheets[first].name).toBe('본편 (복사)');
+    expect(ws().sheets[second].name).toBe('본편 (복사 2)');
+    // 사본의 사본도 꼬리를 겹치지 않는다.
+    expect(ws().sheets[third].name).toBe('본편 (복사 3)');
+  });
+
+  it('copies an empty sheet as an empty sheet', () => {
+    const tripId = store().addTrip('여행');
+    const sheetId = store().addSheet(tripId, '빈 시트')!;
+    const copyId = store().duplicateSheet(sheetId)!;
+
+    expect(ws().sheets[copyId].dayOrder).toEqual([]);
+    expect(ws().sheets[copyId].name).toBe('빈 시트 (복사)');
+    expect(Object.keys(ws().days)).toHaveLength(0);
+  });
+
+  it('returns null for an unknown sheet id and changes nothing', () => {
+    const before = ws();
+    expect(store().duplicateSheet('nope')).toBeNull();
+    expect(ws()).toBe(before);
+  });
+});
+
 describe('addDay / updateDay / deleteDay', () => {
   it('appends to dayOrder and inherits the sheet tripId', () => {
     const { tripId, sheetId, dayA, dayB } = timelineSetup();

@@ -6,6 +6,7 @@ import { TAB_IDS, TAB_LABELS, useUiStore, type TabId } from '../../stores/uiStor
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import AiAskButton from '../ai/AiAskButton';
 import Icon, { type IconName } from '../common/Icon';
+import PatchNotesButton from '../common/PatchNotesButton';
 import SyncStatusChip from '../common/SyncStatusChip';
 import { UNREAD_BADGE_CLASS } from '../common/formStyles';
 
@@ -104,6 +105,7 @@ export default function TabBar() {
             tab bar with things in it that are not tabs is not a tab bar. */}
         {isDesktop ? (
           <div className="ml-auto flex items-center gap-2">
+            <PatchNotesButton />
             <AiAskButton />
             <SyncStatusChip />
           </div>

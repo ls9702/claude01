@@ -39,7 +39,9 @@ export type IconName =
   | 'route'
   | 'drag'
   | 'sparkle'
-  | 'chat';
+  | 'chat'
+  | 'copy'
+  | 'gift';
 
 /** `name` → the path data drawn inside a `0 0 24 24` box. */
 const PATHS: Record<IconName, string> = {
@@ -84,6 +86,12 @@ const PATHS: Record<IconName, string> = {
   // two glyphs have to be told apart at 24px in a five-cell tab row.
   chat:
     'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7l-4.5 3.5V15H6a2 2 0 0 1-2-2V6ZM9 9.5h.01M12 9.5h.01M15 9.5h.01',
+  // 시트 복제 (M40). 두 장의 종이가 반쯤 겹친 자리 — 「하나를 둘로」를 이보다
+  // 짧게 말하는 그림이 없다.
+  copy: 'M9 9a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2V9ZM5 15H4a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h9a1 1 0 0 1 1 1v1',
+  // 새 소식 = 패치노트 (M40). 리본 두른 상자 — 종(알림)은 재촉하는 물건이라
+  // 이 조용한 배지와 어울리지 않고, ✨는 이미 AI 것이다.
+  gift: 'M3 11h18M4 11v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8M3 8h18v3H3zM12 8v12M12 8C11 5 9.5 4 8.5 4a2 2 0 0 0 0 4H12ZM12 8c1-3 2.5-4 3.5-4a2 2 0 0 1 0 4H12Z',
 };
 
 interface IconProps {

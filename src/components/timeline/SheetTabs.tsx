@@ -11,6 +11,8 @@ interface SheetTabsProps {
   onCreate: () => void;
   onRename: (sheet: SheetModel) => void;
   onEditFlights: (sheet: SheetModel) => void;
+  /** 시트를 통째로 베껴 형제로 세운다 (M40). */
+  onDuplicate: (sheet: SheetModel) => void;
   onDelete: (sheet: SheetModel) => void;
   /** Right-hand slot of the row — the phone parks its 시트 지출 칩 here. */
   trailing?: ReactNode;
@@ -58,6 +60,7 @@ export default function SheetTabs({
   onCreate,
   onRename,
   onEditFlights,
+  onDuplicate,
   onDelete,
   trailing,
 }: SheetTabsProps) {
@@ -214,6 +217,21 @@ export default function SheetTabs({
           >
             <Icon name="calendar" size={16} />
             항공편 수정
+          </button>
+          {/* M40 — 지금은 묻지 않고 바로 베낀다. 사본이 활성 시트가 되고,
+              마음에 안 들면 바로 아래 「시트 삭제」가 있다.
+
+              ⚠️ M41: 시트마다 지도 엔진을 고르게 되면 그 선택이 붙는 자리가
+              여기다 — 이 줄이 작은 대화상자를 여는 형태로 늘어난다. 그때까지는
+              대화상자 없이 한 번에 끝나는 편이 낫다. */}
+          <button
+            type="button"
+            data-testid="sheet-duplicate"
+            onClick={() => runAction(onDuplicate)}
+            className={POPOVER_ROW_CLASS}
+          >
+            <Icon name="copy" size={16} />
+            복제
           </button>
           <button
             type="button"

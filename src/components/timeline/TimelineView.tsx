@@ -147,6 +147,7 @@ export default function TimelineView() {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const addSheet = useWorkspaceStore((s) => s.addSheet);
   const deleteSheet = useWorkspaceStore((s) => s.deleteSheet);
+  const duplicateSheet = useWorkspaceStore((s) => s.duplicateSheet);
   const addDay = useWorkspaceStore((s) => s.addDay);
   const deleteDay = useWorkspaceStore((s) => s.deleteDay);
 
@@ -798,6 +799,12 @@ export default function TimelineView() {
             onCreate={() => setDialog({ kind: 'sheet-create' })}
             onRename={(target) => setDialog({ kind: 'sheet-rename', sheet: target })}
             onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
+            // 사본으로 곧장 넘어간다 (M40) — 복제를 눌러 놓고 원본 위에 남아
+            // 있으면, 방금 만든 것을 손보려고 한 번 더 탭해야 한다.
+            onDuplicate={(target) => {
+              const copyId = duplicateSheet(target.id);
+              if (copyId) setActiveSheet(copyId);
+            }}
             onDelete={(target) => setDialog({ kind: 'sheet-delete', sheet: target })}
             // The sheet's 지출 칩 used to ride here. M16-A's summary bar states the
             // same two numbers one row down and never scrolls away, so keeping the

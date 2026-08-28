@@ -30,6 +30,7 @@ import {
 } from '../utils/flights';
 import { getActiveProfileId } from '../profile/profile';
 import { newId } from '../utils/ids';
+import { copySheetName } from '../utils/sheetName';
 import { clampEntry, snapMin } from '../utils/time';
 import { idbStorage } from './persistMiddleware';
 
@@ -586,6 +587,30 @@ export interface WorkspaceState {
   updateSheet: (id: Id, patch: SheetPatch) => void;
   /** Deletes a sheet plus every day and entry inside it (+ tombstones). */
   deleteSheet: (id: Id) => void;
+  /**
+   * 시트를 통째로 복제해 형제로 세운다 (M40) — 시나리오 비교의 출발점.
+   *
+   * 사본이 가져가는 것: 일자 전부(새 id, **같은 날짜·라벨**), 그 일자 위의 배치
+   * 전부(새 id, 새 dayId, 같은 `cardId`·`startMin`·`durationMin`·`note`), 그리고
+   * 시트가 들고 있던 항공편 두 짝. 이름은 {@link copySheetName}이 고른다.
+   *
+   * 사본이 **가져가지 않는** 것: 카드와 칸. 둘 다 여행 것이지 시트 것이 아니고,
+   * 「같은 카드를 다르게 배치한 두 안을 나란히 놓고 고른다」가 이 기능의 전부다.
+   * 카드까지 복사하면 보드가 두 배가 되고, 한쪽에서 고친 예산이 다른 쪽에 반영
+   * 되지 않아 비교 자체가 거짓말이 된다.
+   *
+   * **항공편 카드도 공유한다** — 사본의 ✈️ 배치는 원본과 *같은* 카드를 가리킨다.
+   * 마법사가 시트마다 카드를 새로 만들기는 하지만(위 항공편 헬퍼), 그 카드도
+   * 결국 보드에 서는 여행 데이터다. 공유해도 두 동작이 다 성립한다:
+   * `updateSheetFlights`의 `clearFlightPlacements`는 「어디에도 배치가 남지 않은」
+   * 카드만 지우므로 한쪽 시트의 항공편을 고쳐도 다른 쪽 카드는 살아남고,
+   * `deleteSheet`는 원래 카드를 건드리지 않는다. 반대로 카드까지 복제하면 보드
+   * 이동수단 칸에 똑같은 「✈️ ICN→KIX OZ112」가 두 장 서서, 사람이 어느 쪽이
+   * 어느 시트 것인지 알 방법이 없어진다.
+   *
+   * 새 시트 id를 돌려준다. 모르는 id·주인 없는 시트면 `null`.
+   */
+  duplicateSheet: (sheetId: Id) => Id | null;
 
   /* --- 시트 마법사 — M2b -------------------------------------------- */
 
@@ -1215,6 +1240,83 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             return true;
           });
         },
+
+        duplicateSheet: (sheetId) =>
+          run((draft, now) => {
+            const source = draft.sheets[sheetId];
+            if (!source) return null;
+            const trip = draft.trips[source.tripId];
+            if (!trip) return null;
+
+            const copyId = newId();
+
+            // 옛 dayId → 새 dayId. 배치의 dayId를 갈아끼우는 유일한 열쇠다.
+            const dayIdMap = new Map<Id, Id>();
+            const dayOrder = source.dayOrder
+              .filter((dayId) => draft.days[dayId])
+              .map((dayId) => {
+                const day = draft.days[dayId];
+                const copyDayId = newId();
+                dayIdMap.set(dayId, copyDayId);
+                draft.days[copyDayId] = {
+                  id: copyDayId,
+                  tripId: day.tripId,
+                  sheetId: copyId,
+                  date: day.date,
+                  label: day.label,
+                  createdAt: now,
+                  updatedAt: now,
+                };
+                return copyDayId;
+              });
+
+            // `Object.values`는 부르는 순간의 스냅샷이라, 아래에서 새 배치를
+            // 넣는 동안 이 목록이 자라지 않는다.
+            for (const entry of Object.values(draft.entries)) {
+              const copyDayId = dayIdMap.get(entry.dayId);
+              if (!copyDayId) continue;
+              const entryId = newId();
+              draft.entries[entryId] = {
+                id: entryId,
+                tripId: entry.tripId,
+                cardId: entry.cardId,
+                dayId: copyDayId,
+                startMin: entry.startMin,
+                durationMin: entry.durationMin,
+                // 메모는 배치에 붙는 것이므로 사본도 제 몫을 갖는다 (M39).
+                // 없던 키는 없는 채로 — `undefined`를 심으면 그 배치만 모양이
+                // 달라진다.
+                ...(entry.note === undefined ? {} : { note: entry.note }),
+                createdAt: now,
+                updatedAt: now,
+              };
+            }
+
+            const siblingNames = trip.sheetOrder
+              .map((id) => draft.sheets[id]?.name)
+              .filter((name): name is string => typeof name === 'string');
+
+            draft.sheets[copyId] = {
+              id: copyId,
+              tripId: source.tripId,
+              name: copySheetName(source.name, siblingNames),
+              dayOrder,
+              // 얕은 복사로는 두 시트가 한 다리를 같이 들게 된다 — 한쪽
+              // 항공편을 고치면 다른 쪽 미리보기까지 바뀐다.
+              ...(source.outboundFlight ? { outboundFlight: { ...source.outboundFlight } } : {}),
+              ...(source.inboundFlight ? { inboundFlight: { ...source.inboundFlight } } : {}),
+              createdAt: now,
+              updatedAt: now,
+            };
+
+            draft.trips[trip.id] = {
+              ...trip,
+              sheetOrder: [...trip.sheetOrder, copyId],
+              updatedAt: now,
+            };
+
+            return copyId;
+          }),
 
         createSheetFromFlights: (tripId, name, opts = {}) =>
           run((draft, now) => {
