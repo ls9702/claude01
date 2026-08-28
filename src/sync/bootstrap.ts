@@ -34,6 +34,7 @@
  */
 
 import { useAiStore, hasStoredAiSettings } from '../ai/aiSettings';
+import { normalizeGoogleMapsKey, useGoogleMapsKeyStore } from '../map/gmapsKey';
 import type { Millis } from '../types/models';
 import { isConfigured, loadSettings, normalizeBaseUrl, saveSettings } from './settings';
 import { restartSync } from './syncEngine';
@@ -45,6 +46,14 @@ const OPTOUT_KEY = 'trip-board/bootstrap-optout';
 export interface BootstrapConfig {
   sync?: { baseUrl: string; token: string };
   aiEnabled?: boolean;
+  /**
+   * 구글 지도 브라우저 키 (M41) — 있으면 이 기기가 구글 지도를 쓸 수 있다.
+   *
+   * 동기화 토큰과 같은 파일에 사는 같은 종류의 맞바꿈이고(위 문단), 이 키에는
+   * 그 위에 HTTP 리퍼러 제한이 걸려 있다. 없으면 아무 일도 일어나지 않는다 —
+   * 앱은 M3부터의 OSM 지도 그대로다.
+   */
+  googleMapsKey?: string;
 }
 
 function storage(): Storage | null {
@@ -80,7 +89,11 @@ export function parseBootstrapConfig(raw: unknown): BootstrapConfig | null {
 
   if (record.aiEnabled === true) out.aiEnabled = true;
 
-  return out.sync || out.aiEnabled ? out : null;
+  // 공백만 든 키는 「키 없음」을 잘못 적은 것이다 — 없는 것으로 읽는다 (M41).
+  const googleMapsKey = normalizeGoogleMapsKey(record.googleMapsKey);
+  if (googleMapsKey) out.googleMapsKey = googleMapsKey;
+
+  return out.sync || out.aiEnabled || out.googleMapsKey ? out : null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -288,6 +301,17 @@ export async function applyBootstrapConfig(): Promise<boolean> {
   if (config.aiEnabled && !hasStoredAiSettings()) {
     useAiStore.getState().setEnabled(true);
     applied = true;
+  }
+
+  // 구글 지도 키 (M41)는 위 두 가지와 달리 **사용자 선택이 아니라 배치 사실**
+  // 이다 — 켜고 끄는 토글이 없으므로 존중할 「명시적 OFF」도 없고, 키가 바뀌면
+  // (재발급·교체) 그냥 새 키를 쓰는 것이 맞다. 그래서 파일이 말하는 대로 매번
+  // 덮어쓴다. 파일에서 키가 사라지면 이 기기의 키도 지운다.
+  const storedKey = useGoogleMapsKeyStore.getState().key;
+  const fileKey = config.googleMapsKey ?? null;
+  if (fileKey !== storedKey) {
+    useGoogleMapsKeyStore.getState().setKey(fileKey);
+    applied = applied || fileKey !== null;
   }
 
   return applied;

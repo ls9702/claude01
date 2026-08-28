@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { useGoogleMapsKey } from '../../map/gmapsKey';
+import { useWorkspaceStore, type SheetEngineChoice } from '../../stores/workspaceStore';
 import type { FlightLeg, Id, Sheet as SheetModel } from '../../types/models';
 import { MAX_SHEET_DAYS, formatSheetPlan, planSheetDays, type SheetFlightOpts } from '../../utils/flights';
 import Icon from '../common/Icon';
@@ -232,6 +233,57 @@ function DayStepper({ value, onChange }: DayStepperProps) {
   );
 }
 
+interface EngineChoiceProps {
+  value: SheetEngineChoice;
+  onChange: (next: SheetEngineChoice) => void;
+}
+
+/**
+ * 이 시트의 지도를 무엇으로 그릴지 (M41) — 구글 키가 있는 기기에서만 나타난다.
+ *
+ * **조용해야 하는 줄**이다. 새 시트를 만드는 사람이 실제로 묻는 것은 「며칠짜리
+ * 일정인가」이고, 지도 엔진은 그 다음 순서의 취향이다. 그래서 폼의 맨 아래,
+ * 미리보기 바로 위에 앉고 기본값은 OSM이다 — 지금까지의 모든 시트가 그랬고,
+ * 아무것도 고르지 않은 사람이 얻는 것도 그것이어야 한다.
+ */
+function EngineChoice({ value, onChange }: EngineChoiceProps) {
+  return (
+    <div>
+      <span className={LABEL_CLASS}>지도</span>
+      <div
+        data-testid="wizard-engine"
+        data-engine={value}
+        className="mt-2 inline-flex w-full rounded-md bg-sunken p-1"
+      >
+        {(
+          [
+            ['osm', 'OSM 지도', 'wizard-engine-osm'],
+            ['google', '구글 지도', 'wizard-engine-google'],
+          ] as const
+        ).map(([choice, label, testId]) => (
+          <button
+            key={choice}
+            type="button"
+            data-testid={testId}
+            aria-pressed={value === choice}
+            onClick={() => onChange(choice)}
+            className={[
+              'flex h-9 flex-1 items-center justify-center gap-1 rounded-md text-label',
+              'transition-colors duration-[140ms] ease-quick',
+              value === choice ? 'bg-surface text-ink shadow-raise' : 'text-ink-muted',
+            ].join(' ')}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-micro font-normal text-ink-faint">
+        이 시트의 지도만 바뀌어요. 카드와 위치는 그대로예요.
+      </p>
+    </div>
+  );
+}
+
 interface SheetWizardProps {
   tripId: Id;
   /** Editing an existing sheet (항공편 수정) instead of creating a new one. */
@@ -284,6 +336,12 @@ export default function SheetWizard({
   const [dayCount, setDayCount] = useState(
     sheet && sheet.dayOrder.length > 0 ? sheet.dayOrder.length : 3,
   );
+  /** 지도 엔진 (M41) — 키가 있는 기기에서만 고를 수 있고, 기본은 OSM. */
+  const googleKey = useGoogleMapsKey();
+  const [engine, setEngine] = useState<SheetEngineChoice>('osm');
+  // 수정 mode에서는 묻지 않는다: 이 폼이 고쳐 주는 것은 항공편과 기간이고,
+  // 이미 있는 시트의 지도를 바꾸는 길은 ⋯ 메뉴의 「복제」다.
+  const showEngine = Boolean(googleKey) && !editing;
 
   const opts = useMemo<SheetFlightOpts>(() => {
     if (mode === 'days') return { dayCount };
@@ -305,14 +363,25 @@ export default function SheetWizard({
     if (!canSubmit) return;
     // 수정 mode, or create-into-an-empty-shell (B17): both re-plan a sheet that
     // already exists, and `updateSheetFlights` is exactly that operation.
+    // 고른 지도는 시트가 생긴 **뒤에** 한 줄로 적는다 (M41). 만들기 경로가 둘
+    // (빈 껍데기 채우기 · 새로 만들기)이라, 두 생성 함수에 각각 인자를 다는
+    // 것보다 결과 id 하나에 같은 패치를 얹는 편이 갈래가 하나 적다.
+    const stampEngine = (sheetId: Id) => {
+      if (showEngine && engine === 'google') updateSheet(sheetId, { mapEngine: 'google' });
+    };
+
     const target = sheet ?? fillSheet;
     if (target) {
       updateSheet(target.id, { name: name.trim() || target.name });
       updateSheetFlights(target.id, opts);
+      stampEngine(target.id);
       onDone?.(target.id);
     } else {
       const created = createSheetFromFlights(tripId, name, opts);
-      if (created) onDone?.(created.sheetId);
+      if (created) {
+        stampEngine(created.sheetId);
+        onDone?.(created.sheetId);
+      }
     }
     onClose();
   };
@@ -422,6 +491,8 @@ export default function SheetWizard({
         ) : (
           <DayStepper value={dayCount} onChange={setDayCount} />
         )}
+
+        {showEngine ? <EngineChoice value={engine} onChange={setEngine} /> : null}
 
         {editing ? (
           <p className="text-micro font-normal text-ink-faint">

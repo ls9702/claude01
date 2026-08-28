@@ -21,6 +21,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import { requestPlaceFix } from '../stores/placeFixQueue';
 import { deleteEntryWithUndo } from '../stores/entryDelete';
 import { useUndoStore } from '../stores/undoStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
@@ -262,6 +263,9 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
       if (created) {
         const title = workspace.cards[active]?.title ?? '카드';
         offer(`'${title}' 배치됨`, () => deleteEntry(created));
+        // 배치는 이미 끝났다 (M41). 구글 시트에 놓은 것이라면 그 **뒤에** 구글
+        // 에게 이 장소가 어디인지 한 번 물어본다 — 배치를 막는 일은 없다.
+        requestPlaceFix(workspace, active, target.dayId);
       }
       return;
     }

@@ -966,6 +966,36 @@ describe('duplicateSheet', () => {
     expect(store().duplicateSheet('nope')).toBeNull();
     expect(ws()).toBe(before);
   });
+
+  /* --- M41 — 사본의 지도 엔진 ---------------------------------------- */
+
+  it('인자를 안 주면 원본의 지도 엔진을 그대로 따라간다', () => {
+    const tripId = store().addTrip('여행');
+    const osmId = store().addSheet(tripId, 'OSM 시트')!;
+    const googleId = store().addSheet(tripId, '구글 시트')!;
+    store().updateSheet(googleId, { mapEngine: 'google' });
+
+    // OSM 시트의 사본에는 필드가 아예 없다 — M41 이전 시트와 같은 모양.
+    const osmCopyId = store().duplicateSheet(osmId)!;
+    expect('mapEngine' in ws().sheets[osmCopyId]).toBe(false);
+
+    const googleCopyId = store().duplicateSheet(googleId)!;
+    expect(ws().sheets[googleCopyId].mapEngine).toBe('google');
+  });
+
+  it('사본의 지도를 골라서 바꿀 수 있고, 원본은 그대로다', () => {
+    const tripId = store().addTrip('여행');
+    const osmId = store().addSheet(tripId, 'OSM 시트')!;
+    store().updateSheet(osmId, { name: 'OSM 시트' });
+
+    const googleCopyId = store().duplicateSheet(osmId, 'google')!;
+    expect(ws().sheets[googleCopyId].mapEngine).toBe('google');
+    expect('mapEngine' in ws().sheets[osmId]).toBe(false);
+
+    const backToOsmId = store().duplicateSheet(googleCopyId, 'osm')!;
+    expect('mapEngine' in ws().sheets[backToOsmId]).toBe(false);
+    expect(ws().sheets[googleCopyId].mapEngine).toBe('google');
+  });
 });
 
 describe('addDay / updateDay / deleteDay', () => {

@@ -9,6 +9,7 @@ import {
   type MapFilter,
   type MapScopeKind,
 } from '../../map/filter';
+import { useGoogleMapsKey } from '../../map/gmapsKey';
 import { loadMapFilter, saveMapFilter } from '../../stores/mapFilterPref';
 import { loadRouteChoice, saveRouteChoice, storedDayId } from '../../stores/mapRoutePref';
 import { useUiStore } from '../../stores/uiStore';
@@ -33,6 +34,7 @@ import {
   SECONDARY_BUTTON_CLASS,
   withBtnSize,
 } from '../common/formStyles';
+import GoogleMapView from './GoogleMapView';
 import MapReady from './MapReady';
 import RouteLayer, { type RouteDrawing } from './RouteLayer';
 import {
@@ -295,6 +297,17 @@ export default function MapView() {
   const focusCard = useUiStore((s) => s.focusCard);
   const isDesktop = useIsDesktop();
   const online = useOnline();
+  /** 이 기기가 구글 지도를 쓸 수 있는가 (M41) — 없으면 지금까지 그대로 OSM. */
+  const googleKey = useGoogleMapsKey();
+  /**
+   * 구글 스크립트를 못 불러왔다 (잘못된 키·차단·오프라인).
+   *
+   * 한 번 실패하면 이 여행을 보는 동안은 OSM으로 그린다 — 실패한 로더를 매
+   * 렌더마다 다시 부르면 화면이 깜빡이기만 한다. 키가 바뀌면(부트스트랩이 새
+   * 키를 물어 왔다) 다시 시도한다.
+   */
+  const [googleFailed, setGoogleFailed] = useState(false);
+  useEffect(() => setGoogleFailed(false), [googleKey]);
 
   /** Leaflet's measured viewport; `0 × 0` until the container is laid out. */
   const [size, setSize] = useState({ x: 0, y: 0 });
@@ -513,6 +526,37 @@ export default function MapView() {
     scope === 'day' ? (scopeDay?.id ?? '') : '',
     [...mutedColumns].sort().join(','),
   ].join('|');
+
+  /* --- 구글 지도 시트 (M41) ------------------------------------------ */
+
+  /**
+   * 이 화면을 구글로 그릴 것인가.
+   *
+   * 두 가지가 동시에 참이어야 한다: 위 「표시」 줄이 고른 **일정표**가 구글
+   * 시트이고, 범위가 그 일정표를 읽는 범위(일정 전체·일자별)일 것. 「전체
+   * 아이템」과 「미확정」은 특정 일정표의 화면이 아니라 여행 전체의 화면이라,
+   * 어느 시트의 엔진을 따라야 하는지 물음 자체가 성립하지 않는다 — 그 둘은
+   * 언제나 M3부터의 OSM 지도다.
+   */
+  const sheetDrivenScope = scope === 'sheet' || scope === 'day';
+  const googleSheet = routeSheet?.mapEngine === 'google';
+  /** 구글로 그리려던 참인가 — 키가 없어도 참이다(안내 한 줄이 이 값을 읽는다). */
+  const googleWanted = googleSheet && sheetDrivenScope;
+  const googleMode = googleWanted && Boolean(googleKey) && !googleFailed;
+
+  /**
+   * 구글 핀 중 물러나야 하는 것들 — Leaflet 마커의 `dimmed` 인자와 같은 판정.
+   *
+   * 한 날의 동선을 보는 동안 다른 날의 장소는 사라지지 않고 반 톤 낮아진다
+   * (M15 §3). 판정은 한 곳에서만 하고 두 렌더러가 나눠 쓴다.
+   */
+  const dimmedCardIds = useMemo<Id[]>(
+    () =>
+      selection.kind === 'day' && routeCardIds.size > 0
+        ? visiblePins.filter((pin) => !routeCardIds.has(pin.card.id)).map((pin) => pin.card.id)
+        : [],
+    [selection, routeCardIds, visiblePins],
+  );
 
   // A day (or a whole sheet) that disappears must not leave a dangling route.
   useEffect(() => {
@@ -976,6 +1020,21 @@ export default function MapView() {
         </p>
       ) : null}
 
+      {/* 구글로 그리려 했는데 그럴 수 없는 화면 (M41) — 지도는 그대로 뜨고,
+          왜 다른 지도인지만 한 줄로 말한다. 오프라인 안내와 같은 자리·같은
+          활자: 「지도에 대해 알아 둘 것」은 언제나 지도 바로 위에 선다. */}
+      {googleWanted && !googleMode ? (
+        <p
+          data-testid="map-google-fallback"
+          data-reason={googleKey ? 'failed' : 'no-key'}
+          className="shrink-0 px-4 pb-2 text-label font-normal text-ink-muted"
+        >
+          {googleKey
+            ? '구글 지도를 불러오지 못해 OSM으로 보여요'
+            : '구글 지도 키가 없어 OSM으로 보여요'}
+        </p>
+      ) : null}
+
       {/* `isolate` traps Leaflet's internal z-indexes (panes go up to 700) so
           they cannot paint over the bottom sheets and the tab bar. */}
       <div
@@ -989,6 +1048,27 @@ export default function MapView() {
         data-center-lng={center ? center.lng.toFixed(3) : undefined}
         className="relative isolate mx-4 mb-4 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-sunken"
       >
+        {/* M41 — 구글 시트를 보고 있으면 같은 자리에 구글 지도가 선다. 아래
+            Leaflet 갈래는 한 글자도 손대지 않았다: 지금까지의 모든 지도(그리고
+            그 위의 스펙 절반)가 그 갈래이고, 새 엔진 때문에 옛 엔진이 흔들리는
+            것이 이 마일스톤에서 가장 비싼 실수일 것이다. */}
+        {googleMode ? (
+          <GoogleMapView
+            apiKey={googleKey ?? ''}
+            pins={visiblePins}
+            dimmedCardIds={dimmedCardIds}
+            drawings={drawings}
+            fitPoints={filterPoints}
+            fitKey={filterKey}
+            routePoints={routePoints}
+            routeKey={routeKey}
+            fallback={destination}
+            currency={trip.currency}
+            onEditCard={editOnBoard}
+            onRemoveLocation={(card) => updateCard(card.id, { location: undefined })}
+            onFail={() => setGoogleFailed(true)}
+          />
+        ) : (
         <MapContainer
           center={WORLD_CENTER}
           zoom={WORLD_ZOOM}
@@ -1108,6 +1188,7 @@ export default function MapView() {
             columns={workspace.columns}
           />
         </MapContainer>
+        )}
 
         {pins.length === 0 ? (
           <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center p-6">

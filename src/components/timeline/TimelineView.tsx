@@ -40,6 +40,7 @@ import { formatTimeRange, minToY } from '../../utils/time';
 import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
 import { useAiEnabled } from '../../ai/aiSettings';
+import { useGoogleMapsKey } from '../../map/gmapsKey';
 import AiAskButton from '../ai/AiAskButton';
 import AiReviewSheet from '../ai/AiReviewSheet';
 import SyncStatusChip from '../common/SyncStatusChip';
@@ -62,6 +63,7 @@ import DayColumn from './DayColumn';
 import SpendChip from './SpendChip';
 import EntryDetailSheet from './EntryDetailSheet';
 import ScheduleSheet from './ScheduleSheet';
+import SheetDuplicateDialog from './SheetDuplicateDialog';
 import SheetRenameDialog from './SheetRenameDialog';
 import SheetTabs from './SheetTabs';
 import SheetWizard from './SheetWizard';
@@ -79,6 +81,7 @@ type Dialog =
   | { kind: 'sheet-create' }
   | { kind: 'sheet-edit'; sheet: SheetModel }
   | { kind: 'sheet-rename'; sheet: SheetModel }
+  | { kind: 'sheet-duplicate'; sheet: SheetModel }
   | { kind: 'sheet-delete'; sheet: SheetModel }
   | null;
 
@@ -148,6 +151,8 @@ export default function TimelineView() {
   const addSheet = useWorkspaceStore((s) => s.addSheet);
   const deleteSheet = useWorkspaceStore((s) => s.deleteSheet);
   const duplicateSheet = useWorkspaceStore((s) => s.duplicateSheet);
+  /** 구글 키가 있는 기기에서만 복제가 지도를 묻는다 (M41). */
+  const googleKey = useGoogleMapsKey();
   const addDay = useWorkspaceStore((s) => s.addDay);
   const deleteDay = useWorkspaceStore((s) => s.deleteDay);
 
@@ -801,7 +806,14 @@ export default function TimelineView() {
             onEditFlights={(target) => setDialog({ kind: 'sheet-edit', sheet: target })}
             // 사본으로 곧장 넘어간다 (M40) — 복제를 눌러 놓고 원본 위에 남아
             // 있으면, 방금 만든 것을 손보려고 한 번 더 탭해야 한다.
+            //
+            // M41: 구글 키가 있는 기기에서만 한 번 묻는다 — 사본을 어느 지도로
+            // 볼 것인가. 키가 없으면 물을 것이 없으므로 M40 그대로 한 번에 끝난다.
             onDuplicate={(target) => {
+              if (googleKey) {
+                setDialog({ kind: 'sheet-duplicate', sheet: target });
+                return;
+              }
               const copyId = duplicateSheet(target.id);
               if (copyId) setActiveSheet(copyId);
             }}
@@ -1215,6 +1227,18 @@ export default function TimelineView() {
           sheet={dialog.sheet}
           onClose={() => setDialog(null)}
           onDone={setActiveSheet}
+        />
+      ) : null}
+
+      {dialog?.kind === 'sheet-duplicate' ? (
+        <SheetDuplicateDialog
+          sheet={dialog.sheet}
+          onConfirm={(engine) => {
+            const copyId = duplicateSheet(dialog.sheet.id, engine);
+            setDialog(null);
+            if (copyId) setActiveSheet(copyId);
+          }}
+          onCancel={() => setDialog(null)}
         />
       ) : null}
 

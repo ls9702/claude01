@@ -67,6 +67,16 @@ export interface FlightLeg {
   to?: string;
 }
 
+/**
+ * 이 시트의 지도를 무엇으로 그리는가 (M41).
+ *
+ * 값이 하나뿐인 것은 의도적이다: **없음이 곧 OSM**이고, 그것이 M3부터의 동작이자
+ * 백엔드 없는 GitHub Pages에서도 늘 되는 유일한 선택지다. `'osm'`이라는 값을
+ * 따로 두면 「없음」과 「명시적 OSM」이라는, 화면에서 구분되지 않는 두 상태가
+ * 생긴다.
+ */
+export type MapEngine = 'google';
+
 /** A timesheet: an ordered run of days, optionally bracketed by flights. */
 export interface Sheet {
   id: Id;
@@ -76,6 +86,23 @@ export interface Sheet {
   dayOrder: Id[];
   outboundFlight?: FlightLeg;
   inboundFlight?: FlightLeg;
+  /**
+   * 이 시트의 지도 엔진 (M41) — 없으면 OSM, `'google'`이면 구글 지도.
+   *
+   * 시트마다 고르는 이유는 이것이 **비교의 축**이기 때문이다. 시트 복제(M40)가
+   * 시나리오를 나란히 놓으라고 만든 기능이고, 「같은 일정을 구글 지도 위에서
+   * 보면 어떤가」도 그 비교의 하나다. 여행 단위로 걸면 두 시트가 같은 지도를
+   * 쓸 수밖에 없고, 기기 단위로 걸면 두 사람이 서로 다른 화면을 본다.
+   *
+   * 이 값은 **그리는 방법**일 뿐 데이터가 아니다 — 카드의 좌표도, 배치도, 05시
+   * 창도 엔진과 무관하게 똑같다. 그래서 키가 없는 기기(구글 키를 못 받은
+   * GitHub Pages)에서는 이 필드가 붙은 시트도 조용히 OSM으로 그려진다. 지도가
+   * 안 뜨는 것보다 다른 지도가 뜨는 편이 언제나 낫다.
+   *
+   * Optional and additive — M41 이전에 저장된 시트에는 필드가 없고
+   * `schemaVersion`은 그대로 1이다.
+   */
+  mapEngine?: MapEngine;
   createdAt: Millis;
   updatedAt: Millis;
 }

@@ -52,6 +52,32 @@ describe('parseBootstrapConfig', () => {
     const parsed = parseBootstrapConfig({ sync: { baseUrl: '' }, aiEnabled: true });
     expect(parsed).toEqual({ aiEnabled: true });
   });
+
+  /* --- M41 — 구글 지도 키 ------------------------------------------- */
+
+  it('googleMapsKey를 그대로 실어 온다', () => {
+    const parsed = parseBootstrapConfig({
+      sync: { baseUrl: '/api', token: 't' },
+      googleMapsKey: 'AIza-abc',
+    });
+    expect(parsed?.googleMapsKey).toBe('AIza-abc');
+  });
+
+  it('키만 있는 파일도 유효한 설정이다 — 키만 주는 배포가 있을 수 있다', () => {
+    expect(parseBootstrapConfig({ googleMapsKey: 'AIza-abc' })).toEqual({
+      googleMapsKey: 'AIza-abc',
+    });
+  });
+
+  it('빈 키·타입 오류 키는 없는 것으로 읽는다', () => {
+    expect(parseBootstrapConfig({ googleMapsKey: '   ' })).toBeNull();
+    expect(parseBootstrapConfig({ googleMapsKey: 123 })).toBeNull();
+    expect(parseBootstrapConfig({ aiEnabled: true, googleMapsKey: '' })?.googleMapsKey).toBeUndefined();
+  });
+
+  it('키 앞뒤 공백은 걷어낸다', () => {
+    expect(parseBootstrapConfig({ googleMapsKey: '  AIza-abc \n' })?.googleMapsKey).toBe('AIza-abc');
+  });
 });
 
 /* ------------------------------------------------------------------ *

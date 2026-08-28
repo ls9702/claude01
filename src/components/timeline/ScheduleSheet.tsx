@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { requestPlaceFix } from '../../stores/placeFixQueue';
 import { useUndoStore } from '../../stores/undoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { FIRST_SHEET_NAME, useWorkspaceStore } from '../../stores/workspaceStore';
@@ -137,7 +138,11 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
       return;
     }
     const entryId = scheduleCard(card.id, target.dayId, target.startMin, durationMin);
-    if (entryId) offer(`'${card.title}' 배치됨`, () => deleteEntry(entryId));
+    if (entryId) {
+      offer(`'${card.title}' 배치됨`, () => deleteEntry(entryId));
+      // 드래그 배치와 같은 뒷이야기 (M41) — 구글 시트라면 위치를 한 번 되묻는다.
+      requestPlaceFix(workspace, card.id, target.dayId);
+    }
     onClose();
   };
 

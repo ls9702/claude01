@@ -61,8 +61,22 @@ export type CardPatch = Partial<
   Pick<Card, 'title' | 'memo' | 'url' | 'location' | 'budget' | 'defaultDurationMin'>
 >;
 
-/** Fields of a {@link Sheet} that callers may change (flights arrive in M2b). */
-export type SheetPatch = Partial<Pick<Sheet, 'name'>>;
+/**
+ * Fields of a {@link Sheet} that callers may change (flights arrive in M2b).
+ *
+ * `mapEngine`은 M41에서 더해졌다 — 시트 마법사가 새 시트를 만든 **직후** 한 번
+ * 적는 것이 유일한 쓰임이라, 별도의 뮤테이션을 세우지 않고 이 패치에 얹었다.
+ */
+export type SheetPatch = Partial<Pick<Sheet, 'name' | 'mapEngine'>>;
+
+/**
+ * 사람이 고른 지도 (M41) — 모델의 {@link Sheet.mapEngine}과 달리 **두 값**이다.
+ *
+ * 저장에는 「없음 = OSM」이면 충분하지만, 고르는 자리에서는 OSM도 하나의 선택
+ * 이어야 한다: 복제 대화상자가 「구글이 아님」을 말할 방법이 없으면, 구글 시트를
+ * OSM 사본으로 베끼는 길이 사라진다.
+ */
+export type SheetEngineChoice = 'osm' | 'google';
 
 /** Fields of a {@link Day} that callers may change. */
 export type DayPatch = Partial<Pick<Day, 'date' | 'label'>>;
@@ -609,8 +623,13 @@ export interface WorkspaceState {
    * 어느 시트 것인지 알 방법이 없어진다.
    *
    * 새 시트 id를 돌려준다. 모르는 id·주인 없는 시트면 `null`.
+   *
+   * `engine`(M41)은 사본이 어느 지도로 그려질지다. **주지 않으면 원본을 따른다**
+   * — 복제의 뜻이 그것이고, M40의 호출부(구글 키가 없는 기기)는 지금도 인자
+   * 없이 부른다. `'osm'`은 「구글 아님」을 명시적으로 고르는 값이라 필드를
+   * 아예 심지 않고, `'google'`만 필드를 남긴다 ({@link Sheet.mapEngine}).
    */
-  duplicateSheet: (sheetId: Id) => Id | null;
+  duplicateSheet: (sheetId: Id, engine?: SheetEngineChoice) => Id | null;
 
   /* --- 시트 마법사 — M2b -------------------------------------------- */
 
@@ -1241,7 +1260,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           });
         },
 
-        duplicateSheet: (sheetId) =>
+        duplicateSheet: (sheetId, engine) =>
           run((draft, now) => {
             const source = draft.sheets[sheetId];
             if (!source) return null;
@@ -1301,6 +1320,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               tripId: source.tripId,
               name: copySheetName(source.name, siblingNames),
               dayOrder,
+              // 안 고르면 원본을 따라간다 (M41). 「구글로」를 고른 사본만 필드를
+              // 이고 서고, 「OSM으로」는 필드가 없는 모양 — 즉 M41 이전의 시트와
+              // 완전히 같은 모양 — 으로 태어난다.
+              ...((engine ?? (source.mapEngine === 'google' ? 'google' : 'osm')) === 'google'
+                ? { mapEngine: 'google' as const }
+                : {}),
               // 얕은 복사로는 두 시트가 한 다리를 같이 들게 된다 — 한쪽
               // 항공편을 고치면 다른 쪽 미리보기까지 바뀐다.
               ...(source.outboundFlight ? { outboundFlight: { ...source.outboundFlight } } : {}),

@@ -12,6 +12,7 @@ import Icon from '../common/Icon';
 import PersistBanner from '../common/PersistBanner';
 import ProfilePicker from '../common/ProfilePicker';
 import UndoToast from '../common/UndoToast';
+import PlaceFixHost from '../map/PlaceFixHost';
 
 const VIEWS: Record<TabId, () => React.JSX.Element> = {
   trips: TripsView,
@@ -79,6 +80,9 @@ export default function AppShell() {
       </main>
       <TabBar />
       <UndoToast />
+      {/* 배치 보정 팝업의 주인 (M41). 여기 사는 이유는 배치가 일정 탭에서도
+          보드 탭에서도 일어나기 때문이다 — 자세한 것은 PlaceFixHost. */}
+      <PlaceFixHost />
     </div>
   );
 }

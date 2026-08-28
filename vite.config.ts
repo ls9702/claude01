@@ -57,13 +57,30 @@ export default defineConfig({
         // the browser's own HTTP cache holds them for free. A workbox entry on
         // top would be a second copy of every photo inside the service
         // worker's storage — the one budget a phone actually runs out of.
-        navigateFallbackDenylist: [/\/api\//, /data\.php/, /ai\.php/, /image\.php/],
+        //
+        // `bootstrap-config.json` (M41): 서버가 실제로 주는 파일인데도 SPA
+        // 폴백에 걸려 `index.html`이 돌아오던 자리다 — 사용자가 주소창에 직접
+        // 열어 보고 HTML을 받았다. 앱의 `fetch`는 그 HTML을 JSON으로 읽으려다
+        // 실패하고 「파일 없음」과 구분되지 않는 조용한 실패가 된다.
+        navigateFallbackDenylist: [
+          /\/api\//,
+          /data\.php/,
+          /ai\.php/,
+          /image\.php/,
+          /bootstrap-config\.json/,
+        ],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             // Map tiles are immutable and expensive; everything else the app
             // talks to (data.php, nominatim) is deliberately left uncached so
             // it can never serve stale trip data or stale search results.
+            //
+            // 구글 지도(M41)도 그 「everything else」다: `maps.googleapis.com`·
+            // `maps.gstatic.com`은 여기 없으므로 서비스워커가 가로채지 않고
+            // 네트워크로 곧장 간다. 일부러 그렇게 둔다 — 구글 스크립트는 자기
+            // 캐시 정책과 버전 채널(`v=weekly`)을 들고 다니고, 그 위에 우리
+            // 캐시를 한 겹 얹으면 어느 날 낡은 API가 새 키로 뜬다.
             urlPattern: /^https:\/\/[a-c]\.tile\.openstreetmap\.org\/.*/i,
             handler: 'CacheFirst',
             options: {
