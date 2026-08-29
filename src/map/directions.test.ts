@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DIRECTIONS_BASE,
   DIRECTIONS_LABEL,
+  PLACE_PAGE_LABEL,
+  PLACE_SEARCH_BASE,
   directionsUrl,
+  placePageUrl,
   previousStopMap,
 } from './directions';
 
@@ -79,5 +82,41 @@ describe('previousStopMap', () => {
   it('빈 목록·정거장 하나짜리 날에는 아무것도 없다', () => {
     expect(previousStopMap([]).size).toBe(0);
     expect(previousStopMap([[stops[0]]]).size).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 장소 페이지 링크 (M43)
+ * ------------------------------------------------------------------ */
+
+describe('placePageUrl', () => {
+  it('place id가 있으면 그 가게의 페이지를 바로 연다', () => {
+    expect(placePageUrl('一蘭 道頓堀店', NAMBA, 'ChIJ_place')).toBe(
+      `${PLACE_SEARCH_BASE}?api=1&query=${encodeURIComponent('一蘭 道頓堀店')}&query_place_id=ChIJ_place`,
+    );
+  });
+
+  it('id가 없으면 이름과 좌표를 함께 실어 그 자리 근처를 찾게 한다', () => {
+    expect(placePageUrl('미즈노', NAMBA)).toBe(
+      `${PLACE_SEARCH_BASE}?api=1&query=${encodeURIComponent('미즈노 34.6659,135.5013')}`,
+    );
+  });
+
+  it('이름만·좌표만 있어도 링크는 선다', () => {
+    expect(placePageUrl('미즈노')).toBe(
+      `${PLACE_SEARCH_BASE}?api=1&query=${encodeURIComponent('미즈노')}`,
+    );
+    expect(placePageUrl(undefined, NAMBA)).toBe(
+      `${PLACE_SEARCH_BASE}?api=1&query=${encodeURIComponent('34.6659,135.5013')}`,
+    );
+  });
+
+  it('가리킬 것이 하나도 없으면 링크가 아니다', () => {
+    expect(placePageUrl('  ')).toBeNull();
+    expect(placePageUrl(undefined, { lat: Number.NaN, lng: 1 })).toBeNull();
+  });
+
+  it('버튼의 말은 한 곳에서 온다', () => {
+    expect(PLACE_PAGE_LABEL).toBe('구글 지도 앱에서 보기');
   });
 });

@@ -112,6 +112,66 @@ export function createDurationChipElement(label: string, testId = 'gmap-route-du
   return chip;
 }
 
+/**
+ * 「주변 맛집」 핀 (M43) — 카드 핀과 **한눈에 다르게** 생겼다.
+ *
+ * 이 레이어는 일정 위에 얹히는 참고 자료지 일정 자체가 아니다. 그래서 카드
+ * 핀(30px 물방울, 카테고리 색)보다 작고, 둥글고, 흰 바탕이다 — 지도를 보다가
+ * 「내가 넣은 곳」과 「추천받은 곳」을 헷갈리면 그 순간 이 기능은 방해가 된다.
+ *
+ * 큐레이션은 금색 테두리를 두른다(⭐ 링): 우리가 조사한 집과 구글이 방금 준
+ * 집은 아는 것의 양이 다르고, 그 차이가 눌러 보기 전에 보여야 한다.
+ */
+const GOURMET_PIN_PX = 24;
+
+/** 큐레이션 링의 금색. */
+const CURATED_RING_HEX = '#b45309';
+
+export interface GourmetPinOptions {
+  /** 핀 위에 설 글자 — 갈래 이모지. */
+  emoji: string;
+  /** 이 한 곳의 유일한 이름 (`curated:…` / `google:…`). */
+  spotKey: string;
+  source: 'curated' | 'google';
+  /** 갈래. 못 읽은 구글 결과는 `other`. */
+  genre: string;
+  testId?: string;
+}
+
+export function createGourmetPinElement({
+  emoji,
+  spotKey,
+  source,
+  genre,
+  testId = 'gourmet-pin',
+}: GourmetPinOptions): HTMLElement {
+  const pin = document.createElement('div');
+  pin.setAttribute('data-testid', testId);
+  pin.setAttribute('data-spot-key', spotKey);
+  pin.setAttribute('data-source', source);
+  pin.setAttribute('data-genre', genre);
+  const curated = source === 'curated';
+  pin.style.cssText = [
+    `width:${GOURMET_PIN_PX}px`,
+    `height:${GOURMET_PIN_PX}px`,
+    'background:#fff',
+    `border:${curated ? '2px' : '1px'} solid ${curated ? CURATED_RING_HEX : '#d6d3d1'}`,
+    'border-radius:9999px',
+    'box-shadow:0 1px 4px rgba(28,25,23,0.35)',
+    'display:flex',
+    'align-items:center',
+    'justify-content:center',
+    'cursor:pointer',
+  ].join(';');
+
+  const glyph = document.createElement('span');
+  glyph.style.cssText = 'font-size:13px;line-height:1';
+  glyph.textContent = emoji;
+  pin.appendChild(glyph);
+
+  return pin;
+}
+
 /** 보정 팝업의 두 점 (M41) — 기존은 물러나고 제안이 앞에 선다. */
 export function createDotElement(
   variant: 'existing' | 'suggested',

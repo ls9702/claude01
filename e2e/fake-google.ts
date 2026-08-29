@@ -32,15 +32,48 @@ export interface FakeGoogleState {
   centers: { lat: number; lng: number }[];
   /** 그려진 원 — 「내 위치」의 정확도 (M42). */
   circles: { lat: number; lng: number; radius: number }[];
+  /** `searchNearby` 요청들 — 「주변 맛집」이 무엇을 물었나 (M43). */
+  nearby: {
+    center?: { lat: number; lng: number };
+    radius?: number;
+    includedTypes: string[];
+    fields: string[];
+    maxResultCount?: number;
+  }[];
 }
 
-/** 스펙이 심는 canned 결과 한 줄. */
+/**
+ * 스펙이 심는 canned 결과 한 줄.
+ *
+ * M41은 이름·주소·좌표 셋이면 됐다. M43의 「주변 맛집」은 평점으로 거르고 장소
+ * 페이지로 넘기므로 넷이 더 붙었다 — 전부 **선택적**이라 M41·M42의 스펙은 한
+ * 글자도 바뀌지 않는다.
+ */
 export interface FakePlace {
   displayName: string;
   formattedAddress?: string;
   lat: number;
   lng: number;
+  /** 구글 평점 (M43) — 4.3 문턱을 넘는지를 정하는 값. */
+  rating?: number;
+  userRatingCount?: number;
+  /** 장소 id (M43) — 「구글 지도 앱에서 보기」의 열쇠. */
+  id?: string;
+  /** Places 타입들 (M43) — 결과의 갈래를 되읽는 값. */
+  types?: string[];
 }
+
+/**
+ * 질의별 canned 답 (M43).
+ *
+ * `__tripBoardFakeGooglePlacesByQuery`에 심으면 `searchByText`가 **질의에 그
+ * 열쇠가 들어 있을 때** 그 목록으로 답한다. 맛집 조회는 집마다 다른 질의를
+ * 내므로(「一蘭 道頓堀店 도톤보리」) 하나의 배열로는 흉내 낼 수 없다.
+ *
+ * 맞는 열쇠가 없으면 지금까지처럼 `__tripBoardFakeGooglePlaces` 배열로 답한다 —
+ * M41·M42의 스펙이 그 자리에 그대로 있다.
+ */
+export type FakePlacesByQuery = Record<string, FakePlace[]>;
 
 /**
  * `page.addInitScript(installFakeGoogle)`로 심는다.
@@ -59,10 +92,28 @@ export function installFakeGoogle(): void {
     searches: [] as unknown[],
     centers: [] as unknown[],
     circles: [] as unknown[],
+    nearby: [] as unknown[],
   };
 
   /** 스펙이 미리 심어 두는 검색 결과. 없으면 「못 찾음」. */
   if (!scope.__tripBoardFakeGooglePlaces) scope.__tripBoardFakeGooglePlaces = [];
+  /** 질의별 답 (M43). 없으면 위의 한 배열로만 답한다. */
+  if (!scope.__tripBoardFakeGooglePlacesByQuery) scope.__tripBoardFakeGooglePlacesByQuery = {};
+  /** `searchNearby`가 돌려줄 줄들 (M43). */
+  if (!scope.__tripBoardFakeGoogleNearby) scope.__tripBoardFakeGoogleNearby = [];
+
+  /**
+   * 답을 이만큼 늦춘다 (M43, 기본 0).
+   *
+   * 「맛집 정보 불러오는 중 3/11」처럼 **순차 진행 중에만 존재하는 화면**은
+   * 답이 즉시 오면 볼 수 없다. 기본이 0이라 M41·M42의 스펙은 지금까지처럼
+   * 한 틱에 끝난다.
+   */
+  const settle = <T,>(value: T): Promise<T> => {
+    const ms = Number(scope.__tripBoardFakeGoogleDelayMs ?? 0);
+    if (!(ms > 0)) return Promise.resolve(value);
+    return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+  };
 
   class FakeBounds {
     points: { lat: number; lng: number }[] = [];
@@ -75,18 +126,41 @@ export function installFakeGoogle(): void {
   class FakeMap {
     element: HTMLElement;
     options: Record<string, unknown>;
+    /** 지금 화면 한가운데 — 진짜 지도처럼 `fitBounds`·`setCenter`를 따라 움직인다. */
+    center: { lat: number; lng: number };
     constructor(element: HTMLElement, options: Record<string, unknown> = {}) {
       this.element = element;
       this.options = options;
+      this.center = (options.center as { lat: number; lng: number } | undefined) ?? {
+        lat: 0,
+        lng: 0,
+      };
       element.setAttribute('data-fake-google-map', 'true');
       state.maps.push({ options });
     }
     fitBounds(bounds: FakeBounds) {
       state.fits.push({ points: bounds.points.slice() });
+      // 맞춘 범위의 한가운데로 — 「이 지역에서 다시 검색」이 읽는 값이다 (M43).
+      if (bounds.points.length > 0) {
+        const sum = bounds.points.reduce(
+          (acc, point) => ({ lat: acc.lat + point.lat, lng: acc.lng + point.lng }),
+          { lat: 0, lng: 0 },
+        );
+        this.center = {
+          lat: sum.lat / bounds.points.length,
+          lng: sum.lng / bounds.points.length,
+        };
+      }
     }
     /** M42 — 「내 위치」가 지도를 데려갔는지는 이 한 줄로만 확인할 수 있다. */
     setCenter(point: { lat: number; lng: number }) {
+      this.center = { lat: point.lat, lng: point.lng };
       state.centers.push({ lat: point.lat, lng: point.lng });
+    }
+    /** M43 — 진짜 구글처럼 좌표를 **메서드**로 준다. */
+    getCenter() {
+      const center = this.center;
+      return { lat: () => center.lat, lng: () => center.lng };
     }
     setZoom() {}
   }
@@ -153,30 +227,72 @@ export function installFakeGoogle(): void {
     setMap() {}
   }
 
+  interface Canned {
+    displayName: string;
+    formattedAddress?: string;
+    lat: number;
+    lng: number;
+    rating?: number;
+    userRatingCount?: number;
+    id?: string;
+    types?: string[];
+  }
+
+  /** 진짜 구글이 주는 모양으로 — 좌표는 **메서드**다. */
+  const toPlace = (place: Canned) => ({
+    displayName: place.displayName,
+    formattedAddress: place.formattedAddress,
+    // 앱이 그 모양까지 받아 내는지가 이 가짜가 지켜야 하는 계약의 일부다.
+    location: { lat: () => place.lat, lng: () => place.lng },
+    ...(place.rating === undefined ? {} : { rating: place.rating }),
+    ...(place.userRatingCount === undefined ? {} : { userRatingCount: place.userRatingCount }),
+    ...(place.id === undefined ? {} : { id: place.id }),
+    ...(place.types === undefined ? {} : { types: place.types }),
+  });
+
   const places = {
     Place: {
       searchByText: (request: Record<string, unknown>) => {
         const bias = request.locationBias as { center?: { lat: number; lng: number } } | undefined;
+        const textQuery = String(request.textQuery ?? '');
         state.searches.push({
-          textQuery: String(request.textQuery ?? ''),
+          textQuery,
           fields: (request.fields as string[] | undefined) ?? [],
           bias: bias?.center,
         });
-        const canned = (scope.__tripBoardFakeGooglePlaces ?? []) as {
-          displayName: string;
-          formattedAddress?: string;
-          lat: number;
-          lng: number;
-        }[];
-        return Promise.resolve({
-          places: canned.map((place) => ({
-            displayName: place.displayName,
-            formattedAddress: place.formattedAddress,
-            // 진짜 구글은 좌표를 **메서드**로 준다 — 앱이 그 모양까지 받아
-            // 내는지가 이 가짜가 지켜야 하는 계약의 일부다.
-            location: { lat: () => place.lat, lng: () => place.lng },
-          })),
+
+        // 질의별 답이 먼저다 (M43) — 열쇠가 질의 안에 들어 있으면 그 목록.
+        const byQuery = (scope.__tripBoardFakeGooglePlacesByQuery ?? {}) as Record<
+          string,
+          Canned[]
+        >;
+        const hit = Object.keys(byQuery).find((key) => key !== '' && textQuery.includes(key));
+        const canned = hit ? byQuery[hit] : ((scope.__tripBoardFakeGooglePlaces ?? []) as Canned[]);
+
+        // `minRating`은 진짜 구글이 서버에서 거른다 — 가짜도 그렇게 한다.
+        const minRating = typeof request.minRating === 'number' ? request.minRating : null;
+        const filtered =
+          minRating === null
+            ? canned
+            : canned.filter((place) => (place.rating ?? 0) >= minRating);
+
+        return settle({ places: filtered.map(toPlace) });
+      },
+
+      /** 화면 근처 검색 (M43) — 받아 적고, 심어 둔 줄들을 돌려준다. */
+      searchNearby: (request: Record<string, unknown>) => {
+        const restriction = request.locationRestriction as
+          | { center?: { lat: number; lng: number }; radius?: number }
+          | undefined;
+        state.nearby.push({
+          center: restriction?.center,
+          radius: restriction?.radius,
+          includedTypes: (request.includedTypes as string[] | undefined) ?? [],
+          fields: (request.fields as string[] | undefined) ?? [],
+          maxResultCount: request.maxResultCount as number | undefined,
         });
+        const canned = (scope.__tripBoardFakeGoogleNearby ?? []) as Canned[];
+        return settle({ places: canned.map(toPlace) });
       },
     },
   };

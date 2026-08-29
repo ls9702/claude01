@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { PLACE_BIAS_RADIUS_M, searchPlaceByText, toSuggestion } from './googlePlaces';
+import {
+  GOURMET_FIELDS,
+  PLACE_BIAS_RADIUS_M,
+  searchGourmetPlace,
+  searchGourmetPlaces,
+  searchNearbyGourmet,
+  searchPlaceByText,
+  toGourmetPlace,
+  toSuggestion,
+} from './googlePlaces';
 import type { GoogleMapsApi } from './googleLoader';
 
 /** 구글이 답하는 모양 — 좌표는 **메서드**로 온다. */
@@ -95,5 +104,174 @@ describe('searchPlaceByText', () => {
       importLibrary: () => Promise.reject(new Error('places unavailable')),
     } as unknown as GoogleMapsApi;
     expect(await searchPlaceByText(broken, '이치란')).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 「주변 맛집」이 쓰는 두 갈래 (M43)
+ * ------------------------------------------------------------------ */
+
+/** `searchByText` + `searchNearby` 둘을 든 가짜. */
+function fakeGourmetMaps(options: {
+  text?: unknown;
+  nearby?: unknown;
+  nearbyError?: Error;
+  noNearby?: boolean;
+}) {
+  const log: { kind: 'text' | 'nearby'; request: Record<string, unknown> }[] = [];
+  const Place: Record<string, unknown> = {
+    searchByText: (request: Record<string, unknown>) => {
+      log.push({ kind: 'text', request });
+      return Promise.resolve(options.text ?? { places: [] });
+    },
+  };
+  if (!options.noNearby) {
+    Place.searchNearby = (request: Record<string, unknown>) => {
+      log.push({ kind: 'nearby', request });
+      if (options.nearbyError) return Promise.reject(options.nearbyError);
+      return Promise.resolve(options.nearby ?? { places: [] });
+    };
+  }
+  return {
+    maps: {
+      importLibrary: (name: string) => Promise.resolve(name === 'places' ? { Place } : {}),
+    } as unknown as GoogleMapsApi,
+    log,
+  };
+}
+
+describe('toGourmetPlace', () => {
+  it('평점·평점수·장소 id·타입까지 읽는다', () => {
+    expect(
+      toGourmetPlace(
+        rawPlace(34.6659, 135.5013, {
+          rating: 4.42,
+          userRatingCount: 5200,
+          id: 'p1',
+          types: ['ramen_restaurant', 'restaurant'],
+        }),
+      ),
+    ).toEqual({
+      name: '이치란 난바점',
+      lat: 34.6659,
+      lng: 135.5013,
+      address: '일본 오사카부 오사카시',
+      rating: 4.42,
+      ratingCount: 5200,
+      placeId: 'p1',
+      types: ['ramen_restaurant', 'restaurant'],
+    });
+  });
+
+  it('예약 여부는 `reservable`로도 `isReservable`로도 온다', () => {
+    expect(toGourmetPlace(rawPlace(1, 2, { reservable: true }))?.reservable).toBe(true);
+    expect(toGourmetPlace(rawPlace(1, 2, { isReservable: false }))?.reservable).toBe(false);
+    expect('reservable' in (toGourmetPlace(rawPlace(1, 2)) ?? {})).toBe(false);
+  });
+
+  it('좌표가 없으면 한 줄이 아니다', () => {
+    expect(toGourmetPlace(undefined)).toBeNull();
+    expect(toGourmetPlace({ displayName: 'x' })).toBeNull();
+  });
+});
+
+describe('searchGourmetPlace', () => {
+  it('맛집용 필드 셋으로 묻는다 — 값을 치르는 목록은 여기 하나뿐', () => {
+    expect(GOURMET_FIELDS).toEqual([
+      'displayName',
+      'location',
+      'formattedAddress',
+      'rating',
+      'userRatingCount',
+      'id',
+      'types',
+    ]);
+    // `reservable`은 더 비싼 등급이라 일부러 없다 — 조사값이 그 자리를 채운다.
+    expect(GOURMET_FIELDS).not.toContain('reservable');
+  });
+
+  it('첫 결과 하나를 돌려주고 M41의 검색은 건드리지 않는다', async () => {
+    const { maps, log } = fakeGourmetMaps({
+      text: { places: [rawPlace(34.6659, 135.5013, { rating: 4.4, id: 'p1' })] },
+    });
+    const found = await searchGourmetPlace(maps, '一蘭 道頓堀店 도톤보리', { lat: 34.7, lng: 135.5 });
+    expect(found).toMatchObject({ rating: 4.4, placeId: 'p1' });
+    expect(log[0].request.fields).toEqual(GOURMET_FIELDS);
+    expect(log[0].request.maxResultCount).toBe(1);
+    expect(log[0].request.locationBias).toEqual({
+      center: { lat: 34.7, lng: 135.5 },
+      radius: PLACE_BIAS_RADIUS_M,
+    });
+  });
+
+  it('minRating은 준 때만 실린다', async () => {
+    const { maps, log } = fakeGourmetMaps({ text: { places: [] } });
+    await searchGourmetPlaces(maps, 'とんかつ', undefined, { minRating: 4.3 });
+    expect(log[0].request.minRating).toBe(4.3);
+
+    await searchGourmetPlaces(maps, 'とんかつ');
+    expect('minRating' in (log[1].request as object)).toBe(false);
+  });
+
+  it('빈 질의는 묻지 않고, 오류는 빈 목록이다', async () => {
+    const { maps, log } = fakeGourmetMaps({ text: { places: [] } });
+    expect(await searchGourmetPlaces(maps, '  ')).toEqual([]);
+    expect(log).toHaveLength(0);
+
+    const broken = {
+      importLibrary: () => Promise.reject(new Error('places unavailable')),
+    } as unknown as GoogleMapsApi;
+    expect(await searchGourmetPlaces(broken, 'x')).toEqual([]);
+    expect(await searchGourmetPlace(broken, 'x')).toBeNull();
+  });
+});
+
+describe('searchNearbyGourmet', () => {
+  it('중심·반경·타입을 실어 한 번 묻는다', async () => {
+    const { maps, log } = fakeGourmetMaps({
+      nearby: { places: [rawPlace(1, 2, { rating: 4.6, id: 'n1' })] },
+    });
+    const found = await searchNearbyGourmet(
+      maps,
+      { lat: 34.6659, lng: 135.5013 },
+      ['ramen_restaurant', 'sushi_restaurant'],
+      { radius: 1500, maxResultCount: 20 },
+    );
+
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ rating: 4.6, placeId: 'n1' });
+    expect(log[0].kind).toBe('nearby');
+    expect(log[0].request.includedTypes).toEqual(['ramen_restaurant', 'sushi_restaurant']);
+    expect(log[0].request.locationRestriction).toEqual({
+      center: { lat: 34.6659, lng: 135.5013 },
+      radius: 1500,
+    });
+    expect(log[0].request.maxResultCount).toBe(20);
+    // 순서는 우리가 평점으로 다시 정한다 — 구글에 순위를 사지 않는다.
+    expect('rankPreference' in (log[0].request as object)).toBe(false);
+  });
+
+  it('타입이 없으면 묻지 않는다', async () => {
+    const { maps, log } = fakeGourmetMaps({});
+    expect(await searchNearbyGourmet(maps, { lat: 1, lng: 2 }, [], { radius: 1, maxResultCount: 1 })).toEqual([]);
+    expect(log).toHaveLength(0);
+  });
+
+  it('실패는 던진다 — 호출부가 키워드 검색으로 내려갈 수 있어야 한다', async () => {
+    const missing = fakeGourmetMaps({ noNearby: true });
+    await expect(
+      searchNearbyGourmet(missing.maps, { lat: 1, lng: 2 }, ['ramen_restaurant'], {
+        radius: 1,
+        maxResultCount: 1,
+      }),
+    ).rejects.toThrow();
+
+    const rejected = fakeGourmetMaps({ nearbyError: new Error('INVALID_ARGUMENT') });
+    await expect(
+      searchNearbyGourmet(rejected.maps, { lat: 1, lng: 2 }, ['nope_restaurant'], {
+        radius: 1,
+        maxResultCount: 1,
+      }),
+    ).rejects.toThrow('INVALID_ARGUMENT');
   });
 });

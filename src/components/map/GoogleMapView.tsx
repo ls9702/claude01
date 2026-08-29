@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   GOOGLE_MAP_ID,
   googleMarkerLibrary,
@@ -32,6 +32,7 @@ import {
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
 } from '../common/formStyles';
+import GourmetLayer from './GourmetLayer';
 import { createDurationChipElement, createMyLocationElement, createPinElement } from './googlePin';
 import type { RouteDrawing } from './RouteLayer';
 import { DESTINATION_ZOOM, FIT_MAX_ZOOM, MY_LOCATION_ZOOM, WORLD_ZOOM } from './mapBase';
@@ -147,6 +148,19 @@ export default function GoogleMapView({
   /** 열려 있는 카드 팝업 — 핀 하나를 눌렀을 때. */
   const [openCardId, setOpenCardId] = useState<Id | null>(null);
   /**
+   * 카드 팝업이 열린 횟수 (M43) — 맛집 팝업에게 물러나라고 말하는 신호.
+   *
+   * 두 팝업은 화면의 **같은 자리**(아래 두 칸)에 뜬다. 한쪽이 열릴 때 다른
+   * 쪽이 닫히지 않으면 두 장이 겹치고, 그 아래 장의 버튼은 누를 수 없다.
+   */
+  const [cardPopupToken, setCardPopupToken] = useState(0);
+  const openCardPopup = (cardId: Id) => {
+    setOpenCardId(cardId);
+    setCardPopupToken((current) => current + 1);
+  };
+  /** 맛집 팝업이 열렸다는 신호를 받는 쪽 — 효과의 의존성이라 신원이 고정이어야 한다. */
+  const closeCardPopup = useCallback(() => setOpenCardId(null), []);
+  /**
    * 구글이 답해 준 실제 경로들 — 다리 이름 → 선과 시간 (M42).
    *
    * 한 다리씩 도착하는 대로 채워진다. 아직 없는 다리는 직선 점선으로 남고, 그
@@ -223,7 +237,7 @@ export default function GoogleMapView({
       });
       // 구글의 이벤트 시스템을 거치지 않는다 — 요소는 우리가 만들었고, 클릭도
       // 우리 것이다. 핀 하나 = 카드 하나 = 팝업 하나.
-      element.addEventListener('click', () => setOpenCardId(card.id));
+      element.addEventListener('click', () => openCardPopup(card.id));
 
       const marker = new markerLib.AdvancedMarkerElement({
         map,
@@ -550,6 +564,21 @@ export default function GoogleMapView({
       className="relative h-full w-full"
     >
       <div ref={containerRef} data-testid="google-map-canvas" className="h-full w-full" />
+
+      {/* 「주변 맛집」 (M43) — 구글 지도가 실제로 선 뒤에만, 그리고 여기에만.
+          Leaflet 갈래는 이 컴포넌트를 알지 못하고, 그래서 OSM 시트에는 버튼
+          자체가 없다. 레이어는 자기 핀만 붙였다 떼고, 카드 핀·동선·필터가 쓰는
+          상태에는 손대지 않는다. */}
+      {status === 'ready' && mapsRef.current && mapRef.current && markerLibRef.current ? (
+        <GourmetLayer
+          maps={mapsRef.current}
+          map={mapRef.current}
+          markerLib={markerLibRef.current}
+          fallbackCenter={fallback}
+          onOpenSpot={closeCardPopup}
+          closeToken={cardPopupToken}
+        />
+      ) : null}
 
       {status === 'loading' ? (
         <p

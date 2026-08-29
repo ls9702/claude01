@@ -47,6 +47,12 @@ export interface GoogleMap {
   fitBounds: (bounds: GoogleBounds, padding?: number | Record<string, number>) => void;
   setCenter: (point: { lat: number; lng: number }) => void;
   setZoom: (zoom: number) => void;
+  /**
+   * 지금 화면 한가운데 (M43) — 「이 지역에서 다시 검색」이 무엇을 「이 지역」으로
+   * 삼는지의 유일한 근거. 선택적인 이유는 이것 없이도 지도는 그려지기 때문이다
+   * (그때는 여행의 목적지가 중심을 대신한다).
+   */
+  getCenter?: () => GoogleLatLngLike | undefined | null;
 }
 
 /** 우리가 쓰는 만큼의 `google.maps.Polyline`. */
@@ -75,17 +81,45 @@ export interface GoogleMarkerLibrary {
   AdvancedMarkerElement: new (options: Record<string, unknown>) => GoogleMarker;
 }
 
-/** `searchByText`의 답 한 줄. */
+/**
+ * `searchByText`·`searchNearby`의 답 한 줄.
+ *
+ * M41은 셋(이름·좌표·주소)만 알면 됐다. M43의 「주변 맛집」은 평점으로 거르고
+ * 장소 페이지로 넘기므로 넷이 더 필요하다 — 전부 **선택적**이라 M41의 호출부는
+ * 한 글자도 바뀌지 않는다. 값을 치르는 것은 요청의 `fields` 목록이지 이 타입이
+ * 아니다.
+ */
 export interface GooglePlaceResult {
   displayName?: string;
   formattedAddress?: string;
   location?: GoogleLatLngLike | null;
+  /** 구글의 장소 id (M43) — Places (New)에서는 `id`다(`place_id`가 아니라). */
+  id?: string;
+  /** 평점 0~5 (M43). */
+  rating?: number;
+  /** 평점을 매긴 사람 수 (M43). */
+  userRatingCount?: number;
+  /**
+   * 예약을 받는가 (M43).
+   *
+   * 요청의 필드 이름은 `reservable`이고, JS SDK가 돌려주는 객체의 속성 이름은
+   * `isReservable`이다. 둘 다 받아 둔다 — 어느 쪽이 오든 답은 같아야 한다.
+   */
+  reservable?: boolean;
+  isReservable?: boolean;
+  /** 이 곳이 든 Places 타입들 (M43) — 결과의 갈래를 되읽는 데 쓴다. */
+  types?: string[];
 }
 
 /** `importLibrary('places')`가 주는 것 중 우리가 쓰는 부분. */
 export interface GooglePlacesLibrary {
   Place: {
     searchByText: (request: Record<string, unknown>) => Promise<{ places?: GooglePlaceResult[] }>;
+    /**
+     * 화면 근처 검색 (M43). 선택적인 이유는 이것이 없어도 앱의 나머지가 전부
+     * 동작하기 때문이다 — 없으면 「구글 실시간」 출처만 조용히 비어 있는다.
+     */
+    searchNearby?: (request: Record<string, unknown>) => Promise<{ places?: GooglePlaceResult[] }>;
   };
 }
 

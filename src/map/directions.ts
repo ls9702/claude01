@@ -63,6 +63,46 @@ export function directionsUrl(
 /** 버튼에 적히는 말 — 세 자리에서 같은 한 마디여야 한다. */
 export const DIRECTIONS_LABEL = '길찾기';
 
+/* ------------------------------------------------------------------ *
+ * 장소 페이지 링크 (M43)
+ * ------------------------------------------------------------------ */
+
+/** 구글 Maps URLs의 장소 검색 주소. */
+export const PLACE_SEARCH_BASE = 'https://www.google.com/maps/search/';
+
+/** 버튼에 적히는 말. */
+export const PLACE_PAGE_LABEL = '구글 지도 앱에서 보기';
+
+/**
+ * 「그 가게의 구글 지도 페이지」로 가는 링크 (M43).
+ *
+ * 길찾기와 다른 문이다: 사용자가 맛집 핀을 눌렀을 때 가장 자주 묻는 것은
+ * 「어떻게 가지」가 아니라 **「여기 어떤 집이지」**다 — 사진, 영업시간, 리뷰,
+ * 메뉴. 그건 우리가 흉내 낼 것이 아니라 구글 지도 앱이 이미 잘하는 일이다.
+ *
+ * `query_place_id`가 있으면 앱은 **그 가게의 시트**를 바로 연다. 좌표만 넘기면
+ * 「그 지점에 무엇이 있나」를 앱이 다시 추측하게 되고, 골목 안 가게는 옆집이
+ * 열리기도 한다. 그래서 캐시가 `placeId`를 들고 다닌다.
+ *
+ * `query`는 place id가 있어도 **필수**다(구글 규격) — 현지 상호를 싣는다.
+ * id가 없으면 이름과 좌표를 함께 실어 그 자리 근처의 그 이름을 찾게 한다.
+ */
+export function placePageUrl(
+  name: string | undefined,
+  point?: DirectionsPoint | null,
+  placeId?: string,
+): string | null {
+  const label = (name ?? '').trim();
+  const hasPoint = usable(point);
+  if (!label && !hasPoint) return null;
+
+  const query = label && hasPoint && !placeId ? `${label} ${coord(point!)}` : label || coord(point!);
+
+  const parts = ['api=1', `query=${encodeURIComponent(query)}`];
+  if (placeId) parts.push(`query_place_id=${encodeURIComponent(placeId)}`);
+  return `${PLACE_SEARCH_BASE}?${parts.join('&')}`;
+}
+
 /** 「그 날의 정거장들」 한 줄 — `timeline/route`의 `RouteStop`이 그대로 들어맞는다. */
 interface StopLike {
   cardId: string;
