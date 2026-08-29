@@ -113,19 +113,44 @@ export function createDurationChipElement(label: string, testId = 'gmap-route-du
 }
 
 /**
- * 「주변 맛집」 핀 (M43) — 카드 핀과 **한눈에 다르게** 생겼다.
+ * 「주변 맛집」 핀 (M43 → M45) — 카드 핀과 **한눈에 다르게** 생겼다.
  *
  * 이 레이어는 일정 위에 얹히는 참고 자료지 일정 자체가 아니다. 그래서 카드
- * 핀(30px 물방울, 카테고리 색)보다 작고, 둥글고, 흰 바탕이다 — 지도를 보다가
- * 「내가 넣은 곳」과 「추천받은 곳」을 헷갈리면 그 순간 이 기능은 방해가 된다.
+ * 핀(30px 물방울, 카테고리 색)과 모양이 다르다 — 둥글고, 흰 바탕이고, 아래에
+ * 이름표가 붙는다. 지도를 보다가 「내가 넣은 곳」과 「추천받은 곳」을 헷갈리면
+ * 그 순간 이 기능은 방해가 된다.
  *
  * 큐레이션은 금색 테두리를 두른다(⭐ 링): 우리가 조사한 집과 구글이 방금 준
  * 집은 아는 것의 양이 다르고, 그 차이가 눌러 보기 전에 보여야 한다.
+ *
+ * ## M45 — 안 보이던 핀
+ *
+ * 실사용 신고: 「맛집 핀이 작아서 안 보인다」. 24px 흰 원에 13px 이모지는 밝은
+ * 지도 타일 위에서 배경으로 녹아 버렸다(특히 낮 시간대의 오사카 시가지 타일).
+ * 세 가지를 고친다.
+ *
+ * 1. **크기** — 24 → 32px, 이모지 13 → 17px.
+ * 2. **대비** — 테두리를 잉크색 2px로 올리고 그림자를 짙게. 흰 원이 타일 위에
+ *    「떠 있는」 것으로 보여야 배경과 구별된다.
+ * 3. **이름표** — 핀 **아래**에 「AI추천」 알약 하나. 지도 위의 활자는 타일 위에
+ *    얹히므로 배경이 필요하다(M42의 「23분」 칩이 이미 그렇게 산다). 큐레이션도
+ *    라이브도 같은 말을 쓴다: 사용자에게 이 층은 「누가 추천해 준 곳」 하나이고,
+ *    출처의 차이는 이미 금색 링과 팝업이 말한다.
+ *
+ * 요소가 둘이 되면서 바깥에 세로 묶음 하나가 생겼다. 데이터 속성과 클릭은 전부
+ * **그 묶음**이 든다 — 스펙이 읽는 `[data-spot-key]`도, 앱이 다는 클릭 리스너도
+ * 지금까지와 같은 하나의 요소다.
  */
-const GOURMET_PIN_PX = 24;
+const GOURMET_PIN_PX = 32;
 
 /** 큐레이션 링의 금색. */
 const CURATED_RING_HEX = '#b45309';
+
+/** 라이브 결과의 테두리 — 옅은 회색이던 자리 (M45: 잉크색으로). */
+const LIVE_RING_HEX = '#57534e';
+
+/** 이름표에 적히는 말. 두 출처가 같은 말을 쓴다. */
+export const GOURMET_PIN_LABEL = 'AI추천';
 
 export interface GourmetPinOptions {
   /** 핀 위에 설 글자 — 갈래 이모지. */
@@ -145,29 +170,59 @@ export function createGourmetPinElement({
   genre,
   testId = 'gourmet-pin',
 }: GourmetPinOptions): HTMLElement {
+  const curated = source === 'curated';
+
+  // 바깥 묶음 — 원과 이름표가 세로로 선다. 데이터도 클릭도 이 요소의 것이다.
   const pin = document.createElement('div');
   pin.setAttribute('data-testid', testId);
   pin.setAttribute('data-spot-key', spotKey);
   pin.setAttribute('data-source', source);
   pin.setAttribute('data-genre', genre);
-  const curated = source === 'curated';
   pin.style.cssText = [
+    'display:flex',
+    'flex-direction:column',
+    'align-items:center',
+    'gap:2px',
+    'cursor:pointer',
+    // 이름표가 옆 핀 위로 넘칠 수 있어야 한다 — 잘리면 「AI추…」가 된다.
+    'white-space:nowrap',
+  ].join(';');
+
+  const disc = document.createElement('div');
+  disc.setAttribute('data-testid', `${testId}-disc`);
+  disc.style.cssText = [
     `width:${GOURMET_PIN_PX}px`,
     `height:${GOURMET_PIN_PX}px`,
     'background:#fff',
-    `border:${curated ? '2px' : '1px'} solid ${curated ? CURATED_RING_HEX : '#d6d3d1'}`,
+    `border:2px solid ${curated ? CURATED_RING_HEX : LIVE_RING_HEX}`,
     'border-radius:9999px',
-    'box-shadow:0 1px 4px rgba(28,25,23,0.35)',
+    'box-shadow:0 2px 6px rgba(28,25,23,0.45)',
     'display:flex',
     'align-items:center',
     'justify-content:center',
-    'cursor:pointer',
   ].join(';');
 
   const glyph = document.createElement('span');
-  glyph.style.cssText = 'font-size:13px;line-height:1';
+  glyph.style.cssText = 'font-size:17px;line-height:1';
   glyph.textContent = emoji;
-  pin.appendChild(glyph);
+  disc.appendChild(glyph);
+  pin.appendChild(disc);
+
+  const label = document.createElement('span');
+  label.setAttribute('data-testid', `${testId}-label`);
+  label.style.cssText = [
+    'padding:0 5px',
+    'border-radius:9999px',
+    'background:#fff',
+    `color:${curated ? CURATED_RING_HEX : '#1c1917'}`,
+    'font-size:10px',
+    'line-height:15px',
+    'font-weight:700',
+    'letter-spacing:-0.01em',
+    'box-shadow:0 1px 3px rgba(28,25,23,0.4)',
+  ].join(';');
+  label.textContent = GOURMET_PIN_LABEL;
+  pin.appendChild(label);
 
   return pin;
 }

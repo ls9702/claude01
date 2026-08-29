@@ -418,7 +418,11 @@ test('전체 아이템 범위(Leaflet)에도 토글이 없다', async ({ page })
 
 test('켜면 진행을 말하며 큐레이션을 조회하고, 답이 온 집만 핀이 된다', async ({ page }) => {
   // 답을 늦춰야 「불러오는 중 3/11」이라는 화면이 존재한다.
-  await openWithGoogle(page, { delayMs: 40 });
+  //
+  // M45 — 40ms이던 자리다. 조회가 동시 폭 6의 워커 풀로 바뀌면서 여섯 줄짜리
+  // 목록은 한 계단(≈40ms)에 끝나고, 그러면 이 화면은 존재하기도 전에 사라진다.
+  // 늦추는 값을 키우는 것은 기능이 아니라 **관측 창**을 키우는 일이다.
+  await openWithGoogle(page, { delayMs: 300 });
   await openGoogleMap(page);
 
   await page.getByTestId('gourmet-toggle').click();
@@ -454,6 +458,27 @@ test('구글 평점 4.3 미만은 큐레이션 목록에 있어도 감춰진다'
   await expect(page.locator('[data-spot-key="curated:spec-dessert-low"]')).toHaveCount(0);
   // 답이 아예 없던 집도 이번 세션에는 없다.
   await expect(page.locator('[data-spot-key="curated:spec-missing"]')).toHaveCount(0);
+});
+
+test('맛집 핀은 카드 핀만큼 크고, 「AI추천」 이름표를 달고 있다 (M45)', async ({ page }) => {
+  await openWithGoogle(page);
+  await openGoogleMap(page);
+  await activateGourmet(page);
+
+  // 지도 타일 위에서 읽히려면 24px 흰 원으로는 모자랐다 — 원을 키우고 이름표를 단다.
+  const disc = page.getByTestId('gourmet-pin-disc').first();
+  const box = await disc.boundingBox();
+  expect(box).not.toBeNull();
+  expect(Math.round(box!.width)).toBeGreaterThanOrEqual(32);
+  expect(Math.round(box!.height)).toBeGreaterThanOrEqual(32);
+
+  // 큐레이션도 라이브도 같은 말을 쓴다 — 사용자에게 이 층은 하나다.
+  const labels = page.getByTestId('gourmet-pin-label');
+  await expect(labels.first()).toHaveText('AI추천');
+  expect(await labels.count()).toBe(await page.getByTestId('gourmet-pin').count());
+  await expect(
+    page.locator('[data-source="google"] [data-testid="gourmet-pin-label"]').first(),
+  ).toHaveText('AI추천');
 });
 
 test('큐레이션 핀과 카드 핀은 서로를 건드리지 않는다', async ({ page }) => {
@@ -711,8 +736,12 @@ test('「보드에 카드로 추가」가 위치를 든 카드를 식사 칸에 
  *
  * 백스물일곱 집을 다 조회하게 두지 않는다: 첫 질의를 확인한 즉시 토글을 꺼서
  * 중단시킨다(중단은 레이어가 이미 하는 일이다).
+ *
+ * M45 — 조회는 이제 동시 폭 6의 워커 풀이다(순차가 아니다). 그래도 **첫 요청은
+ * 언제나 첫 줄의 것**이다: 워커는 만들어진 순서대로 다음 칸을 집어간다
+ * (`src/gourmet/pool.ts`). 그래서 아래의 `searches[before]` 단정은 그대로다.
  */
-test('아무것도 심지 않으면 진짜 조사 배열을 순차로 조회한다', async ({ page }) => {
+test('아무것도 심지 않으면 진짜 조사 배열을 조회한다', async ({ page }) => {
   // 답을 늦춰야 「불러오는 중」이 화면에 머문다 — 그리고 127집이 다 나가기 전에
   // 끌 수 있다.
   await openWithGoogle(page, { delayMs: 60, entries: false });
@@ -740,7 +769,62 @@ test('아무것도 심지 않으면 진짜 조사 배열을 순차로 조회한�
 });
 
 /* ------------------------------------------------------------------ *
- * 8. 390px
+ * 8. 패널 접기 (M45)
+ * ------------------------------------------------------------------ */
+
+test('필터 패널을 접으면 요약 한 줄만 남고, 핀은 그대로다', async ({ page }) => {
+  await openWithGoogle(page);
+  await openGoogleMap(page);
+  await activateGourmet(page);
+
+  const panel = page.getByTestId('gourmet-panel');
+  await expect(panel).toHaveAttribute('data-collapsed', 'false');
+  await expect(page.getByTestId('gourmet-genre-chip')).not.toHaveCount(0);
+  const pinsBefore = await page.getByTestId('gourmet-pin').count();
+  expect(pinsBefore).toBeGreaterThan(0);
+
+  await page.getByTestId('gourmet-panel-toggle').click();
+
+  // 본문이 사라지고 요약 알약 하나만 남는다…
+  await expect(panel).toHaveAttribute('data-collapsed', 'true');
+  await expect(page.getByTestId('gourmet-genre-chip')).toHaveCount(0);
+  await expect(page.getByTestId('gourmet-research')).toHaveCount(0);
+  await expect(page.getByTestId('gourmet-panel-toggle')).toContainText('주변 맛집');
+  // …그리고 접기는 끄기가 아니다: 핀은 한 개도 줄지 않는다.
+  await expect(page.getByTestId('gourmet-pin')).toHaveCount(pinsBefore);
+
+  // 접으면 지도를 덜 가린다 — 그게 이 기능의 전부다.
+  const collapsedBox = await panel.boundingBox();
+  expect(collapsedBox).not.toBeNull();
+  expect(collapsedBox!.height).toBeLessThan(64);
+
+  // 탭하면 다시 펼쳐진다.
+  await page.getByTestId('gourmet-panel-toggle').click();
+  await expect(panel).toHaveAttribute('data-collapsed', 'false');
+  await expect(page.getByTestId('gourmet-genre-chip')).not.toHaveCount(0);
+});
+
+test('접힘은 이 기기가 기억한다 — 기본값은 펼침', async ({ page }) => {
+  await openWithGoogle(page);
+  await openGoogleMap(page);
+  await activateGourmet(page);
+
+  // 처음 켠 사람은 칩을 본다.
+  await expect(page.getByTestId('gourmet-panel')).toHaveAttribute('data-collapsed', 'false');
+  await page.getByTestId('gourmet-panel-toggle').click();
+  await expect(page.getByTestId('gourmet-panel')).toHaveAttribute('data-collapsed', 'true');
+
+  await page.reload();
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+  await openSheetScopedMap(page);
+  await expect(page.getByTestId('google-map')).toHaveAttribute('data-status', 'ready');
+  await activateGourmet(page);
+
+  await expect(page.getByTestId('gourmet-panel')).toHaveAttribute('data-collapsed', 'true');
+});
+
+/* ------------------------------------------------------------------ *
+ * 9. 390px
  * ------------------------------------------------------------------ */
 
 test.describe('폰 폭', () => {

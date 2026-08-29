@@ -36,6 +36,7 @@ import {
   markBootstrapOptOut,
 } from '../../sync/bootstrap';
 import { restartSync, syncNow } from '../../sync/syncEngine';
+import { useGoogleMapsKey } from '../../map/gmapsKey';
 import LocationAuditSheet from '../map/LocationAuditSheet';
 import Avatar from './Avatar';
 import ConfirmDialog from './ConfirmDialog';
@@ -171,6 +172,15 @@ const LOCATION_AUDIT_NOTE: Record<LocationAuditGate, string> = {
   'no-trip': '여행을 연 다음에 쓸 수 있어요',
 };
 
+/**
+ * 구글 키가 있는 기기의 `ready` 한 줄 (M44).
+ *
+ * 위 문장을 고치지 않고 하나를 더한다: 키가 없는 기기(GitHub Pages·부트스트랩
+ * 없는 배포)에서 이 화면은 M36 그대로여야 하고, 그 기기에서 「구글 지도 기준」은
+ * 거짓말이다.
+ */
+const LOCATION_AUDIT_GOOGLE_NOTE = '예전에 저장한 카드 위치를 구글 지도 기준으로 다시 맞춰요';
+
 /** `2026-03-07 19:04` — enough to tell "just now" from "yesterday". */
 function formatSyncedAt(at?: number): string {
   if (!at) return '아직 없음';
@@ -246,6 +256,8 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   const fileInput = useRef<HTMLInputElement>(null);
 
   const workspace = useWorkspaceStore((s) => s.workspace);
+  /** 이 기기의 구글 지도 키 (M41) — 「위치 재정비」의 두 번째 문(M44). */
+  const googleMapsKey = useGoogleMapsKey();
   const usage = photoUsage(workspace);
   const estimate = useStorageEstimate();
   /** M20: photos ride to the NAS too, but only once there is a NAS. */
@@ -281,9 +293,17 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
           ? 'no-key'
           : 'checking';
 
-  /** 물어볼 AI와 훑을 여행, 둘 다 있어야 「위치 재정비」가 눌린다 (M36). */
+  /**
+   * 물어볼 곳과 훑을 여행, 둘 다 있어야 「위치 재정비」가 눌린다 (M36 → M44).
+   *
+   * M44에서 「물어볼 곳」이 둘이 됐다: 구글 키가 있으면 AI가 꺼져 있어도 돈다
+   * (그 길은 AI를 한 번도 부르지 않는다). 키가 없는 기기의 판정은 M36 그대로다 —
+   * `'ai-off'`라는 이름도, 그 아래 한 줄도.
+   */
+  const auditGoogleOn = googleMapsKey !== null;
+
   const auditGate: LocationAuditGate =
-    aiState !== 'ready' ? 'ai-off' : auditTripId ? 'ready' : 'no-trip';
+    aiState !== 'ready' && !auditGoogleOn ? 'ai-off' : auditTripId ? 'ready' : 'no-trip';
 
   /** Flipping it on is also the cheapest moment to re-ask the server. */
   const handleAiToggle = (): void => {
@@ -716,7 +736,9 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
             data-state={auditGate}
             className="text-micro font-normal text-ink-faint"
           >
-            {LOCATION_AUDIT_NOTE[auditGate]}
+            {auditGate === 'ready' && auditGoogleOn
+              ? LOCATION_AUDIT_GOOGLE_NOTE
+              : LOCATION_AUDIT_NOTE[auditGate]}
           </p>
         </div>
       </div>

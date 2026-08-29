@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { latLngBounds } from 'leaflet';
 import { Circle, MapContainer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useIsDesktop } from '../../hooks/useMediaQuery';
+import { useIsDesktop, useMediaQuery } from '../../hooks/useMediaQuery';
 import { DIRECTIONS_LABEL, directionsUrl, previousStopMap } from '../../map/directions';
 import {
   emptyFilterHint,
@@ -353,6 +353,27 @@ export default function MapView() {
   const focusCard = useUiStore((s) => s.focusCard);
   const isDesktop = useIsDesktop();
   const online = useOnline();
+  /**
+   * 폰인가 (M45) — 지도 최대화는 **폰에만** 있다.
+   *
+   * `sm` 미만이다. 그 위에서는 지도가 이미 화면의 대부분을 차지하고, 태블릿·
+   * 노트북에서 탭 바와 필터 줄을 덮는 버튼은 얻는 것보다 잃는 것이 많다.
+   */
+  const isPhone = useMediaQuery('(max-width: 639px)');
+  /**
+   * 지금 지도가 화면을 다 쓰고 있는가.
+   *
+   * **저장하지 않는다.** 「전체화면으로 열어 두기」는 앱을 다시 열었을 때 필터도
+   * 범례도 없는 화면으로 사용자를 떨어뜨린다 — 지금 이 순간의 몸짓이지 설정이
+   * 아니다. 지도 탭을 떠나면 이 컴포넌트가 통째로 언마운트되므로 그때도 풀린다.
+   */
+  const [fullscreen, setFullscreen] = useState(false);
+
+  // 폰이 아니게 되면(회전·창 크기) 전체화면은 스스로 풀린다 — 데스크톱 화면에
+  // 탭 바를 덮은 지도가 남아 있으면 나가는 길이 없다.
+  useEffect(() => {
+    if (!isPhone && fullscreen) setFullscreen(false);
+  }, [isPhone, fullscreen]);
   /**
    * 「내 위치」 (M42) — 두 지도가 나눠 쓰는 하나의 상태.
    *
@@ -1117,13 +1138,28 @@ export default function MapView() {
       <div
         data-testid="map-root"
         data-ready={ready}
+        data-fullscreen={fullscreen ? 'true' : 'false'}
         data-map-width={size.x}
         data-map-height={size.y}
         // Rounded to ~110m: enough to tell 오사카 from 서울 without a test
         // failing on the metre Leaflet's pixel maths lands on.
         data-center-lat={center ? center.lat.toFixed(3) : undefined}
         data-center-lng={center ? center.lng.toFixed(3) : undefined}
-        className="relative isolate mx-4 mb-4 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-sunken"
+        /* 전체화면 (M45): 같은 상자가 자리만 바꾼다 — 지도 인스턴스도, 그 위의
+           오버레이들(내 위치·맛집 토글·패널)도 그대로 살아 있으므로 전체화면에서
+           할 수 있는 일이 줄지 않는다.
+
+           `z-45`인 이유: 탭 바(z-40) **위**, 시트·토스트(z-50) **아래**. 지도가
+           탭 바를 덮는 것은 이 모드의 목적이지만, 시트가 열렸는데 그 위로 지도가
+           올라오면 그건 나갈 수 없는 화면이다.
+
+           `isolate`는 두 자세 모두에 남는다 — Leaflet의 내부 z-index가 700까지
+           올라오므로, 그것이 이 상자 밖으로 새면 위의 계층 규칙이 무너진다. */
+        className={
+          fullscreen
+            ? 'fixed inset-0 z-[45] isolate overflow-hidden bg-sunken'
+            : 'relative isolate mx-4 mb-4 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-sunken'
+        }
       >
         {/* M41 — 구글 시트를 보고 있으면 같은 자리에 구글 지도가 선다. 아래
             Leaflet 갈래는 한 글자도 손대지 않았다: 지금까지의 모든 지도(그리고
@@ -1288,6 +1324,43 @@ export default function MapView() {
           />
         </MapContainer>
         )}
+
+        {/* 지도 최대화 (M45) — 폰에서만, 그리고 지도 **왼쪽 위**에.
+
+            오른쪽 줄은 「내 위치」와 그 아래 안내 한 줄이 이미 쓰고 있고, 왼쪽
+            줄의 첫 칸(`top-[5.5rem]`)은 맛집 토글의 자리다. 그래서 이 버튼은 그
+            위, 상자의 첫 모서리에 선다 — 두 지도 엔진 모두 그 자리에 컨트롤을
+            두지 않는다(Leaflet의 ＋/−는 M9에서 오른쪽으로 옮겼고, 구글은 자기
+            버튼을 전부 껐다).
+
+            전체화면일 때는 노치 아래로 내려온다: `fixed inset-0`은 안전영역까지
+            먹으므로, 그러지 않으면 복귀 버튼이 상태바에 깔린다. */}
+        {isPhone ? (
+          <button
+            type="button"
+            data-testid={fullscreen ? 'map-fullscreen-exit' : 'map-fullscreen'}
+            data-active={fullscreen}
+            aria-pressed={fullscreen}
+            aria-label={fullscreen ? '지도 최대화 끄기' : '지도 최대화'}
+            title={fullscreen ? '원래 크기로' : '지도 최대화'}
+            onClick={() => setFullscreen((current) => !current)}
+            style={
+              fullscreen
+                ? { top: 'calc(env(safe-area-inset-top, 0px) + 0.625rem)' }
+                : { top: '0.625rem' }
+            }
+            className={[
+              'absolute left-2.5 z-[1100] inline-flex h-11 shrink-0 items-center gap-1',
+              'rounded-full border bg-surface/95 shadow-raise',
+              'transition-colors duration-[140ms] ease-quick',
+              // 나가는 문은 들어온 문보다 분명해야 한다 — 복귀에는 이름이 붙는다.
+              fullscreen ? 'w-auto border-ink px-3 text-label text-ink' : 'w-11 justify-center border-line text-ink-muted',
+            ].join(' ')}
+          >
+            <Icon name={fullscreen ? 'shrink' : 'expand'} size={20} />
+            {fullscreen ? '원래대로' : null}
+          </button>
+        ) : null}
 
         {/* 내 위치 (M42) — 지도 컨테이너 **바깥**의 오버레이라 두 엔진에서 자리가
             같다. Leaflet의 ＋/− 는 오른쪽 위 10px에 두 칸(≈64px)을 차지하므로 그

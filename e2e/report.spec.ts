@@ -290,9 +290,15 @@ test.describe('좁은 화면', () => {
     // 상단 메뉴를 접어도 버튼은 살아 있다 (접기는 숨기기가 아니다 — M29의 규칙).
     await page.getByTestId('timeline-chrome-toggle').click();
     await expect(page.getByTestId('timeline-header')).toHaveAttribute('data-collapsed', 'true');
-    await expect(page.getByTestId('report-open')).toBeVisible();
+    await expect(page.getByTestId('todo-open')).toBeVisible();
 
-    await page.getByTestId('report-open').click();
+    // M45 — 390px에서는 헤더의 리포트 버튼이 물러난다(「수정」 토글이 그 줄에
+    // 서면서 기준선이 408px로 올라갔다). 리포트로 가는 두 번째 문은 그대로다.
+    await expect(page.getByTestId('report-open')).toHaveCount(0);
+    // 접었으니 요약 바도 없다 — 다시 펴서 팝오버로 들어간다.
+    await page.getByTestId('timeline-chrome-toggle').click();
+    await page.getByTestId('spend-summary-cats-open').click();
+    await page.getByTestId('report-open-popover').click();
     await expect(page.getByTestId('report-sheet')).toBeVisible();
 
     const overflow = await page.evaluate(

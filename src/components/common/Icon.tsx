@@ -42,7 +42,9 @@ export type IconName =
   | 'chat'
   | 'copy'
   | 'gift'
-  | 'locate';
+  | 'locate'
+  | 'expand'
+  | 'shrink';
 
 /** `name` → the path data drawn inside a `0 0 24 24` box. */
 const PATHS: Record<IconName, string> = {
@@ -96,6 +98,11 @@ const PATHS: Record<IconName, string> = {
   // 내 위치 (M42). 조준선 — 지도 앱들이 쓰는 그 그림이라 설명이 필요 없다.
   // `pin`과 헷갈릴 수 없는 것도 중요하다: 핀은 「저기 어딘가」고, 이건 「나」다.
   locate: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM12 2v3M12 19v3M2 12h3M19 12h3',
+  // 지도 최대화 / 복귀 (M45). 네 모서리의 꺾쇠 — 바깥을 향하면 「화면 가득」,
+  // 안을 향하면 「원래대로」다. 화살표를 쓰지 않는 이유는 이 화면에서 화살표가
+  // 이미 동선(`route`)과 페이저의 것이기 때문이다.
+  expand: 'M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5',
+  shrink: 'M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5',
 };
 
 interface IconProps {

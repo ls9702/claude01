@@ -1,5 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import { DND_ENTRY, entryDraggableId } from '../../dnd/planDnd';
+import { useTimelineEditStore } from '../../stores/timelineEdit';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, TimelineEntry } from '../../types/models';
 import type { VisualPlacement } from '../../timeline/dayWindow';
@@ -152,6 +153,12 @@ interface EntryBlockProps {
  * moving things, and a resize needs the live delta without an activation
  * distance.
  *
+ * That zero activation distance is exactly why the handle is behind a switch
+ * now (M45): a finger brushing the bottom 12px of a block changed the plan, and
+ * the user could not tell what they had touched. 「수정」이 꺼져 있으면 손잡이는
+ * **그려지지 않는다** — 리스너가 없으므로 스칠 것도 없다. 이동·탭·휴지통은
+ * 그대로다(전부 8px / 250ms 문턱을 가진 제스처라 실수로 벌어지지 않는다).
+ *
  * `data-start-min` stays the **stored clock minute**, not the offset: it is the
  * model's number, several specs read it as such, and the whole point of M16-B
  * is that the model did not move.
@@ -166,6 +173,8 @@ export default function EntryBlock({
   onOpen,
 }: EntryBlockProps) {
   const resizeEntry = useWorkspaceStore((s) => s.resizeEntry);
+  /** 「수정」이 켜져 있는가 (M45) — 꺼져 있으면 길이 손잡이가 아예 없다. */
+  const editOn = useTimelineEditStore((s) => s.on);
 
   /**
    * A 새벽-pinned block is **not** draggable (B4).
@@ -192,7 +201,7 @@ export default function EntryBlock({
    * move minutes the block is not showing. Length is edited in the detail
    * sheet for those two cases, and only those two.
    */
-  const resizable = placement.drawMin === entry.durationMin;
+  const resizable = editOn && placement.drawMin === entry.durationMin;
 
   /** '' when this placement carries no memo — the one test both marks use. */
   const hint = noteHint(entry.note);

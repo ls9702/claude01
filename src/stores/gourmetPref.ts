@@ -22,6 +22,20 @@ import {
 
 const GOURMET_FILTER_KEY = 'trip-board/gourmet-filter';
 
+/**
+ * 필터 패널을 접어 두었는가 (M45) — 필터 **선택**과는 다른 값이라 키도 다르다.
+ *
+ * 신고: 폰에서 패널(`inset-x-2 top-[9.5rem] max-h-[55%]`)이 지도의 절반을 덮는다.
+ * 칩 열한 개는 한 번 고르고 나면 다시 볼 일이 드문 물건인데, 그것이 지도를
+ * 가리고 서 있다.
+ *
+ * 접힘을 필터 객체 안에 넣지 않은 이유: `GourmetFilter`는 **무엇을 보여 줄지**를
+ * 정하는 순수 값이고 `gourmet/filter.ts`의 함수들이 그것만 읽는다. 「패널이
+ * 접혀 있다」는 화면의 사정이지 필터의 사정이 아니다 — 섞으면 필터를 검사하는
+ * 단위 테스트가 화면 상태를 알게 된다.
+ */
+const GOURMET_PANEL_KEY = 'trip-board/gourmet-panel';
+
 const RESERVABLE: readonly GourmetReservableFilter[] = ['all', 'yes', 'no'];
 const SOURCES: readonly GourmetSourceFilter[] = ['all', 'curated', 'google'];
 
@@ -79,4 +93,43 @@ export function saveGourmetFilter(filter: GourmetFilter): GourmetFilter {
     /* quota / private mode */
   }
   return next;
+}
+
+/* ------------------------------------------------------------------ *
+ * 패널 접기 (M45)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 패널이 접혀 있는가. 고른 적이 없으면 **펼침**.
+ *
+ * 기본이 펼침인 이유는 `timelineChrome`(M18)과 같다: 처음 켠 사람이 칩이 있다는
+ * 사실 자체를 발견할 수 없으면, 아낀 것은 공간이 아니라 기능이다. 한 번 접으면
+ * 그때부터 기억한다.
+ */
+export function loadGourmetPanelCollapsed(): boolean {
+  const store = storage();
+  if (!store) return false;
+  try {
+    return store.getItem(GOURMET_PANEL_KEY) === 'collapsed';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 접힘을 저장하고 그 값을 돌려준다 — 호출부가 그대로 상태로 삼아도 된다.
+ *
+ * 펼침은 키를 지운다: 기본값을 적어 두면 「한 번도 안 건드림」과 「접었다 폄」이
+ * 구별되지 않는다.
+ */
+export function saveGourmetPanelCollapsed(collapsed: boolean): boolean {
+  const store = storage();
+  if (!store) return collapsed;
+  try {
+    if (collapsed) store.setItem(GOURMET_PANEL_KEY, 'collapsed');
+    else store.removeItem(GOURMET_PANEL_KEY);
+  } catch {
+    /* quota / private mode */
+  }
+  return collapsed;
 }

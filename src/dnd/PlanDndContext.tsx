@@ -27,6 +27,7 @@ import { useUndoStore } from '../stores/undoStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import type { BoardColumn, Id, Trip, Workspace } from '../types/models';
 import { dropTarget, type DropTarget } from '../timeline/dayWindow';
+import { snapDropMin } from '../timeline/dropSnap';
 import { DAY_COLUMN_PX, PX_PER_MIN } from '../timeline/layout';
 import { yToMin } from '../utils/time';
 import { CardSurface } from '../components/board/CardItem';
@@ -101,6 +102,14 @@ const planCollisionDetection: CollisionDetection = (args) => {
  * `null` means the pointer was in the last column's 새벽 zone — minutes of a
  * date the sheet does not have. The caller refuses the drop instead of quietly
  * parking the entry somewhere else.
+ *
+ * M45 — 자석이 여기 붙는다: `yMin`은 손가락이 가리킨 **오프셋**이고, 그 값이
+ * `dropTarget`에 들어가기 전에 :00 / :30으로 반올림된다. 창의 시작이 05:00이라
+ * 오프셋 격자와 시계 격자가 같은 선 위에 있으므로(자세한 것은 `dropSnap.ts`),
+ * 05시 경계 산술은 지금까지처럼 `dayWindow.ts` 한 곳에만 남는다.
+ *
+ * 두 드롭(레일 카드 배치 · 블록 이동)이 **둘 다** 이 함수를 지나므로, 자석은
+ * 한 줄로 두 길을 덮는다.
  */
 function resolveDrop(
   workspace: Workspace,
@@ -109,7 +118,7 @@ function resolveDrop(
 ): DropTarget | null {
   const day = workspace.days[visualDayId];
   const dayOrder = day ? (workspace.sheets[day.sheetId]?.dayOrder ?? [visualDayId]) : [visualDayId];
-  return dropTarget(visualDayId, yMin, dayOrder);
+  return dropTarget(visualDayId, snapDropMin(yMin), dayOrder);
 }
 
 /** Said when a drop lands past the last day's midnight and has nowhere to go. */
@@ -131,7 +140,7 @@ interface PlanDndContextProps {
  *
  * Three drops are possible:
  * 1. a rail card onto `day:<id>` → {@link useWorkspaceStore.scheduleCard} at
- *    the minute under the pointer (snapped by the store);
+ *    the minute under the pointer, pulled onto the nearest :00 / :30 (M45);
  * 2. an entry onto `day:<id>` → `moveEntry`, shifting its start by the drag
  *    delta so the block keeps the grab offset;
  * 3. anything else → `resolveBoardDrop`, unchanged from M1.

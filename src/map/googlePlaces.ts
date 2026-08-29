@@ -74,6 +74,54 @@ export async function searchPlaceByText(
   }
 }
 
+/**
+ * 카드 위치 검색이 사람에게 보여 줄 후보 수 (M44).
+ *
+ * M28의 AI 검색이 다섯 줄을 내놓고, 사용자는 그중 하나를 고른다. 구글이 1순위가
+ * 되어도 그 화면은 그대로여야 하므로 같은 다섯이다 — 한 줄만 주면 「아니 그거
+ * 말고 옆집」을 말할 방법이 없어진다.
+ */
+export const PLACE_SEARCH_MAX_RESULTS = 5;
+
+/**
+ * 이름 하나로 **여러 후보**를 찾는다 (M44) — 카드 위치 검색의 1순위.
+ *
+ * {@link searchPlaceByText}는 `maxResultCount: 1`이다. 그건 배치 보정(M41)의
+ * 계약이라서 그렇다: 거기서는 「이 카드가 정말 여기냐」 한 가지만 묻고 사람은
+ * 예/아니오만 답한다. 검색창은 반대로 **고르는 화면**이라 줄이 여럿이어야 한다.
+ *
+ * 필드는 M41의 셋 그대로다. 검색창이 그리는 것은 이름·주소·좌표뿐이고, 평점을
+ * 받아 올 이유가 없다 — 필드 목록이 곧 요금이다.
+ *
+ * 실패·빈 결과는 `[]` 하나로 접히지 **않는다**: 던진다. 부르는 쪽
+ * (`map/placeSearch.ts`)이 「구글이 못 찾았다」와 「구글을 부르지 못했다」를
+ * 구별해 서로 다른 한 줄로 말해야 하기 때문이다.
+ */
+export async function searchPlaceSuggestions(
+  maps: GoogleMapsApi,
+  query: string,
+  bias?: PlacePoint,
+  maxResultCount: number = PLACE_SEARCH_MAX_RESULTS,
+): Promise<PlaceSuggestion[]> {
+  const textQuery = query.trim();
+  if (!textQuery) return [];
+
+  const places = await googlePlacesLibrary(maps);
+  const answer = await places.Place.searchByText({
+    textQuery,
+    fields: FIELDS,
+    maxResultCount,
+    language: 'ko',
+    ...(bias
+      ? { locationBias: { center: { lat: bias.lat, lng: bias.lng }, radius: PLACE_BIAS_RADIUS_M } }
+      : {}),
+  });
+
+  return (answer?.places ?? [])
+    .map(toSuggestion)
+    .filter((place): place is PlaceSuggestion => place !== null);
+}
+
 /* ------------------------------------------------------------------ *
  * 「주변 맛집」이 쓰는 두 갈래 (M43)
  * ------------------------------------------------------------------ */

@@ -602,3 +602,57 @@ describe('scanAudit', () => {
     expect(propose).not.toHaveBeenCalled();
   });
 });
+
+describe('proposeLocation — 구글이 있으면 구글만 (M44)', () => {
+  /** 구글이 답하는 줄 — 좌표가 원본이라 조일 단계가 없다. */
+  const googleHit = (metres: number, name = '히요리 호텔'): PlaceCandidate => ({
+    name,
+    ...northOf(HERE, metres),
+    refined: true,
+    refinedBy: 'google',
+  });
+
+  it('구글에게 묻고, AI도 OSM도 부르지 않는다', async () => {
+    const googleSearch = vi.fn(async () => [googleHit(210)]);
+    const aiSearch = vi.fn(async () => [AI_HIT]);
+    const osmSearch = vi.fn(async () => [{ ...northOf(HERE, 210), address: '日和ホテル' }]);
+
+    const proposal = await proposeLocation(TARGET, { googleSearch, aiSearch, osmSearch });
+
+    expect(googleSearch).toHaveBeenCalledWith('히요리 호텔', '나니와구, 오사카시, 일본');
+    expect(aiSearch).not.toHaveBeenCalled();
+    expect(osmSearch).not.toHaveBeenCalled();
+    expect(proposal?.lat).toBeCloseTo(northOf(HERE, 210).lat, 6);
+    expect(proposal?.refinedBy).toBe('google');
+  });
+
+  it('후보가 여럿이면 지금 핀에 **가장 가까운** 것을 고른다', async () => {
+    const proposal = await proposeLocation(TARGET, {
+      googleSearch: async () => [googleHit(2_000, '멀리'), googleHit(180, '가까이')],
+      aiSearch: async () => [],
+      osmSearch: async () => [],
+    });
+    expect(proposal?.name).toBe('가까이');
+  });
+
+  it('구글이 못 찾으면 제안 없음이다 — 모델의 기억을 대신 넣지 않는다', async () => {
+    const aiSearch = vi.fn(async () => [AI_HIT]);
+    const proposal = await proposeLocation(TARGET, {
+      googleSearch: async () => [],
+      aiSearch,
+      osmSearch: async () => [],
+    });
+    expect(proposal).toBeNull();
+    expect(aiSearch).not.toHaveBeenCalled();
+  });
+
+  it('넘기지 않으면(키 없는 기기) M36~M37의 길이 그대로 돈다', async () => {
+    const aiSearch = vi.fn(async () => [AI_HIT]);
+    const osmSearch = vi.fn(async () => [{ ...northOf(HERE, 210), address: '日和ホテル' }]);
+    const proposal = await proposeLocation(TARGET, { aiSearch, osmSearch });
+
+    expect(aiSearch).toHaveBeenCalled();
+    expect(proposal?.refined).toBe(true);
+    expect(proposal?.refinedBy).toBe('name');
+  });
+});

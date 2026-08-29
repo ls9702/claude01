@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_GOURMET_FILTER } from '../gourmet/filter';
-import { loadGourmetFilter, normalizeGourmetFilter, saveGourmetFilter } from './gourmetPref';
+import {
+  loadGourmetFilter,
+  loadGourmetPanelCollapsed,
+  normalizeGourmetFilter,
+  saveGourmetFilter,
+  saveGourmetPanelCollapsed,
+} from './gourmetPref';
 
 /** vitest는 node 환경이라 `localStorage`가 없다 — 최소한만 흉내 낸다. */
 function fakeStorage() {
@@ -77,5 +83,44 @@ describe('기기 기억', () => {
       reservable: 'no',
       source: 'google',
     });
+  });
+});
+
+describe('패널 접기 (M45)', () => {
+  const KEY = 'trip-board/gourmet-panel';
+
+  it('기본값은 펼침 — 처음 켠 사람이 칩을 발견할 수 있어야 한다', () => {
+    expect(loadGourmetPanelCollapsed()).toBe(false);
+  });
+
+  it('접으면 기억하고, 펴면 키를 지운다', () => {
+    expect(saveGourmetPanelCollapsed(true)).toBe(true);
+    expect(loadGourmetPanelCollapsed()).toBe(true);
+
+    expect(saveGourmetPanelCollapsed(false)).toBe(false);
+    expect(store.raw.has(KEY)).toBe(false);
+    expect(loadGourmetPanelCollapsed()).toBe(false);
+  });
+
+  it('모르는 값은 펼침으로 읽는다', () => {
+    store.setItem(KEY, 'yes');
+    expect(loadGourmetPanelCollapsed()).toBe(false);
+  });
+
+  it('접힘은 필터 선택과 섞이지 않는다', () => {
+    saveGourmetFilter({ genres: ['ramen'], reservable: 'yes', source: 'curated' });
+    saveGourmetPanelCollapsed(true);
+    expect(loadGourmetFilter()).toEqual({
+      genres: ['ramen'],
+      reservable: 'yes',
+      source: 'curated',
+    });
+    expect(loadGourmetPanelCollapsed()).toBe(true);
+  });
+
+  it('`localStorage`가 없어도 던지지 않는다', () => {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+    expect(loadGourmetPanelCollapsed()).toBe(false);
+    expect(saveGourmetPanelCollapsed(true)).toBe(true);
   });
 });

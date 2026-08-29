@@ -132,6 +132,15 @@ export interface GoogleMapsApi {
   Circle?: new (options?: Record<string, unknown>) => GoogleCircle;
   SymbolPath?: Record<string, unknown>;
   importLibrary?: (name: string) => Promise<unknown>;
+  /**
+   * 이벤트 버스 (M45) — 컨테이너 크기가 바뀌었다고 지도에게 말하는 유일한 길.
+   *
+   * 모바일 전체화면은 지도 컨테이너를 `fixed inset-0`으로 키운다. Leaflet은
+   * `MapReady`의 `ResizeObserver`가 `invalidateSize()`로 따라가지만, 구글에게는
+   * `google.maps.event.trigger(map, 'resize')`가 그 자리다. 없는 구현(가짜)도
+   * 있으므로 전부 선택적이다 — 못 부르면 타일이 한 프레임 늦게 맞을 뿐이다.
+   */
+  event?: { trigger?: (instance: unknown, name: string) => void };
   /** `libraries=marker`로 실은 경우의 자리 — `importLibrary`가 없을 때의 대비. */
   marker?: GoogleMarkerLibrary;
   places?: GooglePlacesLibrary;

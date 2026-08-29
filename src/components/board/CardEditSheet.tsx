@@ -422,6 +422,9 @@ export default function CardEditSheet({
           // 여행의 목적지는 AI 검색이 「글리코상」을 어느 도시에서 찾을지 아는
           // 유일한 단서다 (M28). OSM 경로는 이 값을 쓰지 않는다.
           destination={tripDestination?.address}
+          // 구글 Places는 주소가 아니라 좌표로 기울인다 (M44) — 같은 목적지의
+          // 다른 얼굴이라, 두 엔진이 서로의 형식을 배울 필요가 없다.
+          bias={tripDestination}
           onPick={setLocation}
           onClose={() => setPicker(null)}
         />

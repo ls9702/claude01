@@ -68,8 +68,14 @@ export interface PlaceCandidate extends GeoPoint {
   refinedBy?: RefinedBy;
 }
 
-/** 좌표를 조인 방법 — 후보의 이름으로 찾았나, 되물은 주소로 찾았나 (M37). */
-export type RefinedBy = 'name' | 'address';
+/**
+ * 좌표를 조인 방법 — 후보의 이름으로 찾았나, 되물은 주소로 찾았나 (M37).
+ *
+ * M44에서 셋째가 붙었다: `'google'`. 그 줄은 **조인 것이 아니라 처음부터** 구글
+ * Places가 준 좌표라는 뜻이다(조일 필요가 없다 — 그게 원본이다). 화면에는 셋 다
+ * 「✓ 지도 확인됨」 한 마디로만 보인다.
+ */
+export type RefinedBy = 'name' | 'address' | 'google';
 
 /** 후보 하나를 저장 가능한 {@link GeoPoint}로 좁힌다. */
 export function toGeoPoint(candidate: PlaceCandidate): GeoPoint {

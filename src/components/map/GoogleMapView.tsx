@@ -209,6 +209,40 @@ export default function GoogleMapView({
     // 다시 세우는 것이 맞다. 나머지 props는 아래 효과들이 따로 따라간다.
   }, [apiKey]);
 
+  /* --- 컨테이너가 커졌다 (M45) ---------------------------------------- */
+
+  /**
+   * 모바일 전체화면은 이 컨테이너를 `fixed inset-0`으로 키운다. 구글 지도는
+   * 자기가 만들어질 때 잰 크기를 들고 있으므로, 말해 주지 않으면 타일이 옛 상자
+   * 안에만 그려지고 나머지는 회색으로 남는다.
+   *
+   * Leaflet 쪽 {@link MapReady}가 하는 일과 같은 일이다 — 그쪽은
+   * `invalidateSize()`, 이쪽은 `event.trigger(map, 'resize')`. 두 갈래가 같은
+   * `ResizeObserver` 계약을 쓰는 편이 「전체화면 때만 부른다」보다 낫다: 회전도,
+   * 탭 전환도, 데스크톱 브레이크포인트도 같은 사고를 낼 수 있다.
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (status !== 'ready' || !container) return;
+
+    const settle = () => {
+      const maps = mapsRef.current;
+      const map = mapRef.current;
+      if (!maps || !map) return;
+      // 가짜 지도(e2e)와 옛 로더에는 `event`가 없다 — 없으면 아무 일도 없다.
+      maps.event?.trigger?.(map, 'resize');
+    };
+
+    const observer = new ResizeObserver(settle);
+    observer.observe(container);
+    window.addEventListener('orientationchange', settle);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('orientationchange', settle);
+    };
+  }, [status]);
+
   /* --- 핀 --------------------------------------------------------- */
 
   const dimmed = useMemo(() => new Set(dimmedCardIds), [dimmedCardIds]);

@@ -15,6 +15,7 @@ import {
 } from '../../gourmet/filter';
 import { loadGourmetCache, saveGourmetResolved } from '../../gourmet/cache';
 import { gourmetEntries } from '../../gourmet/entries';
+import { GOURMET_POOL_WIDTH, runPool } from '../../gourmet/pool';
 import {
   CITY_CENTER,
   NEARBY_MAX_RESULTS,
@@ -55,7 +56,12 @@ import {
 import { useUiStore } from '../../stores/uiStore';
 import { useUndoStore } from '../../stores/undoStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import { loadGourmetFilter, saveGourmetFilter } from '../../stores/gourmetPref';
+import {
+  loadGourmetFilter,
+  loadGourmetPanelCollapsed,
+  saveGourmetFilter,
+  saveGourmetPanelCollapsed,
+} from '../../stores/gourmetPref';
 import type { BoardColumn } from '../../types/models';
 import { matchColumn } from '../ai/AiSuggestSheet';
 import Icon from '../common/Icon';
@@ -132,6 +138,18 @@ export default function GourmetLayer({
 
   const [active, setActive] = useState(false);
   const [filter, setFilter] = useState<GourmetFilter>(() => loadGourmetFilter());
+  /**
+   * 필터 패널을 접어 두었는가 (M45) — 기기별로 기억한다.
+   *
+   * 신고는 폰에서 왔다: 패널이 화면의 절반을 덮어 지도가 보이지 않는다. 칩 열한
+   * 개는 한 번 고르고 나면 다시 볼 일이 드문 물건인데, 그것이 지도 앞에 서 있다.
+   *
+   * **핀은 접힘과 상관없다.** 접기는 필터를 끄는 것이 아니라 필터의 **손잡이**를
+   * 치우는 것이다 — 접었더니 추천이 사라졌다면 그건 접기가 아니라 끄기다.
+   */
+  const [panelCollapsed, setPanelCollapsed] = useState<boolean>(() =>
+    loadGourmetPanelCollapsed(),
+  );
   const [curated, setCurated] = useState<GourmetSpot[]>([]);
   const [live, setLive] = useState<GourmetSpot[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -142,7 +160,7 @@ export default function GourmetLayer({
   /**
    * 지금 살아 있는 활성화의 번호.
    *
-   * 끄거나 다시 켜면 올라간다. 진행 중이던 순차 조회는 답이 올 때마다 이 값을
+   * 끄거나 다시 켜면 올라간다. 진행 중이던 조회는 답이 올 때마다 이 값을
    * 확인하고, 자기 번호가 아니면 결과를 **버린다** — 「끈 뒤에 핀이 하나씩
    * 돋아나는」 화면이 이 기능에서 가장 이상한 버그일 것이다.
    */
@@ -178,29 +196,43 @@ export default function GourmetLayer({
       setCurated(cached);
 
       if (pending.length === 0) return;
-      setProgress({ done: 0, total: pending.length });
+      const total = pending.length;
+      setProgress({ done: 0, total });
 
-      // **순차**로. 마흔 집을 동시에 던지면 구글은 받아 주지만 사용자의 폰이
-      // 먼저 넘어간다 — 그리고 취소도 불가능해진다.
-      for (let index = 0; index < pending.length; index += 1) {
-        const entry = pending[index];
-        const place = await searchGourmetPlace(
-          maps,
-          lookupQuery(entry),
-          CITY_CENTER[entry.city],
-        );
-        // 껐거나 다시 켰다 — 이 줄의 답은 이제 아무의 것도 아니다.
-        if (runRef.current !== token) return;
+      // M43은 **순차**였다: 「마흔 집을 동시에 던지면 구글은 받아 주지만 사용자의
+      // 폰이 먼저 넘어간다」. 그 걱정은 지금도 옳다 — 틀린 것은 폭이 1이었다는
+      // 점뿐이고, 그래서 127집이 127번의 왕복으로 줄을 서 「불러오는게 너무
+      // 늦다」가 됐다 (M45).
+      //
+      // 이제 폭이 여섯이다. 동시에 살아 있는 요청은 여섯을 넘지 않고, 끄면
+      // (`stop`) 남은 칸은 아예 집지 않는다. 자세한 계약은 `gourmet/pool.ts`.
+      let done = 0;
+      await runPool(
+        pending,
+        GOURMET_POOL_WIDTH,
+        async (entry) => {
+          const place = await searchGourmetPlace(
+            maps,
+            lookupQuery(entry),
+            CITY_CENTER[entry.city],
+          );
+          // 껐거나 다시 켰다 — 이 줄의 답은 이제 아무의 것도 아니다.
+          if (runRef.current !== token) return;
 
-        if (place) {
-          const resolved = resolvedFromPlace(place);
-          // 찾은 것만 적는다. **실패는 캐시하지 않는다** — 오늘 못 찾은 집을
-          // 영영 못 찾은 집으로 만들면 안 되고, 다음에 켤 때 다시 물으면 된다.
-          saveGourmetResolved(entry.id, resolved);
-          setCurated((current) => [...current, curatedSpot(entry, resolved)]);
-        }
-        setProgress({ done: index + 1, total: pending.length });
-      }
+          if (place) {
+            const resolved = resolvedFromPlace(place);
+            // 찾은 것만 적는다. **실패는 캐시하지 않는다** — 오늘 못 찾은 집을
+            // 영영 못 찾은 집으로 만들면 안 되고, 다음에 켤 때 다시 물으면 된다.
+            saveGourmetResolved(entry.id, resolved);
+            setCurated((current) => [...current, curatedSpot(entry, resolved)]);
+          }
+          // 진행은 **완료 기준**이다 — 끝나는 순서는 보장되지 않으므로 칸 번호가
+          // 아니라 끝난 개수를 센다.
+          done += 1;
+          setProgress({ done, total });
+        },
+        { stop: () => runRef.current !== token },
+      );
 
       if (runRef.current !== token) return;
       setProgress(null);
@@ -237,21 +269,32 @@ export default function GourmetLayer({
         for (const place of places) found.push(googleSpot(place, plan.typedGenres, query.genre));
       };
 
+      // M45 — 여기도 순차였다. 최대 세 개의 호출이 서로를 기다릴 이유가 없다:
+      // 셋은 **서로 다른 질문**이고, 답이 오는 순서는 화면에 아무 뜻도 없다
+      // (순위는 아래에서 평점으로 우리가 다시 매긴다). 폭을 따로 두지 않는 이유는
+      // 이 갈래의 호출 수가 애초에 3으로 못박혀 있기 때문이다 (`nearbyPlan`).
+      const jobs: Promise<void>[] = [];
+      if (plan.includedTypes.length > 0) {
+        jobs.push(
+          (async () => {
+            try {
+              const places = await searchNearbyGourmet(maps, center, plan.includedTypes, {
+                radius: NEARBY_RADIUS_M,
+                maxResultCount: NEARBY_MAX_RESULTS,
+              });
+              for (const place of places) found.push(googleSpot(place, plan.typedGenres));
+            } catch {
+              // 타입 이름을 구글이 거절했다(요청 전체가 400으로 떨어진다). 빈
+              // 지도 대신 조금 덜 정확한 결과를 보여 준다 — 키워드로 한 계단.
+              await Promise.all(nearbyFallbackQueries(plan).map((query) => askKeyword(query)));
+            }
+          })(),
+        );
+      }
+      for (const query of plan.textQueries) jobs.push(askKeyword(query));
+
       try {
-        if (plan.includedTypes.length > 0) {
-          try {
-            const places = await searchNearbyGourmet(maps, center, plan.includedTypes, {
-              radius: NEARBY_RADIUS_M,
-              maxResultCount: NEARBY_MAX_RESULTS,
-            });
-            for (const place of places) found.push(googleSpot(place, plan.typedGenres));
-          } catch {
-            // 타입 이름을 구글이 거절했다(요청 전체가 400으로 떨어진다). 빈
-            // 지도 대신 조금 덜 정확한 결과를 보여 준다 — 키워드로 한 계단.
-            for (const query of nearbyFallbackQueries(plan)) await askKeyword(query);
-          }
-        }
-        for (const query of plan.textQueries) await askKeyword(query);
+        await Promise.all(jobs);
       } finally {
         if (runRef.current === token) setSearching(false);
       }
@@ -421,9 +464,45 @@ export default function GourmetLayer({
           같은 높이에 두면 z-index가 더 높은 버튼들이 패널 위에 떠서 겹친다.
           그리고 맛집 팝업이 열리면 물러난다: 390px에서 둘을 세로로 나란히
           세울 자리가 없고, 한 집을 읽는 동안 칩 열한 개가 필요하지도 않다. */}
-      {active && !openSpot ? (
+      {/* 접힌 패널 (M45) — 요약 한 줄짜리 알약. 펼친 패널과 **같은** testid를
+          쓴다: 화면에 서 있는 것은 언제나 「그 패널」 하나이고, 접혀 있는지는
+          속성 하나가 말한다. 자리도 같은 자리에서 시작한다(둥근 버튼 둘 아래). */}
+      {active && !openSpot && panelCollapsed ? (
         <div
           data-testid="gourmet-panel"
+          data-collapsed="true"
+          data-spot-count={spots.length}
+          className="absolute left-2 right-2 top-[9.5rem] z-[1050] flex flex-col items-start gap-1"
+        >
+          <button
+            type="button"
+            data-testid="gourmet-panel-toggle"
+            data-collapsed="true"
+            aria-expanded={false}
+            aria-label={`주변 맛집 ${spots.length}곳 — 필터 펼치기`}
+            onClick={() => setPanelCollapsed(saveGourmetPanelCollapsed(false))}
+            className="inline-flex h-9 max-w-full items-center gap-1 rounded-full bg-surface/97 px-3 text-label text-ink shadow-float transition-colors duration-[140ms] ease-quick hover:bg-surface"
+          >
+            <span aria-hidden="true">🍜</span>
+            <span className="min-w-0 truncate">주변 맛집 {spots.length}곳</span>
+            <Icon name="chevron-down" size={16} className="text-ink-faint" />
+          </button>
+          {/* 접혀 있어도 진행은 말한다 — 「왜 아직 핀이 안 뜨나」의 답이다. */}
+          {progress ? (
+            <p
+              data-testid="gourmet-progress"
+              className="max-w-full truncate rounded-full bg-surface/97 px-3 py-0.5 text-micro font-normal text-ink-muted shadow-raise"
+            >
+              {progressLabel(progress.done, progress.total)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {active && !openSpot && !panelCollapsed ? (
+        <div
+          data-testid="gourmet-panel"
+          data-collapsed="false"
           data-spot-count={spots.length}
           className="absolute inset-x-2 top-[9.5rem] z-[1050] max-h-[55%] space-y-2 overflow-y-auto rounded-lg bg-surface/97 p-3 shadow-float"
         >
@@ -440,6 +519,18 @@ export default function GourmetLayer({
             >
               <Icon name="search" size={16} />
               {searching ? '검색 중…' : '이 지역에서 다시 검색'}
+            </button>
+            <button
+              type="button"
+              data-testid="gourmet-panel-toggle"
+              data-collapsed="false"
+              aria-expanded={true}
+              aria-label="필터 접기"
+              title="필터 접기"
+              onClick={() => setPanelCollapsed(saveGourmetPanelCollapsed(true))}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-faint transition-colors duration-[140ms] ease-quick hover:bg-sunken hover:text-ink"
+            >
+              <Icon name="chevron-up" size={16} />
             </button>
           </div>
 

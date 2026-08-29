@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   GOURMET_FIELDS,
   PLACE_BIAS_RADIUS_M,
+  PLACE_SEARCH_MAX_RESULTS,
+  searchPlaceSuggestions,
   searchGourmetPlace,
   searchGourmetPlaces,
   searchNearbyGourmet,
@@ -273,5 +275,59 @@ describe('searchNearbyGourmet', () => {
         maxResultCount: 1,
       }),
     ).rejects.toThrow('INVALID_ARGUMENT');
+  });
+});
+
+describe('searchPlaceSuggestions — 카드 검색의 여러 후보 (M44)', () => {
+  it('다섯 줄까지 받아 오고, 좌표가 없는 줄은 버린다', async () => {
+    const { maps, log } = fakeMaps({
+      places: [
+        rawPlace(34.6659, 135.5013),
+        { displayName: '좌표 없음' },
+        rawPlace(34.6701, 135.5011, { displayName: '이치란 도톤보리점' }),
+      ],
+    });
+
+    const found = await searchPlaceSuggestions(maps, '이치란 난바', {
+      lat: 34.6,
+      lng: 135.5,
+    });
+
+    expect(found).toHaveLength(2);
+    expect(found[0]).toEqual({
+      name: '이치란 난바점',
+      lat: 34.6659,
+      lng: 135.5013,
+      address: '일본 오사카부 오사카시',
+    });
+    expect(found[1].name).toBe('이치란 도톤보리점');
+
+    // M41의 세 필드 그대로 — 검색창은 평점을 그리지 않는다.
+    expect(log[0].fields).toEqual(['displayName', 'location', 'formattedAddress']);
+    expect(log[0].maxResultCount).toBe(PLACE_SEARCH_MAX_RESULTS);
+    expect(log[0].language).toBe('ko');
+    expect(log[0].locationBias).toEqual({
+      center: { lat: 34.6, lng: 135.5 },
+      radius: PLACE_BIAS_RADIUS_M,
+    });
+  });
+
+  it('목적지가 없으면 기울이지 않는다', async () => {
+    const { maps, log } = fakeMaps({ places: [rawPlace(1, 2)] });
+    await searchPlaceSuggestions(maps, '난바');
+    expect(log[0].locationBias).toBeUndefined();
+  });
+
+  it('빈 질의는 아무것도 묻지 않는다', async () => {
+    const { maps, log } = fakeMaps({ places: [rawPlace(1, 2)] });
+    expect(await searchPlaceSuggestions(maps, '   ')).toEqual([]);
+    expect(log).toHaveLength(0);
+  });
+
+  it('실패는 삼키지 않고 **던진다** — 부르는 쪽이 「못 찾음」과 구별해야 한다', async () => {
+    const maps = {
+      importLibrary: () => Promise.reject(new Error('blocked')),
+    } as unknown as GoogleMapsApi;
+    await expect(searchPlaceSuggestions(maps, '난바')).rejects.toThrow();
   });
 });

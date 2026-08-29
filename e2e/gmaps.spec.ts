@@ -174,6 +174,58 @@ async function scheduleCard(page: Page, title: string, quarterSteps = 0): Promis
   await expect(page.getByTestId('schedule-sheet')).toHaveCount(0);
 }
 
+/**
+ * 배치가 IndexedDB에 실제로 적힐 때까지 기다린다.
+ *
+ * 아래 「키가 사라진 기기」 시험은 배치 **직후에 리로드**한다. zustand의 persist는
+ * 상태가 바뀔 때마다 쓰지만 그 쓰기는 비동기라, 부하가 걸린 러너에서는 리로드가
+ * 마지막 쓰기를 앞지를 수 있다 — 그러면 카드도 일자도 남고(그 앞의 쓰기다) **배치
+ * 하나만** 사라져서, 키와는 아무 상관 없는 이유로 핀이 0개가 된다. 실제로 그렇게
+ * 세 번에 한 번씩 붉어졌다 (M45에서 진단).
+ *
+ * `map.spec`·`timeline.spec`이 리로드 앞에서 하는 일과 같은 일이다.
+ */
+async function waitForEntryPersisted(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          (key) =>
+            new Promise<number>((resolve) => {
+              const request = indexedDB.open('trip-board');
+              request.onerror = () => resolve(-1);
+              request.onsuccess = () => {
+                try {
+                  const read = request.result
+                    .transaction('state', 'readonly')
+                    .objectStore('state')
+                    .get(key);
+                  read.onsuccess = () => {
+                    try {
+                      const raw = typeof read.result === 'string' ? read.result : '';
+                      const parsed = raw
+                        ? (JSON.parse(raw) as {
+                            state?: { workspace?: { entries?: Record<string, unknown> } };
+                          })
+                        : null;
+                      resolve(Object.keys(parsed?.state?.workspace?.entries ?? {}).length);
+                    } catch {
+                      resolve(-1);
+                    }
+                  };
+                  read.onerror = () => resolve(-1);
+                } catch {
+                  resolve(-1);
+                }
+              };
+            }),
+          'trip-board/workspace',
+        ),
+      { timeout: 5_000 },
+    )
+    .toBeGreaterThan(0);
+}
+
 /** 지도 탭을 열고 「일정 전체」로 — 구글 시트가 구글로 그려지는 범위. */
 async function openSheetScopedMap(page: Page): Promise<void> {
   await page.getByTestId('tab-map').click();
@@ -328,6 +380,9 @@ test('키가 사라진 기기에서는 구글 시트도 OSM으로 보이고 한 
   await addLocatedCard(page, 2, '이치란', CARD_POINT);
   await createSheet(page, 'google');
   await scheduleCard(page, '이치란');
+
+  // 리로드가 마지막 쓰기를 앞지르지 않게 — 자세한 것은 `waitForEntryPersisted`.
+  await waitForEntryPersisted(page);
 
   // 이 기기에서 키를 걷어낸다 — GitHub Pages로 같은 워크스페이스를 연 상황.
   await revokeKey(page);

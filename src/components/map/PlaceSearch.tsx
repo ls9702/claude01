@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAiEnabled } from '../../ai/aiSettings';
 import { toGeoPoint, type PlaceCandidate } from '../../ai/aiPlaces';
 import { parseCoordInput, SHORT_LINK_HINT } from '../../map/coordInput';
+import { useGoogleMapsKey } from '../../map/gmapsKey';
 import { searchPlacesRefined, type PlaceSource } from '../../map/placeSearch';
 import type { GeoPoint } from '../../types/models';
 import { SEARCH_COOLDOWN_MS, SEARCH_ERROR_MESSAGE, formatLatLng, pinAddress } from '../../utils/geo';
@@ -18,6 +19,13 @@ interface PlaceSearchProps {
    * the OSM half never sees it, because Nominatim has no such parameter.
    */
   destination?: string;
+  /**
+   * 같은 목적지의 **좌표** (M44) — 구글 Places 검색을 그 반경으로 기울인다.
+   *
+   * 문자열 목적지와 따로 받는 이유는 두 엔진이 서로 다른 것을 이해하기 때문이다:
+   * 모델은 「오사카시, 오사카부, 일본」을 읽고, Places는 좌표와 반경을 읽는다.
+   */
+  bias?: GeoPoint;
   onPick: (point: GeoPoint) => void;
   onClose: () => void;
 }
@@ -47,10 +55,13 @@ type Status = 'idle' | 'loading' | 'done';
 export default function PlaceSearch({
   initialQuery = '',
   destination,
+  bias,
   onPick,
   onClose,
 }: PlaceSearchProps) {
   const aiOn = useAiEnabled();
+  /** 이 기기가 구글 Places를 1순위로 쓸 수 있는가 (M44). */
+  const googleOn = useGoogleMapsKey() !== null;
   const [query, setQuery] = useState(initialQuery);
   const [status, setStatus] = useState<Status>('idle');
   const [results, setResults] = useState<PlaceCandidate[]>([]);
@@ -108,6 +119,7 @@ export default function PlaceSearch({
     try {
       const found = await searchPlacesRefined(trimmed, {
         destination,
+        bias,
         signal: controller.signal,
       });
       if (!aliveRef.current || controller.signal.aborted) return;
@@ -152,10 +164,14 @@ export default function PlaceSearch({
           </button>
         </div>
 
+        {/* M44 — 구글 키가 있는 기기에서는 첫 계단이 구글이다. 키가 없는 기기의
+            두 문장은 M28 그대로 한 글자도 바뀌지 않는다. */}
         <p data-testid="place-search-hint" className="text-micro font-normal text-ink-faint">
-          {aiOn
-            ? 'AI가 먼저 찾고, 못 찾으면 OpenStreetMap(Nominatim)에서 찾아요. 검색 버튼을 눌러야 요청해요.'
-            : 'OpenStreetMap(Nominatim)에서 찾아요. 검색 버튼을 눌러야 요청해요.'}
+          {googleOn
+            ? '구글 지도에서 먼저 찾고, 못 찾으면 AI·OpenStreetMap에서 찾아요. 검색 버튼을 눌러야 요청해요.'
+            : aiOn
+              ? 'AI가 먼저 찾고, 못 찾으면 OpenStreetMap(Nominatim)에서 찾아요. 검색 버튼을 눌러야 요청해요.'
+              : 'OpenStreetMap(Nominatim)에서 찾아요. 검색 버튼을 눌러야 요청해요.'}
         </p>
         {/* 있는 줄을 고치지 않고 한 줄을 더한다 (M37) — 이건 다른 이야기다. */}
         <p
@@ -203,7 +219,11 @@ export default function PlaceSearch({
           data-testid="place-search-busy"
           className="mt-3 rounded-md bg-sunken px-3 py-2 text-label font-normal text-ink-muted"
         >
-          {aiOn ? 'AI에게 물어보는 중이에요… 몇 초 걸려요' : '찾는 중이에요…'}
+          {googleOn
+            ? '구글 지도에서 찾는 중이에요…'
+            : aiOn
+              ? 'AI에게 물어보는 중이에요… 몇 초 걸려요'
+              : '찾는 중이에요…'}
         </p>
       ) : null}
 

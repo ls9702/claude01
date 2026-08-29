@@ -5,6 +5,7 @@ import type { GeoPoint } from '../types/models';
 import { SEARCH_ERROR_MESSAGE } from '../utils/geo';
 import {
   FALLBACK_NOTES,
+  GOOGLE_FALLBACK_NOTES,
   fallbackReasonFor,
   osmCandidate,
   searchPlacesRefined,
@@ -22,9 +23,28 @@ const AI_HIT: PlaceCandidate = {
 
 const OSM_HIT: GeoPoint = { lat: 35.6595, lng: 139.7005, address: '시부야 스크램블 교차로, 도쿄' };
 
-/** Deps with AI on and both halves answering, unless a test says otherwise. */
+/** 구글이 답하는 줄 하나 (M44) — 좌표가 원본이라 `refined`를 달고 온다. */
+const GOOGLE_HIT: PlaceCandidate = {
+  name: '마루하치 슈퍼 난바점',
+  lat: 34.6641,
+  lng: 135.5017,
+  address: '일본 오사카부 오사카시 나니와구',
+  locality: '일본 오사카부 오사카시 나니와구',
+  refined: true,
+  refinedBy: 'google',
+};
+
+/**
+ * Deps with AI on and both halves answering, unless a test says otherwise.
+ *
+ * M44 — 구글은 **꺼진 채로** 시작한다. 이 파일의 시험 대부분은 M28~M37의 두
+ * 계단에 대한 것이고, 키가 없는 기기(Pages·부트스트랩 없는 배포)가 여전히 그
+ * 두 계단만 쓴다는 사실이 곧 이 기본값이다.
+ */
 function deps(overrides: Partial<SmartSearchDeps> = {}): Partial<SmartSearchDeps> {
   return {
+    hasGoogle: () => false,
+    googleSearch: vi.fn(async () => [GOOGLE_HIT]),
     isAiEnabled: () => true,
     aiSearch: vi.fn(async () => [AI_HIT]),
     osmSearch: vi.fn(async () => [OSM_HIT]),
@@ -34,6 +54,116 @@ function deps(overrides: Partial<SmartSearchDeps> = {}): Partial<SmartSearchDeps
     ...overrides,
   };
 }
+
+describe('searchPlacesSmart — 구글 우선 (M44)', () => {
+  it('키가 있으면 구글에게 먼저 묻고, 답이 오면 AI도 OSM도 부르지 않는다', async () => {
+    const googleSearch = vi.fn(async () => [GOOGLE_HIT]);
+    const aiSearch = vi.fn(async () => [AI_HIT]);
+    const osmSearch = vi.fn(async () => [OSM_HIT]);
+
+    const result = await searchPlacesSmart('마루하치 슈퍼 난바점', {
+      deps: deps({ hasGoogle: () => true, googleSearch, aiSearch, osmSearch }),
+    });
+
+    expect(result.source).toBe('google');
+    expect(result.results).toEqual([GOOGLE_HIT]);
+    expect(result.note).toBeUndefined();
+    expect(aiSearch).not.toHaveBeenCalled();
+    expect(osmSearch).not.toHaveBeenCalled();
+  });
+
+  it('여행 목적지 좌표를 구글에게 기울임으로 넘긴다', async () => {
+    const googleSearch = vi.fn(async () => [GOOGLE_HIT]);
+    const bias: GeoPoint = { lat: 34.6937, lng: 135.5023 };
+    await searchPlacesSmart('난바', {
+      bias,
+      deps: deps({ hasGoogle: () => true, googleSearch }),
+    });
+    expect(googleSearch).toHaveBeenCalledWith('난바', bias);
+  });
+
+  it('키가 없으면 구글을 부르지도 않고 M28의 길을 그대로 간다', async () => {
+    const googleSearch = vi.fn(async () => [GOOGLE_HIT]);
+    const result = await searchPlacesSmart('츠텐카쿠', { deps: deps({ googleSearch }) });
+
+    expect(googleSearch).not.toHaveBeenCalled();
+    expect(result.source).toBe('ai');
+    expect(result.googleReason).toBe('google-off');
+    // 평소 상태를 매번 사과하지 않는다.
+    expect(result.note).toBeUndefined();
+  });
+
+  it('구글이 못 찾으면 AI로 내려가고, 그 사실을 한 줄로 말한다', async () => {
+    const aiSearch = vi.fn(async () => [AI_HIT]);
+    const result = await searchPlacesSmart('없는 가게', {
+      deps: deps({ hasGoogle: () => true, googleSearch: async () => [], aiSearch }),
+    });
+
+    expect(aiSearch).toHaveBeenCalled();
+    expect(result.source).toBe('ai');
+    expect(result.googleReason).toBe('google-empty');
+    expect(result.note).toBe(GOOGLE_FALLBACK_NOTES['google-empty']);
+  });
+
+  it('구글을 못 부르면(키 오류·차단·오프라인) 조용히 다음 계단으로 간다', async () => {
+    const result = await searchPlacesSmart('츠텐카쿠', {
+      deps: deps({
+        hasGoogle: () => true,
+        googleSearch: async () => {
+          throw new Error('script blocked');
+        },
+      }),
+    });
+
+    expect(result.source).toBe('ai');
+    expect(result.googleReason).toBe('google-error');
+    expect(result.note).toBe(GOOGLE_FALLBACK_NOTES['google-error']);
+  });
+
+  it('구글도 AI도 답하지 못하면 OSM까지 내려가고, 그 줄의 안내는 AI 쪽 이유다', async () => {
+    const result = await searchPlacesSmart('없는 가게', {
+      deps: deps({
+        hasGoogle: () => true,
+        googleSearch: async () => [],
+        aiSearch: async () => [],
+      }),
+    });
+
+    expect(result.source).toBe('osm');
+    expect(result.googleReason).toBe('google-empty');
+    // 한 줄에 두 개의 사과를 담지 않는다 — 지금 보고 있는 것이 어디 결과인지가 먼저다.
+    expect(result.note).toBe(FALLBACK_NOTES['ai-empty']);
+  });
+
+  it('취소는 구글 계단에서도 그대로 밖으로 나간다', async () => {
+    const aiSearch = vi.fn(async () => [AI_HIT]);
+    await expect(
+      searchPlacesSmart('츠텐카쿠', {
+        deps: deps({
+          hasGoogle: () => true,
+          googleSearch: async () => {
+            throw new DOMException('aborted', 'AbortError');
+          },
+          aiSearch,
+        }),
+      }),
+    ).rejects.toThrow(DOMException);
+    expect(aiSearch).not.toHaveBeenCalled();
+  });
+
+  it('구글 결과는 좌표를 다시 조이지 않는다 — 원본을 사본으로 바꾸지 않는다', async () => {
+    const osmSearch = vi.fn(async () => [OSM_HIT]);
+    const aiAddress = vi.fn(async () => '大阪市浪速区');
+    const result = await searchPlacesRefined('마루하치 슈퍼 난바점', {
+      deps: deps({ hasGoogle: () => true, osmSearch, aiAddress }),
+    });
+
+    expect(result.source).toBe('google');
+    expect(result.results).toEqual([GOOGLE_HIT]);
+    expect(osmSearch).not.toHaveBeenCalled();
+    expect(aiAddress).not.toHaveBeenCalled();
+  });
+});
 
 describe('searchPlacesSmart — AI 우선', () => {
   it('returns the AI candidates and never touches Nominatim', async () => {

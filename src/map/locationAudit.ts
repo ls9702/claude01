@@ -1,5 +1,10 @@
 /**
- * 위치 재정비 (M36) — 이미 저장된 카드 좌표를 M35의 방식으로 다시 맞추기.
+ * 위치 재정비 (M36 → M44) — 이미 저장된 카드 좌표를 다시 맞추기.
+ *
+ * M44에서 좌표의 **원천**이 갈렸다: 이 기기에 구글 지도 키가 있으면
+ * {@link proposeLocation}은 구글 Places에게 묻고 그 좌표를 그대로 제안한다(조일
+ * 이유가 없는 원본이다). 키가 없으면 아래 M36~M37의 길이 한 글자도 다르지 않게
+ * 돈다 — 판정도, 30m/3km의 벽도, 「고른 것만 적용」도 전부 그대로다.
  *
  * M35는 **새로 찾는** 장소의 좌표를 고쳤다: AI가 현지 표기를 알아내고
  * (`ai/aiPlaces`), 그 표기로 Nominatim에 되물어 좌표를 스냅한다(`map/refine`).
@@ -286,6 +291,15 @@ export function restoreSnapshot(
 
 /** {@link proposeLocation}이 갈아끼울 수 있는 것들. */
 export interface ProposeDeps {
+  /**
+   * 구글 Places 후보들 (M44) — **주어지면 이 길만 쓴다**.
+   *
+   * 실제로는 `map/googlePlaceLookup.googlePlaceSearch`. 이 기기에 구글 키가
+   * 없으면 화면이 아예 넘기지 않고, 그때는 M36~M37의 AI+OSM 길이 그대로 돈다.
+   *
+   * 구글이 답한 좌표는 보정 단계를 지나지 않는다 — 조일 이유가 없는 원본이다.
+   */
+  googleSearch?: (query: string, hint?: string) => Promise<PlaceCandidate[]>;
   /** 실제로는 `ai/aiPlaces.aiSearchPlaces`. */
   aiSearch: (query: string, hint?: string) => Promise<PlaceCandidate[]>;
   /** 실제로는 `utils/geo.searchPlaces`. */
@@ -337,6 +351,26 @@ export async function proposeLocation(
 ): Promise<PlaceCandidate | null> {
   const query = target.title.trim();
   if (query === '') return null;
+
+  /* --- 구글이 있으면 구글만 (M44) ------------------------------------ */
+
+  /**
+   * 왜 「구글이 못 찾으면 AI로」가 아닌가.
+   *
+   * 이 파일의 첫째 규칙이 「OSM이 확인해 준 좌표만 제안한다」인 것과 같은
+   * 이유다: 이 도구의 존재 이유가 **모델의 기억으로 찍힌 좌표를 고치는 것**인데,
+   * 구글이 모르는 가게에 대해 모델의 기억을 다시 제안하면 아무것도 나아지지
+   * 않는다. 구글이 모르면 「제안 없음」이 정직한 답이고, 그 한 장은 카드 편집의
+   * 검색이 (사람이 보고 고르는 자리에서) 맡는다.
+   *
+   * 덤으로 AI 프록시의 분당 퓨즈와 Nominatim의 초당 정책이 이 길에는 없다.
+   * 그래도 훑기는 여전히 순차다(`scanAudit`) — 카드 서른 장을 동시에 던질
+   * 이유는 어느 엔진에서도 없다.
+   */
+  if (options.googleSearch) {
+    const hits = await options.googleSearch(query, target.hint);
+    return nearestCandidate(target.from, hits);
+  }
 
   const found = await options.aiSearch(query, target.hint);
   if (found.length === 0) return null;

@@ -11,6 +11,8 @@ import {
   type AuditRow,
   type AuditStatus,
 } from '../../map/locationAudit';
+import { useGoogleMapsKey } from '../../map/gmapsKey';
+import { googlePlaceSearch } from '../../map/googlePlaceLookup';
 import { useUndoStore } from '../../stores/undoStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Id } from '../../types/models';
@@ -64,6 +66,8 @@ export default function LocationAuditSheet({ tripId, onClose }: LocationAuditShe
   const workspace = useWorkspaceStore((s) => s.workspace);
   const updateCard = useWorkspaceStore((s) => s.updateCard);
   const offer = useUndoStore((s) => s.offer);
+  /** 이 기기가 구글 Places로 훑을 수 있는가 (M44). */
+  const googleOn = useGoogleMapsKey() !== null;
 
   const [phase, setPhase] = useState<AuditPhase>('idle');
   const [rows, setRows] = useState<AuditRow[]>([]);
@@ -101,6 +105,17 @@ export default function LocationAuditSheet({ tripId, onClose }: LocationAuditShe
         signal: controller.signal,
         propose: (target, signal) =>
           proposeLocation(target, {
+            // M44 — 키가 있는 기기에서는 여기가 유일한 길이 된다. 넘기지 않으면
+            // (키 없음) 아래 두 줄이 M36~M37 그대로 돈다.
+            ...(googleOn
+              ? {
+                  googleSearch: (query: string, hint?: string) =>
+                    // 카드에 적힌 주소(또는 여행 목적지)를 그대로 질의에 태운다:
+                    // 「히요리 호텔」은 세상에 여럿이고, Places도 그 사실을
+                    // 문맥 없이는 풀지 못한다.
+                    googlePlaceSearch(hint ? `${query} ${hint}` : query),
+                }
+              : {}),
             // 대량 훑기에서는 grounding 재시도를 붙이지 않는다 — 이유는
             // `proposeLocation`의 주석에 있다.
             aiSearch: (query, hint) =>

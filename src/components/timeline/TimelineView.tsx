@@ -6,6 +6,7 @@ import { deleteEntryWithUndo } from '../../stores/entryDelete';
 import { deleteWithUndo } from '../../stores/undoDelete';
 import { useUiStore } from '../../stores/uiStore';
 import { useTimelineChromeStore } from '../../stores/timelineChrome';
+import { useTimelineEditStore } from '../../stores/timelineEdit';
 import { FIRST_SHEET_NAME, useWorkspaceStore } from '../../stores/workspaceStore';
 import type {
   BoardColumn,
@@ -175,6 +176,31 @@ export default function TimelineView() {
   const toggleChrome = useTimelineChromeStore((s) => s.toggle);
   const expandChrome = useTimelineChromeStore((s) => s.expand);
   const collapsed = !isDesktop && chromeCollapsed;
+
+  /**
+   * 「수정」 (M45) — 지속시간 조정을 여는 스위치. 모바일·데스크톱 공통이다.
+   *
+   * 접기(`chromeCollapsed`)와 달리 `isDesktop`으로 한 번 더 거르지 **않는다**:
+   * 마우스로도 블록 아래 12px 띠는 실수로 잡히고, 무엇보다 「내가 지금 고칠 수
+   * 있는 상태인가」는 화면 폭과 상관없는 사실이다.
+   */
+  const editOn = useTimelineEditStore((s) => s.on);
+  const toggleEdit = useTimelineEditStore((s) => s.toggle);
+  /**
+   * 「수정」 토글이 설 수 있는 최소 폭 — 실측이다 (M45).
+   *
+   * `REPORT_NEEDS_PX` 옆의 그 자와 같은 자로 쟀다. 리포트가 물러난 뒤 이 줄의
+   * 내용 폭은 335px이고, 320px 화면의 안쪽 폭은 288px(좌우 `px-4` 제외)이다.
+   * 그래서 320px에서는 이 버튼도 물러난다 — 그 폭에서 서면 페이지가 15px 가로로
+   * 밀리고, 그건 M18·M19가 없앤 사고이자 `daywindow.spec`이 320/360/390에서
+   * 지키고 있는 계약이다.
+   *
+   * 물러난 폭에서 무엇을 잃나: 그 화면에서는 길이 조절이 **잠긴 채로** 남는다.
+   * 잠금이 기본값이므로 잃는 것은 「푸는 방법」이지 「고치는 방법」이 아니다 —
+   * 배치의 길이는 엔트리 상세 시트의 ± 스테퍼로 어느 폭에서나 고칠 수 있다.
+   */
+  const EDIT_NEEDS_PX = 344;
+  const roomForEdit = useMediaQuery(`(min-width: ${EDIT_NEEDS_PX}px)`);
 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -384,13 +410,25 @@ export default function TimelineView() {
    * 두 단계인 이유는 M31의 `WORDS_YIELD`와 같다: 같은 줄이라도 무엇이 서 있느냐에
    * 따라 필요한 폭이 다르고, 하나의 기준선으로 뭉뚱그리면 둘 중 한쪽이 틀린다.
    *
-   * ⚠️ 알려진 제한: AI를 켠 기기에서는 423px가 필요해서 390px 폰에서는 이 버튼이
+   * ⚠️ 알려진 제한: AI를 켠 기기에서는 471px가 필요해서 390px 폰에서는 이 버튼이
    * 서지 못한다. 그 폭에서 AI 두 개가 붙은 줄은 **M32 이전에도 이미** 360px에서
    * 넘치고 있었다(375px) — 이 줄을 근본적으로 고치려면 기존 버튼들의 크기·간격을
    * 손봐야 한다. 그래서 좁은 폭의 진입점은 예산 바 팝오버 맨 아래의 「전체
    * 리포트 보기」다: 버튼이 물러나는 모든 폭에서 리포트는 여전히 두 탭 거리다.
+   *
+   * **M45 — 두 기준선이 나란히 48px 올라갔다.** 이 줄에 「수정」 토글이 하나 더
+   * 섰기 때문이다(44px 버튼 + 4px 간격). 브라우저에 다시 대고 잰 값은 이렇다:
+   * 「수정」을 얹은 뒤 리포트까지 서면 내용 폭이 360px에서 383px, 320px에서
+   * 335px가 되어 **페이지가 가로로 밀린다** — M18·M19가 없애 놓은 바로 그 사고다.
+   * 리포트가 한 칸 먼저 물러나면 390px 폰에서 「수정」이 서고 320px에서도 줄이
+   * 넘치지 않는다.
+   *
+   * 왜 물러나는 쪽이 또 리포트인가: 위 문단의 이유가 그대로다. 「수정」은 지금
+   * 화면에서 손끝이 계획을 바꿀 수 있는지를 정하는 **잠금 장치**라 그 자리에
+   * 없으면 잠긴 이유를 물을 곳이 없고, 리포트는 이미 적어 둔 것을 읽는 자리이며
+   * 두 번째 문이 예산 바 팝오버에 열려 있다.
    */
-  const REPORT_NEEDS_PX = { plain: 360, crowded: 424 } as const;
+  const REPORT_NEEDS_PX = { plain: 408, crowded: 472 } as const;
   const roomForReport = useMediaQuery(
     `(min-width: ${aiOn ? REPORT_NEEDS_PX.crowded : REPORT_NEEDS_PX.plain}px)`,
   );
@@ -622,6 +660,41 @@ export default function TimelineView() {
           </span>
         ) : null}
       </button>
+      {/* 「수정」 (M45) — 지속시간 조정을 여는 유일한 스위치.
+
+          여기 사는 이유: 이 묶음이 「이 시간표에 대고 할 수 있는 일」이 모여
+          있는 자리이고, 접어도 사라지지 않는 자리다. 길이 조절을 잠갔다는
+          사실이 접기 한 번으로 화면에서 사라지면, 왜 손잡이가 없는지 물을 곳이
+          없어진다.
+
+          라벨이 있는 이유: 아이콘만으로는 「무엇을 수정하나」가 안 읽힌다.
+          `sm` 아래에서는 다른 버튼들과 같이 아이콘만 남고, 이름은 `aria-label`이
+          든다 (M18의 그 레시피).
+
+          `roomForEdit`가 없는 폭(320px)에서는 물러난다 — 이유와 그때 무엇이
+          남는지는 그 상수 옆에 적어 두었다. */}
+      {roomForEdit ? (
+      <button
+        type="button"
+        data-testid="timeline-edit-toggle"
+        data-on={editOn ? 'true' : 'false'}
+        aria-pressed={editOn}
+        onClick={toggleEdit}
+        aria-label={editOn ? '수정 끄기' : '수정'}
+        title={editOn ? '지속시간 조정 잠그기' : '지속시간 조정 열기'}
+        className={[
+          COMPACT_ACTION_BUTTON_CLASS,
+          // 켜져 있다는 것은 「지금 계획이 손끝에서 바뀔 수 있다」는 뜻이라,
+          // 칩 하나가 눌린 정도가 아니라 반전색으로 분명히 선다.
+          editOn ? 'border-ink bg-inverse text-surface hover:bg-inverse' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <Icon name="pencil" size={16} />
+        <span className="hidden sm:inline">수정</span>
+      </button>
+      ) : null}
       {/* 「할 일」과 같은 묶음, 같은 레시피 — 접어도 남는다 (M29의 그 자리다).
           시트가 있어야 볼 표가 있으므로, 시트가 없으면 버튼도 없다.
 
