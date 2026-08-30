@@ -46,7 +46,14 @@ export default function TabBar() {
       aria-label="주요 탭"
       data-testid="tab-bar"
       className={[
-        'fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/92 backdrop-blur',
+        // 아래쪽(폰) 바는 불투명이다. 반투명+`backdrop-blur`였는데, 안드로이드
+        // 크롬이 고정 요소의 backdrop-filter를 합성 레이어가 많은 화면(일정
+        // 그리드의 sticky+블러) 위에서 아예 그리지 않는 버그가 있어 탭 바가
+        // 통째로 사라졌다(M45-fix). 블러는 장식이고 탭 바는 출구다 — 출구가
+        // 장식 때문에 사라질 수는 없다. `lg`의 위쪽 바는 데스크톱 전용이라
+        // 반투명·블러를 그대로 둔다.
+        'fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface',
+        'lg:bg-surface/92 lg:backdrop-blur',
         'pb-[env(safe-area-inset-bottom)]',
         // From `lg` the bar is at the *top*, so that is where the inset goes —
         // and `tb-safe-top` adds the same amount under it, so the two agree.
