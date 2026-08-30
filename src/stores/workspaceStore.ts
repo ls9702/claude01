@@ -33,6 +33,7 @@ import { newId } from '../utils/ids';
 import { copySheetName } from '../utils/sheetName';
 import { clampEntry, snapMin } from '../utils/time';
 import { idbStorage } from './persistMiddleware';
+import { loadServerSession, workspaceStorageKey } from '../sync/session';
 
 export type { SheetFlightOpts } from '../utils/flights';
 
@@ -1555,7 +1556,17 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       };
     },
     {
-      name: 'trip-board/workspace',
+      /**
+       * 세션 이름공간 (M46).
+       *
+       * `default` resolves to the historical `trip-board/workspace`, so every
+       * device that has ever run this app keeps its data with nothing to
+       * migrate; any other session gets a suffixed key of its own. Read here at
+       * store-creation time — before `persist` starts hydrating — because a
+       * device that is in session `osaka` must not spend one paint showing
+       * `default`'s trips. `sync/sessionSwitch` moves it afterwards.
+       */
+      name: workspaceStorageKey(loadServerSession()),
       version: 1,
       storage: createJSONStorage(() => idbStorage),
       // `hydrated` and the actions are derived/ephemeral — only persist data.

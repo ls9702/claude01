@@ -44,7 +44,10 @@ export type IconName =
   | 'gift'
   | 'locate'
   | 'expand'
-  | 'shrink';
+  | 'shrink'
+  | 'info'
+  | 'lock'
+  | 'upload';
 
 /** `name` → the path data drawn inside a `0 0 24 24` box. */
 const PATHS: Record<IconName, string> = {
@@ -103,6 +106,15 @@ const PATHS: Record<IconName, string> = {
   // 이미 동선(`route`)과 페이저의 것이기 때문이다.
   expand: 'M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5',
   shrink: 'M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5',
+  // 공지 (M47). 알림 아이콘이 아니라 안내 아이콘이다 — 종은 재촉하고, 이건
+  // 「읽어 두세요」다. `alert`(경고 삼각형)와는 톤이 정반대라 나란히 둬도 섞이지
+  // 않는다.
+  info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 11v5M12 7.6h.01',
+  // 보관된 세션 = 읽기 전용 (M47). 자물쇠는 「잠겼다」를 말하는 유일한 그림이다.
+  lock: 'M7 10V7a5 5 0 0 1 10 0v3M5.5 10h13v10.5h-13z',
+  // 사진 보관 (M46). 상자로 들어가는 화살표 — `package`(백업 상자)와 달리
+  // 방향이 있고, `camera`와 달리 찍는 것이 아니라 보내는 것이다.
+  upload: 'M12 15V3.5M8 7l4-4 4 4M4 15v4.5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V15',
 };
 
 interface IconProps {

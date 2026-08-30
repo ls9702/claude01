@@ -16,6 +16,10 @@ import type { AddressInfo } from 'node:net';
  *   /image.php GET  ?id=     → 200 image/jpeg <bytes> | 404 {error}
  *              PUT  ?id=     → 200 {ok:true}          | 413 {error}
  *              DELETE ?id=   → 200 {ok:true}   (idempotent, as in the original)
+ *   /admin.php GET           → 200 {ok, active, sessions, archive, notice, …}
+ *              POST {action} → 200 the same body       | 401 without X-Admin-Token
+ *   /archive.php GET ?check=1 → 200 {ok, writable, folder}
+ *              POST ?name=   → 200 {ok, path, bytes}   | 400 {error}
  *   any        → 401 without a matching `X-Sync-Token`
  *
  * The AI half answers with **canned Gemini-shaped bodies**, not with Gemini:
@@ -120,6 +124,25 @@ export interface MockApi {
    * the AI coordinates survive untouched. `'error'` answers a 502.
    */
   setAiAddressFor: (needle: string, answer: string | 'error') => void;
+  /** The admin token the mock's `/admin.php` expects (M46). */
+  adminToken: string;
+  /** Which session `/data.php` is serving right now. */
+  session: () => string;
+  /**
+   * Switches the active session **server-side**, the way the admin screen does.
+   *
+   * A spec that wants to prove a client notices the switch must be able to make
+   * one happen without going through the sheet — that is a different assertion.
+   */
+  setSession: (id: string) => void;
+  /** 보관 (M47): the active session refuses PUTs with 423. */
+  setLocked: (locked: boolean) => void;
+  /** 공지 (M47): what `?meta=1` carries, or `null` to take it down. */
+  setNotice: (text: string | null) => void;
+  /** How many PUTs have been refused with 409 `session_changed` (M46). */
+  sessionRejects: () => number;
+  /** Every photo filed through `/archive.php`, newest last (M46). */
+  archived: () => { name: string; bytes: number }[];
   /** How many photos `image.php` is currently holding. */
   photoCount: () => number;
   /** Is this photo id stored? */
@@ -249,8 +272,50 @@ async function readBody(req: IncomingMessage): Promise<string | null> {
 }
 
 /** Starts the mock on an ephemeral port. */
-export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
-  let stored: MockEnvelope | null = null;
+/** One session's worth of storage inside the mock (M46). */
+interface MockSession {
+  id: string;
+  label: string;
+  archived: boolean;
+  stored: MockEnvelope | null;
+  photos: Map<string, Buffer>;
+  /** `YYYYMMDD` → the envelope that day's first save preserved (M30/M47). */
+  daily: Map<string, MockEnvelope>;
+  profiles: Record<string, { label?: string; avatar?: string }>;
+  /** When the administrator last restored this session (M47). `0` = never. */
+  restoredAt: number;
+}
+
+const newSession = (id: string, label = ''): MockSession => ({
+  id,
+  label,
+  archived: false,
+  stored: null,
+  photos: new Map(),
+  daily: new Map(),
+  profiles: {},
+  restoredAt: 0,
+});
+
+export async function startMockApi(
+  token = 'e2e-token',
+  adminToken = 'e2e-admin',
+): Promise<MockApi> {
+  /**
+   * 세션 (M46). `default` exists from the start and is active, which is exactly
+   * what a pre-M46 NAS looks like after `data.php` has migrated it — so every
+   * spec written before this milestone sees no difference at all.
+   */
+  const sessions = new Map<string, MockSession>([['default', newSession('default')]]);
+  let active = 'default';
+  let sessionRejects = 0;
+  let notice: { text: string; at: number } | null = null;
+  let archiveFolder = '';
+  const archivedPhotos: { name: string; bytes: number }[] = [];
+
+  /** The active session — always present; `active` is only ever set to a real id. */
+  const current = (): MockSession => sessions.get(active) ?? newSession(active);
+
   let conflicts = 0;
   let metaReads = 0;
   let puts = 0;
@@ -261,12 +326,10 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
   /** 장소(프롬프트 조각) → 주소 되묻기에 주는 답 (M37). */
   const addressOverrides = new Map<string, string | 'error'>();
   let aiCalls: MockAiCall[] = [];
-  /** `image.php`'s disk: photo id → the JPEG bytes. */
-  const photos = new Map<string, Buffer>();
 
   const CORS = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'X-Sync-Token, Content-Type',
+    'Access-Control-Allow-Headers': 'X-Sync-Token, X-Session, X-Admin-Token, Content-Type',
     'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
   } as const;
 
@@ -281,6 +344,195 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     res.end(body);
   };
 
+  /** `archive.php`'s filename rule, in miniature — see `archive/archiveFiles`. */
+  const safeArchiveName = (raw: string): string | null => {
+    const base = (raw.split(/[\\/]/).pop() ?? '').trim();
+    const dot = base.lastIndexOf('.');
+    if (dot <= 0) return null;
+    const ext = base.slice(dot + 1).toLowerCase();
+    if (!['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp'].includes(ext)) return null;
+    const stem = base.slice(0, dot).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._-]+|[._-]+$/g, '');
+    return `${stem === '' ? 'photo' : stem}.${ext}`;
+  };
+
+  /** One session, as `admin.php` lists it. */
+  const sessionRow = (item: MockSession): unknown => ({
+    id: item.id,
+    label: item.label,
+    active: item.id === active,
+    archived: item.archived,
+    updatedAt: item.stored?.updatedAt ?? 0,
+    dataBytes: item.stored ? JSON.stringify(item.stored).length : 0,
+    photoBytes: [...item.photos.values()].reduce((sum, buf) => sum + buf.length, 0),
+    photoCount: item.photos.size,
+  });
+
+  /** Every admin response is the whole state — same rule as the PHP. */
+  const adminState = (): unknown => ({
+    ok: true,
+    active,
+    sessions: [...sessions.values()].map(sessionRow),
+    archive: {
+      folder: archiveFolder,
+      base: '/volume1/photo/trip-board',
+      ready: archiveFolder !== '',
+      baseExists: true,
+      bytes: archivedPhotos.reduce((sum, item) => sum + item.bytes, 0),
+      count: archivedPhotos.length,
+    },
+    usage: { diskFree: 512 * 1024 * 1024 * 1024, diskTotal: 2 * 1024 * 1024 * 1024 * 1024, at: Date.now() },
+    notice,
+    profiles: Object.keys(current().profiles).length > 0 ? current().profiles : null,
+  });
+
+  const SESSION_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+  function handleAdmin(req: IncomingMessage, res: ServerResponse, url: URL): void {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      if (url.searchParams.get('action') === 'export') {
+        const item = sessions.get(url.searchParams.get('id') ?? '');
+        if (!item?.stored) {
+          send(res, 404, { error: 'not_found', detail: '그 세션에는 아직 저장된 데이터가 없어요.' });
+          return;
+        }
+        // The server's own envelope, which is what `deserializeBackup` reads —
+        // so an export restores through 설정 → 가져오기 unchanged.
+        send(res, 200, item.stored);
+        return;
+      }
+      send(res, 200, adminState());
+      return;
+    }
+    if (req.method !== 'POST') {
+      send(res, 405, { error: 'method_not_allowed' });
+      return;
+    }
+
+    void readBody(req).then((raw) => {
+      let body: Record<string, unknown>;
+      try {
+        body = JSON.parse(raw ?? '') as Record<string, unknown>;
+      } catch {
+        send(res, 400, { error: 'bad_request' });
+        return;
+      }
+
+      const action = typeof body.action === 'string' ? body.action : '';
+      const id = typeof body.id === 'string' ? body.id.trim() : '';
+      const label = typeof body.label === 'string' ? body.label.trim() : '';
+      const needsId = ['create', 'rename', 'activate', 'lock', 'unlock', 'profiles', 'backups', 'restore'];
+      if (needsId.includes(action) && !SESSION_ID.test(id)) {
+        send(res, 400, { error: 'bad_id', detail: '세션 id는 영문 소문자·숫자·하이픈만 쓸 수 있어요.' });
+        return;
+      }
+
+      if (action === 'create') {
+        if (sessions.has(id)) {
+          send(res, 409, { error: 'already_exists', detail: '같은 id의 세션이 이미 있어요.' });
+          return;
+        }
+        sessions.set(id, newSession(id, label));
+        send(res, 200, adminState());
+        return;
+      }
+
+      if (action === 'rename') {
+        const item = sessions.get(id) ?? newSession(id);
+        item.label = label;
+        sessions.set(id, item);
+        send(res, 200, adminState());
+        return;
+      }
+
+      if (action === 'activate') {
+        if (!sessions.has(id)) {
+          send(res, 404, { error: 'not_found', detail: '그런 세션이 없어요.' });
+          return;
+        }
+        active = id;
+        send(res, 200, adminState());
+        return;
+      }
+
+      if (action === 'lock' || action === 'unlock') {
+        const item = sessions.get(id) ?? newSession(id);
+        item.archived = action === 'lock';
+        sessions.set(id, item);
+        send(res, 200, adminState());
+        return;
+      }
+
+      if (action === 'archive-settings') {
+        archiveFolder = typeof body.folder === 'string' ? body.folder.trim() : '';
+        send(res, 200, adminState());
+        return;
+      }
+
+      if (action === 'notice') {
+        const text = typeof body.text === 'string' ? body.text.trim() : '';
+        notice = text === '' ? null : { text, at: Date.now() };
+        send(res, 200, adminState());
+        return;
+      }
+
+      if (action === 'profiles') {
+        const item = sessions.get(id) ?? newSession(id);
+        const incoming = (body.profiles ?? {}) as Record<string, { label?: string; avatar?: string }>;
+        const out: Record<string, { label?: string; avatar?: string }> = {};
+        for (const profileId of ['song', 'hoyabom']) {
+          const value = incoming[profileId];
+          const nextLabel = value?.label?.trim() ?? '';
+          const avatar = value?.avatar?.trim() ?? '';
+          if (nextLabel || avatar) {
+            out[profileId] = { ...(nextLabel ? { label: nextLabel } : {}), ...(avatar ? { avatar } : {}) };
+          }
+        }
+        item.profiles = out;
+        sessions.set(id, item);
+        send(res, 200, adminState());
+        return;
+      }
+
+      if (action === 'backups') {
+        const item = sessions.get(id);
+        send(res, 200, {
+          ok: true,
+          backups: [...(item?.daily.keys() ?? [])]
+            .sort()
+            .reverse()
+            .map((date) => ({ date, bytes: JSON.stringify(item?.daily.get(date)).length })),
+        });
+        return;
+      }
+
+      if (action === 'restore') {
+        const item = sessions.get(id);
+        const date = typeof body.date === 'string' ? body.date : '';
+        const snapshot = item?.daily.get(date);
+        if (!item || !snapshot) {
+          send(res, 404, { error: 'not_found', detail: '그 날짜의 백업이 없어요.' });
+          return;
+        }
+        // **Forward, never back.** Clients decide whether to pull by comparing
+        // version numbers; a restore that lowered the counter would be
+        // invisible to every device that is already up to date.
+        item.stored = {
+          version: (item.stored?.version ?? 0) + 1,
+          updatedAt: Date.now(),
+          data: snapshot.data,
+        };
+        // The stamp is what makes a restore *win*: clients merge by default, so
+        // without it the first device to sync would fold the removed entities
+        // straight back in.
+        item.restoredAt = Date.now();
+        send(res, 200, adminState());
+        return;
+      }
+
+      send(res, 400, { error: 'bad_request', detail: '알 수 없는 action이에요.' });
+    });
+  }
+
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
@@ -290,10 +542,26 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     }
     const isAi = url.pathname.endsWith('/ai.php');
     const isImage = url.pathname.endsWith('/image.php');
-    if (!isAi && !isImage && !url.pathname.endsWith('/data.php')) {
+    const isAdmin = url.pathname.endsWith('/admin.php');
+    const isArchive = url.pathname.endsWith('/archive.php');
+    if (!isAi && !isImage && !isAdmin && !isArchive && !url.pathname.endsWith('/data.php')) {
       send(res, 404, { error: 'not_found' });
       return;
     }
+
+    /* --- admin.php (M46/M47) ------------------------------------------ *
+     * Its own secret, checked before the sync token gate below: holding the
+     * sync token lets you use the app, which is deliberately not the same as
+     * being allowed to move everybody to a different workspace. */
+    if (isAdmin) {
+      if (req.headers['x-admin-token'] !== adminToken) {
+        send(res, 401, { error: 'unauthorized' });
+        return;
+      }
+      handleAdmin(req, res, url);
+      return;
+    }
+
     // Auth first, for every endpoint — `ai.php` guards its ping too, so an
     // unauthenticated scan cannot learn whether a key is configured, and
     // `image.php` guards everything so nobody browses the trip's photos.
@@ -310,8 +578,25 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
         return;
       }
 
+      // 세션 오염 방지 (M46) / 보관 (M47) — writes only, exactly as in the PHP.
+      const claimed = req.headers['x-session'];
+      if (
+        (req.method === 'PUT' || req.method === 'DELETE') &&
+        typeof claimed === 'string' &&
+        claimed !== '' &&
+        claimed !== active
+      ) {
+        sessionRejects += 1;
+        send(res, 409, { error: 'session_changed', session: active });
+        return;
+      }
+      if ((req.method === 'PUT' || req.method === 'DELETE') && current().archived) {
+        send(res, 423, { error: 'locked', detail: '보관된 세션이에요.' });
+        return;
+      }
+
       if (req.method === 'GET' || req.method === 'HEAD') {
-        const bytes = photos.get(id);
+        const bytes = current().photos.get(id);
         if (!bytes) {
           send(res, 404, { error: 'not_found' });
           return;
@@ -340,7 +625,7 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
           }
           // Idempotent overwrite, exactly like the atomic rename in the
           // original: an id's bytes never change, so a retry is a no-op.
-          photos.set(id, body);
+          current().photos.set(id, body);
           send(res, 200, { ok: true });
         });
         return;
@@ -349,7 +634,7 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       if (req.method === 'DELETE') {
         // 200 whether or not it was there — two devices sweeping the same
         // tombstone must not turn the loser into an error.
-        photos.delete(id);
+        current().photos.delete(id);
         send(res, 200, { ok: true });
         return;
       }
@@ -455,17 +740,92 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       return;
     }
 
+    /* --- archive.php (M46) -------------------------------------------- */
+    if (isArchive) {
+      if (req.method === 'GET' && url.searchParams.has('check')) {
+        send(res, 200, {
+          ok: true,
+          writable: archiveFolder !== '',
+          folder: archiveFolder,
+          detail: archiveFolder === '' ? '보관 폴더가 정해지지 않았어요.' : '',
+        });
+        return;
+      }
+      if (req.method !== 'POST') {
+        send(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+      if (archiveFolder === '') {
+        send(res, 409, {
+          error: 'no_folder',
+          detail: '보관할 폴더가 아직 정해지지 않았어요. 관리자에게 문의해 주세요.',
+        });
+        return;
+      }
+
+      const raw = url.searchParams.get('name') ?? '';
+      const name = safeArchiveName(raw);
+      if (name === null) {
+        send(res, 400, { error: 'bad_type', detail: '사진 파일만 보관할 수 있어요.' });
+        return;
+      }
+
+      void readRaw(req, MAX_BODY_BYTES).then((body) => {
+        if (body === null) {
+          send(res, 413, { error: 'payload_too_large' });
+          return;
+        }
+        if (body.length === 0) {
+          send(res, 400, { error: 'empty', detail: '보낼 사진이 없어요.' });
+          return;
+        }
+        // Bytes in = bytes out. The whole feature is that nothing between the
+        // camera and the disk touches the file, so the mock stores the length
+        // it actually received rather than the one the header claimed.
+        archivedPhotos.push({ name, bytes: body.length });
+        send(res, 200, {
+          ok: true,
+          folder: archiveFolder,
+          name,
+          path: `${archiveFolder}/${name}`,
+          bytes: body.length,
+        });
+      });
+      return;
+    }
+
+    /* --- data.php ------------------------------------------------------ */
+    const session = current();
+
     if (req.method === 'GET') {
       if (url.searchParams.has('meta')) {
         metaReads += 1;
-        send(res, 200, { version: stored?.version ?? 0, updatedAt: stored?.updatedAt ?? 0 });
+        send(res, 200, {
+          version: session.stored?.version ?? 0,
+          updatedAt: session.stored?.updatedAt ?? 0,
+          // Additive (M46/M47), byte for byte what `data.php` answers.
+          session: active,
+          locked: session.archived,
+          notice,
+          profiles: Object.keys(session.profiles).length > 0 ? session.profiles : null,
+          restoredAt: session.restoredAt,
+        });
         return;
       }
-      if (!stored) {
-        send(res, 404, { error: 'not_found' });
+      if (!session.stored) {
+        // The 404 names the session too — a client must be able to tell an
+        // empty session B from an empty session A before it pushes anything.
+        send(res, 404, { error: 'not_found', session: active });
         return;
       }
-      send(res, 200, stored);
+      send(res, 200, {
+        ...session.stored,
+        session: active,
+        locked: session.archived,
+        notice,
+        profiles: Object.keys(session.profiles).length > 0 ? session.profiles : null,
+        restoredAt: session.restoredAt,
+      });
       return;
     }
 
@@ -473,6 +833,24 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       send(res, 405, { error: 'method_not_allowed' });
       return;
     }
+
+    // 세션 오염 방지 (M46), before the body is read and before `puts` is
+    // counted: a refused write is not an attempted write.
+    const claimedSession = req.headers['x-session'];
+    if (
+      typeof claimedSession === 'string' &&
+      claimedSession !== '' &&
+      claimedSession !== active
+    ) {
+      sessionRejects += 1;
+      send(res, 409, { error: 'session_changed', session: active });
+      return;
+    }
+    if (session.archived) {
+      send(res, 423, { error: 'locked', detail: '보관된 세션이에요.' });
+      return;
+    }
+
     // Counted before the body is even read: what the poll specs assert is that
     // no write was *attempted*, not that one was attempted and rejected.
     puts += 1;
@@ -498,13 +876,15 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
         return;
       }
 
-      const currentVersion = stored?.version ?? 0;
+      const currentVersion = session.stored?.version ?? 0;
       if (baseVersion !== currentVersion) {
         conflicts += 1;
         send(res, 409, {
           version: currentVersion,
-          updatedAt: stored?.updatedAt ?? 0,
-          data: stored?.data ?? {
+          updatedAt: session.stored?.updatedAt ?? 0,
+          session: active,
+          restoredAt: session.restoredAt,
+          data: session.stored?.data ?? {
             schemaVersion: 1,
             trips: {},
             sheets: {},
@@ -518,8 +898,25 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
         return;
       }
 
-      stored = { version: currentVersion + 1, updatedAt: Date.now(), data };
-      send(res, 200, { version: stored.version, updatedAt: stored.updatedAt });
+      // 일 단위 스냅샷 (M30) — the day's *first* save keeps what was there
+      // before it, which is what 관리자 → 백업 → 복원 later walks (M47).
+      const today = new Date();
+      const stampKey = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(
+        today.getDate(),
+      ).padStart(2, '0')}`;
+      if (session.stored && !session.daily.has(stampKey)) {
+        session.daily.set(stampKey, session.stored);
+      }
+
+      session.stored = { version: currentVersion + 1, updatedAt: Date.now(), data };
+      send(res, 200, {
+        version: session.stored.version,
+        updatedAt: session.stored.updatedAt,
+        session: active,
+        locked: false,
+        notice,
+        restoredAt: session.restoredAt,
+      });
     });
   });
 
@@ -529,8 +926,22 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     token,
-    version: () => stored?.version ?? 0,
-    data: () => stored?.data ?? null,
+    adminToken,
+    version: () => current().stored?.version ?? 0,
+    data: () => current().stored?.data ?? null,
+    session: () => active,
+    setSession: (id: string) => {
+      if (!sessions.has(id)) sessions.set(id, newSession(id));
+      active = id;
+    },
+    setLocked: (locked: boolean) => {
+      current().archived = locked;
+    },
+    setNotice: (text: string | null) => {
+      notice = text === null || text.trim() === '' ? null : { text: text.trim(), at: Date.now() };
+    },
+    sessionRejects: () => sessionRejects,
+    archived: () => [...archivedPhotos],
     conflicts: () => conflicts,
     metaReads: () => metaReads,
     puts: () => puts,
@@ -547,10 +958,16 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
     setAiAddressFor: (needle: string, answer: string | 'error') => {
       addressOverrides.set(needle, answer);
     },
-    photoCount: () => photos.size,
-    hasPhoto: (id: string) => photos.has(id),
+    photoCount: () => current().photos.size,
+    hasPhoto: (id: string) => current().photos.has(id),
     reset: () => {
-      stored = null;
+      sessions.clear();
+      sessions.set('default', newSession('default'));
+      active = 'default';
+      sessionRejects = 0;
+      notice = null;
+      archiveFolder = '';
+      archivedPhotos.length = 0;
       conflicts = 0;
       metaReads = 0;
       puts = 0;
@@ -559,7 +976,6 @@ export async function startMockApi(token = 'e2e-token'): Promise<MockApi> {
       aiPlaceMode = 'ok';
       placeOverrides.clear();
       addressOverrides.clear();
-      photos.clear();
     },
     stop: () =>
       new Promise<void>((resolve) => {

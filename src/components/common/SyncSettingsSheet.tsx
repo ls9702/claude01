@@ -20,7 +20,7 @@ import {
   importJson,
   readBackupFile,
 } from '../../sync/exportImport';
-import { PROFILES, otherProfile, useProfileStore } from '../../profile/profile';
+import { otherProfileId, useProfileDef, useProfileStore } from '../../profile/profile';
 import { formatBytes, photoUsage } from '../../utils/photos';
 import { formatStamp } from '../../utils/time';
 import {
@@ -38,6 +38,7 @@ import {
 import { restartSync, syncNow } from '../../sync/syncEngine';
 import { useGoogleMapsKey } from '../../map/gmapsKey';
 import LocationAuditSheet from '../map/LocationAuditSheet';
+import AdminSheet from './AdminSheet';
 import Avatar from './Avatar';
 import ConfirmDialog from './ConfirmDialog';
 import Icon from './Icon';
@@ -82,12 +83,15 @@ function ProfileSection() {
   const seenBy = useWorkspaceStore((s) => s.workspace.seenBy);
   const [switching, setSwitching] = useState(false);
 
-  // Unreachable in the app (the shell gates on a profile) but not in a test
-  // that mounts the sheet on its own.
+  // Resolved through the session's overrides (M47) — the built-in definitions
+  // when there are none, which is every install that has not been renamed.
+  // Hooks first, bail-out after: `profileId` is null only in a test that mounts
+  // this section on its own, and rules-of-hooks does not care why.
+  const me = useProfileDef(profileId ?? 'song');
+  const other = useProfileDef(otherProfileId(profileId ?? 'song'));
+
   if (!profileId) return null;
 
-  const me = PROFILES[profileId];
-  const other = otherProfile(profileId);
   const seen = seenBy?.[other.id];
 
   return (
@@ -253,6 +257,8 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
   );
   /** 「위치 재정비」 시트가 이 시트 위에 떠 있는가 (M36). */
   const [auditOpen, setAuditOpen] = useState(false);
+  /** 「관리자」 시트가 이 시트 위에 떠 있는가 (M46). */
+  const [adminOpen, setAdminOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -740,12 +746,34 @@ export default function SyncSettingsSheet({ onClose }: { onClose: () => void }) 
               ? LOCATION_AUDIT_GOOGLE_NOTE
               : LOCATION_AUDIT_NOTE[auditGate]}
           </p>
+
+          {/* 관리자 (M46) — 위치 재정비와 같은 톤의 조용한 링크 한 줄. 이 문은
+              세션을 바꾸고 공지를 띄우는 문이라 크게 만들 수 없다: 설정을 열러
+              온 사람이 실수로 밟을 자리에 두면 안 되고, 찾는 사람은 여기 있는
+              줄 안다. 서버가 없으면 누를 것이 없으므로 잠긴다. */}
+          <button
+            type="button"
+            data-testid="admin-open"
+            onClick={() => setAdminOpen(true)}
+            disabled={!configured}
+            className="mt-2 flex min-h-11 items-center gap-1.5 text-micro font-normal text-ink-faint underline decoration-line-strong underline-offset-4 transition-colors duration-[140ms] ease-quick hover:text-ink disabled:no-underline disabled:hover:text-ink-faint"
+          >
+            <Icon name="lock" size={16} />
+            관리자
+          </button>
+          <p data-testid="admin-note" className="text-micro font-normal text-ink-faint">
+            {configured
+              ? '세션 전환·백업 복원·공지·사진 보관함 설정 (비밀번호 필요)'
+              : '동기화(NAS) 연결 후 사용할 수 있어요'}
+          </p>
         </div>
       </div>
 
       {auditOpen && auditTripId ? (
         <LocationAuditSheet tripId={auditTripId} onClose={() => setAuditOpen(false)} />
       ) : null}
+
+      {adminOpen ? <AdminSheet onClose={() => setAdminOpen(false)} /> : null}
 
       {restoreAsk ? (
         <ConfirmDialog

@@ -24,15 +24,29 @@
  * Everything funnels through {@link enqueue}, so there is only ever one sync
  * operation in flight — overlapping pulls and pushes were the one thing
  * guaranteed to produce a version-counter mess.
+ *
+ * ## 세션 (M46)
+ *
+ * The server names the workspace it is serving on every response, and the
+ * engine's rule is one line: **if that name moved, adopt it before touching
+ * anything.** Adoption swaps IndexedDB namespaces (`sync/sessionSwitch`) and is
+ * never a merge — two groups' trips folded together by LWW is the one mistake
+ * with no undo. The push side is belt *and* braces: every PUT carries
+ * `X-Session`, and a server that disagrees answers 409 `session_changed`, which
+ * lands here as {@link SessionChangedError} and re-runs the pull under the new
+ * namespace.
  */
 
+import { useServerStateStore } from '../stores/serverState';
 import { useSyncStore } from '../stores/syncStore';
 import { useUiStore } from '../stores/uiStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
-import { SyncError, fetchAll, fetchMeta, push } from './api';
+import { SyncError, fetchMeta, fetchWorkspace, push, type SyncMeta } from './api';
 import { merge, workspaceEquals } from './merge';
 import { uploadPendingPhotos } from './photoSync';
 import { nextPollDelay } from './poll';
+import { loadServerSession } from './session';
+import { adoptServerSession } from './sessionSwitch';
 import { isConfigured, loadSettings, type SyncSettings } from './settings';
 
 /** How long the workspace has to stay quiet before we push it. */
@@ -58,6 +72,31 @@ let teardown: (() => void) | null = null;
 
 const sync = () => useSyncStore.getState();
 const workspace = () => useWorkspaceStore.getState();
+
+/**
+ * The server refused a push because everybody was moved somewhere else (M46).
+ *
+ * Not a `SyncError`: it never reaches the status chip and it is never reported
+ * to the user. It is a control-flow signal that means "start over in the new
+ * namespace", and the two callers that can raise it both catch it themselves.
+ */
+class SessionChangedError extends Error {
+  session: string | null;
+
+  constructor(session: string | null) {
+    super('session_changed');
+    this.name = 'SessionChangedError';
+    this.session = session;
+  }
+}
+
+/**
+ * Files away everything a `?meta=1` / workspace response said about the server
+ * itself (M46/M47) — session, 보관 lock, 공지, profile overrides.
+ */
+function adoptMeta(meta: SyncMeta): void {
+  useServerStateStore.getState().applyMeta(meta);
+}
 
 /**
  * Serializes sync work. A job arriving while another runs is *chained*, not
@@ -114,6 +153,10 @@ async function pushLoop(settings: SyncSettings, baseVersion: number): Promise<vo
       return;
     }
 
+    // 409 session_changed: not a race, a relocation. Merging is exactly what
+    // must not happen here, so this leaves the loop entirely.
+    if ('sessionChanged' in result) throw new SessionChangedError(result.session);
+
     // 409: someone else got there first. Fold their copy in and retry.
     version = result.conflict.version;
     const merged = merge(workspace().workspace, result.conflict.data);
@@ -134,14 +177,39 @@ async function pushLoop(settings: SyncSettings, baseVersion: number): Promise<vo
  * Pull
  * ------------------------------------------------------------------ */
 
-/** `fetchAll` → merge → adopt → push back anything the server is missing. */
+/** `fetchWorkspace` → merge → adopt → push back anything the server is missing. */
 async function pullMerge(settings: SyncSettings): Promise<void> {
-  const remote = await fetchAll(settings);
+  const { session, envelope: remote } = await fetchWorkspace(settings);
 
-  // A server with no workspace yet (404): ours becomes version 1.
+  // 세션 (M46), before anything is merged: adopting swaps this device into the
+  // named namespace, which is what makes the merge below legal. A no-op when
+  // the session has not moved, and when the server does not name one at all.
+  await adoptServerSession(session);
+  if (remote) adoptMeta(remote);
+
+  // A server with no workspace yet (404): ours becomes version 1. After the
+  // adoption above, "ours" is that session's own local copy (or an empty
+  // workspace), never the previous session's trips.
   if (!remote) {
     sync().setServerVersion(0);
     await pushLoop(settings, 0);
+    return;
+  }
+
+  // 복원 (M47) — the one write where the server beats everybody.
+  //
+  // Every other pull merges, because two phones editing one trip is what LWW is
+  // for. A restore is the opposite situation: the administrator has decided
+  // that yesterday's copy is the truth, and a merge would helpfully fold every
+  // entity the restore removed straight back in. So a stamp this device has not
+  // acted on is adopted **whole**, exactly once — `lastRestoredAt` is persisted
+  // so a reload does not re-adopt it over everything edited since.
+  const restoredAt = remote.restoredAt ?? 0;
+  if (restoredAt > 0 && restoredAt > sync().lastRestoredAt) {
+    workspace().replaceWorkspace(remote.data);
+    workspace().setDirty(false);
+    sync().markRestoreAdopted(restoredAt);
+    sync().markSynced(remote.version, remote.updatedAt || Date.now());
     return;
   }
 
@@ -190,6 +258,39 @@ function uploadPhotosAfterSync(): void {
  * ------------------------------------------------------------------ */
 
 /**
+ * Runs one piece of sync work, and starts over in the new namespace if the
+ * server says the session moved underneath it (M46).
+ *
+ * Deliberately calls {@link pullMerge} **directly** on the retry rather than
+ * going back through {@link enqueue}: this already runs inside a queued job, and
+ * awaiting a job chained behind the one you are in is a deadlock.
+ *
+ * One retry, not a loop. A second relocation mid-retry is vanishingly unlikely
+ * and the next poll picks it up a few seconds later anyway.
+ */
+async function runWithSessionRetry(
+  settings: SyncSettings,
+  job: () => Promise<void>,
+): Promise<void> {
+  try {
+    await job();
+    return;
+  } catch (err) {
+    if (!(err instanceof SessionChangedError)) {
+      reportFailure(err);
+      return;
+    }
+    await adoptServerSession(err.session);
+  }
+
+  try {
+    await pullMerge(settings);
+  } catch (err) {
+    reportFailure(err);
+  }
+}
+
+/**
  * Full pull-merge-push round trip. Safe to call at any time; a no-op when sync
  * is not configured. Never rejects — failures land on the status chip.
  */
@@ -202,11 +303,7 @@ export function syncNow(): Promise<void> {
 
   return enqueue(async () => {
     sync().setStatus('syncing');
-    try {
-      await pullMerge(settings);
-    } catch (err) {
-      reportFailure(err);
-    }
+    await runWithSessionRetry(settings, () => pullMerge(settings));
     uploadPhotosAfterSync();
     // A completed round trip *is* an answer to the question the probe asks, so
     // the next one is due a full interval from here rather than from some fixed
@@ -227,11 +324,7 @@ function pushNow(): Promise<void> {
   return enqueue(async () => {
     if (!workspace().dirty) return;
     sync().setStatus('syncing');
-    try {
-      await pushLoop(settings, sync().serverVersion);
-    } catch (err) {
-      reportFailure(err);
-    }
+    await runWithSessionRetry(settings, () => pushLoop(settings, sync().serverVersion));
     uploadPhotosAfterSync();
     armPoll();
   });
@@ -313,9 +406,9 @@ export async function pollOnce(): Promise<void> {
   if (!isConfigured(settings)) return;
   if (inFlight !== null || pushTimer !== null) return;
 
-  let version: number;
+  let meta: SyncMeta;
   try {
-    version = (await fetchMeta(settings)).version;
+    meta = await fetchMeta(settings);
   } catch {
     // Silent on purpose. A probe that could not reach the NAS is not a failed
     // sync: crying 오프라인 at a phone walking between wifi APs would make the
@@ -327,9 +420,19 @@ export async function pollOnce(): Promise<void> {
   }
 
   pollFailures = 0;
+  adoptMeta(meta);
+
+  // 세션 (M46) before the version, and not folded into the comparison below:
+  // a brand-new session starts its own counter, so the number can be *equal*
+  // while the workspace behind it is a different group's trip entirely.
+  if (meta.session && meta.session !== loadServerSession()) {
+    await syncNow();
+    return;
+  }
+
   // The engine's own bookkeeping is the only copy of "what we last saw" — a
   // second one here would drift out of step with the 409 handling that uses it.
-  if (version === sync().serverVersion) return;
+  if (meta.version === sync().serverVersion) return;
   await syncNow();
 }
 
@@ -375,6 +478,8 @@ export function restartSync(): Promise<void> {
   pollFailures = 0;
   if (!isConfigured()) {
     sync().reset();
+    // Nothing to be read-only about, and nobody to post a 공지 (M46/M47).
+    useServerStateStore.getState().reset();
     // 해제 means 해제 — no probes at an address the user just took away.
     cancelPoll();
     return Promise.resolve();

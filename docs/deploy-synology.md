@@ -42,7 +42,7 @@ File Station에서 `web` 공유 폴더 아래 `travel` 폴더 생성 → `trip-b
 web/travel/
 ├─ index.html, assets/, icons/, sw.js, manifest.webmanifest …
 └─ api/
-   ├─ data.php   ├─ ai.php   ├─ image.php
+   ├─ data.php   ├─ ai.php   ├─ image.php   ├─ admin.php   ├─ archive.php
    └─ config.php   ← 동기화 토큰이 이미 들어 있음
 ```
 
@@ -101,6 +101,34 @@ Web Station → **웹 서비스 포털**(또는 웹 서비스 → 생성) → **
 1. https://aistudio.google.com/apikey 에서 발급받은 키를 `web/travel/api/config.php` 의 `'GEMINI_API_KEY' => ''` 따옴표 안에 붙여넣기 (파일은 NAS 안에만 존재 — 브라우저로 절대 전송되지 않음)
 2. 앱 → 동기화 설정 → **AI 도우미 토글 ON** → 상태가 「사용 준비 완료」로 바뀌면 보드 ✨ AI 추천 / 일정 AI 검토 / 질문 버튼이 나타남
 
+## 10. 관리자 기능 · 사진 보관함 켜기 (M46/M47)
+
+이 회차는 **서버 파일이 바뀝니다.** zip을 `web/travel/`에 덮어쓸 때 아래 네 가지를 같이 해 주세요.
+
+1. **교체**: `api/data.php`, `api/image.php`
+2. **신규 업로드**: `api/admin.php`, `api/archive.php`
+3. **`api/config.php`에 두 줄 추가** (기존 줄은 그대로 두세요)
+
+   ```php
+   'ADMIN_TOKEN' => '여기에-긴-랜덤-문자열',      // 관리자 화면 비밀번호. SYNC_TOKEN과 다른 값으로!
+   'ARCHIVE_DIR' => '/volume1/photo/trip-board', // 여행 사진 원본이 쌓일 기준 폴더
+   ```
+
+   토큰 만들기: `php -r 'echo bin2hex(random_bytes(24)), PHP_EOL;'`
+   `ADMIN_TOKEN`은 **두 사람이 공유하는 SYNC_TOKEN과 일부러 다른 비밀**입니다 — 앱을 쓰는 것과, 모든 사람이 보는 세션을 바꾸는 것은 다른 권한이니까요.
+
+4. **보관 폴더 권한**: File Station에서 `ARCHIVE_DIR`에 해당하는 폴더를 만들고, Web Station이 도는 사용자(`http`)에게 **쓰기 권한**을 주세요. 하위 폴더 이름은 앱의 관리자 화면에서 정합니다.
+
+**`api/data/`는 손대지 마세요.** 업그레이드 후 첫 요청이 기존 `data.json`과 `photos/`를 `data/sessions/default/` 아래로 한 번 옮깁니다(같은 볼륨 안에서의 이름 바꾸기라 즉시 끝나고, 여러 번 실행해도 안전합니다). 기존 데이터는 그대로 `default` 세션이 됩니다.
+
+### 쓰는 법
+
+- 앱 → 동기화 설정 → 맨 아래 **「관리자」** → `ADMIN_TOKEN` 입력. 비밀번호는 이 기기에 저장되지 않고 탭을 닫으면 잊혀집니다.
+- **세션**: 새로 만들고, 「전환」하면 접속한 모든 사람이 그 세션을 보게 됩니다. 세션을 바꿔도 예전 세션 데이터는 서버와 각 기기에 그대로 남아 있어요. **세션 삭제 기능은 없습니다** — 정말 지우려면 File Station에서 `data/sessions/<id>` 폴더를 지우세요.
+- **사진 보관함**: 관리자 화면에서 폴더 이름(예: `2026-11-osaka`)을 정하면, 앱 상단의 📤 「사진 보관」이 그 폴더로 원본 사진을 올립니다. 사진은 줄이지 않고 원본 그대로 저장되며, 계획·카드와는 무관합니다.
+- 사진 한 장이 크면 NAS의 PHP 설정(`post_max_size`, `upload_max_filesize`)을 올려야 할 수 있습니다 — 초과하면 앱이 그렇게 안내합니다.
+- **키 점검** 버튼이 AI 키 · 구글 지도 키 · 보관 폴더 쓰기 권한을 한 번에 ✓/✗로 확인해 줍니다.
+
 ## 문제 해결
 
 | 증상 | 확인 |
@@ -111,5 +139,9 @@ Web Station → **웹 서비스 포털**(또는 웹 서비스 → 생성) → **
 | 연결 테스트 실패 | 주소 끝 `/api` 포함 여부, 토큰 복사 오류, `data.php` 직접 열어 unauthorized 확인 |
 | 저장 오류(storage_error) | 6단계 권한 |
 | AI 상태 「서버에 AI 키가…」 | config.php 키 오타/누락, PHP curl 확장 |
+| 관리자 화면이 「서버에 관리자 기능이 없어요」 | `api/admin.php`가 올라갔는지 |
+| 관리자 비밀번호가 계속 틀림 | config.php의 `ADMIN_TOKEN`이 기본값(`change-me-…`)이면 서버가 거절합니다 |
+| 사진 보관이 「보관할 폴더가…」 | 관리자 화면에서 폴더 이름을 정했는지 |
+| 사진 보관이 「보관 폴더에 쓸 수 없어요」 | `ARCHIVE_DIR` 경로·권한 (관리자 화면의 「키 점검」으로 확인) |
 
 앱 업데이트 방법: 새 빌드가 나오면 `web/travel/` 의 앱 파일들(index.html, assets/, sw.js 등)만 교체 — `api/config.php` 와 `api/data/` 는 그대로 두면 됩니다.

@@ -15,9 +15,25 @@
  *
  * Nothing here is a security boundary. Either person can switch to the other in
  * 설정; the profile answers "누가 썼지?", not "may you?".
+ *
+ * ## 세션마다 다른 두 사람 (M47)
+ *
+ * One address now serves several groups (M46), and the second group is not
+ * songlee and hoyabom. So the administrator may override how each of the two is
+ * **drawn** — a display name and an emoji avatar, per session, delivered on the
+ * `?meta=1` probe like everything else about the server.
+ *
+ * What is deliberately *not* overridable is the pair of **ids**. `song` and
+ * `hoyabom` are written into every card, comment, receipt and read-marker ever
+ * created; renaming them would rewrite history and break `seenBy`'s namespaced
+ * keys. A different group is two people wearing different names, not two
+ * different records. And with no overrides at all — every existing install —
+ * {@link resolveProfile} returns {@link PROFILES} unchanged, byte for byte.
  */
 
 import { create } from 'zustand';
+import { useServerStateStore } from '../stores/serverState';
+import type { ProfileOverrides } from '../sync/api';
 
 /** The two — and only two — people this app is for. */
 export type ProfileId = 'song' | 'hoyabom';
@@ -31,6 +47,13 @@ export interface ProfileDef {
   initials: string;
   /** A token from `utils/colors` — the avatar's fill. */
   colorToken: string;
+  /**
+   * An emoji the administrator chose, drawn instead of {@link initials} (M47).
+   *
+   * Absent by default, which is what keeps every existing screen identical:
+   * the avatar falls back to the initials it has always shown.
+   */
+  avatar?: string;
 }
 
 export const PROFILES: Record<ProfileId, ProfileDef> = {
@@ -136,9 +159,58 @@ export const getActiveProfileId = (): ProfileId | null => useProfileStore.getSta
 /** The active profile's definition, or `null` before anyone has picked. */
 export function useCurrentProfile(): ProfileDef | null {
   const id = useProfileStore((s) => s.profileId);
-  return id ? PROFILES[id] : null;
+  const overrides = useServerStateStore((s) => s.profiles);
+  return id ? resolveProfile(id, overrides) : null;
 }
 
 /** The one this device is *not*. Used by 설정 to show "누가 봤는지". */
 export const otherProfile = (id: ProfileId): ProfileDef =>
   PROFILES[id === 'song' ? 'hoyabom' : 'song'];
+
+/** The id this device is *not*. */
+export const otherProfileId = (id: ProfileId): ProfileId => (id === 'song' ? 'hoyabom' : 'song');
+
+/* ------------------------------------------------------------------ *
+ * 세션별 표시 (M47)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The definition to draw, with the session's overrides folded in.
+ *
+ * Pure, and pure on purpose: this is the one rule the whole feature rests on —
+ * *no overrides means the built-in definition, unchanged* — and it should be
+ * provable without mounting anything. A blank label or a blank emoji is not an
+ * override; it is a field somebody cleared, and the default is what belongs
+ * there.
+ */
+export function resolveProfile(id: ProfileId, overrides?: ProfileOverrides | null): ProfileDef {
+  const base = PROFILES[id];
+  const patch = overrides?.[id];
+  if (!patch) return base;
+
+  const label = typeof patch.label === 'string' ? patch.label.trim() : '';
+  const avatar = typeof patch.avatar === 'string' ? patch.avatar.trim() : '';
+  if (label === '' && avatar === '') return base;
+
+  return {
+    ...base,
+    ...(label ? { label } : {}),
+    ...(avatar ? { avatar } : {}),
+  };
+}
+
+/** {@link resolveProfile} against whatever the server last said (M47). */
+export function useProfileDef(id: ProfileId): ProfileDef {
+  const overrides = useServerStateStore((s) => s.profiles);
+  return resolveProfile(id, overrides);
+}
+
+/** Every profile in picker order, as this session draws them. */
+export function useProfileDefs(): ProfileDef[] {
+  const overrides = useServerStateStore((s) => s.profiles);
+  return PROFILE_IDS.map((id) => resolveProfile(id, overrides));
+}
+
+/** The resolved definition for a profile id, for modules that must not subscribe. */
+export const profileDef = (id: ProfileId): ProfileDef =>
+  resolveProfile(id, useServerStateStore.getState().profiles);

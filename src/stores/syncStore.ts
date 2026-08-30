@@ -30,6 +30,8 @@ export interface SyncState {
   lastError?: string;
   /** Version counter of the server copy we last saw. `0` = never synced. */
   serverVersion: number;
+  /** The newest 복원 stamp this device has already adopted (M47). */
+  lastRestoredAt: number;
 
   /** Sets the status; clears `lastError` unless one is supplied. */
   setStatus: (status: SyncStatus, error?: string) => void;
@@ -37,6 +39,8 @@ export interface SyncState {
   markSynced: (serverVersion: number, at?: Millis) => void;
   /** Updates the known server version without claiming success. */
   setServerVersion: (serverVersion: number) => void;
+  /** Records that a 복원 stamp has been acted on, so it is adopted once (M47). */
+  markRestoreAdopted: (at: number) => void;
   /** Back to a never-configured state (used by 해제). */
   reset: () => void;
 }
@@ -48,21 +52,41 @@ export const useSyncStore = create<SyncState>()((set, get) => ({
   lastSyncedAt: initial.lastSyncedAt,
   lastError: undefined,
   serverVersion: initial.serverVersion,
+  lastRestoredAt: initial.lastRestoredAt ?? 0,
 
   setStatus: (status, error) => set({ status, lastError: error }),
 
   markSynced: (serverVersion, at = Date.now()) => {
     set({ status: 'idle', serverVersion, lastSyncedAt: at, lastError: undefined });
-    saveBookkeeping({ serverVersion, lastSyncedAt: at });
+    saveBookkeeping({ serverVersion, lastSyncedAt: at, lastRestoredAt: get().lastRestoredAt });
   },
 
   setServerVersion: (serverVersion) => {
     set({ serverVersion });
-    saveBookkeeping({ serverVersion, lastSyncedAt: get().lastSyncedAt });
+    saveBookkeeping({
+      serverVersion,
+      lastSyncedAt: get().lastSyncedAt,
+      lastRestoredAt: get().lastRestoredAt,
+    });
+  },
+
+  markRestoreAdopted: (at) => {
+    set({ lastRestoredAt: at });
+    saveBookkeeping({
+      serverVersion: get().serverVersion,
+      lastSyncedAt: get().lastSyncedAt,
+      lastRestoredAt: at,
+    });
   },
 
   reset: () => {
-    set({ status: 'off', serverVersion: 0, lastSyncedAt: undefined, lastError: undefined });
+    set({
+      status: 'off',
+      serverVersion: 0,
+      lastSyncedAt: undefined,
+      lastError: undefined,
+      lastRestoredAt: 0,
+    });
     saveBookkeeping({ serverVersion: 0 });
   },
 }));

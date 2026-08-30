@@ -1,4 +1,4 @@
-import { PROFILES, isProfileId } from '../../profile/profile';
+import { isProfileId, useProfileDef } from '../../profile/profile';
 import { colorHex } from '../../utils/colors';
 
 /** The three places a person's face shows up, and nothing in between. */
@@ -35,11 +35,19 @@ interface AvatarProps {
  * a backup written by some future third profile shows no badge rather than a
  * grey question mark. Every caller can therefore hand it whatever string the
  * model holds without checking first.
+ *
+ * Since M47 the *drawing* can be overridden per session: an emoji the
+ * administrator picked replaces the initials, and the label follows the name
+ * they typed. With no overrides — every existing install — this is the M13
+ * circle exactly as it was.
  */
 export default function Avatar({ id, size = 'sm', className = '', title }: AvatarProps) {
-  if (!isProfileId(id)) return null;
-  const profile = PROFILES[id];
+  // Hooks run before the bail-out: an unknown id is rendered as nothing, but
+  // rules-of-hooks does not care what the component decided afterwards.
+  const known = isProfileId(id);
+  const profile = useProfileDef(known ? id : 'song');
   const { px, font } = SIZES[size];
+  if (!known) return null;
 
   return (
     <span
@@ -53,11 +61,13 @@ export default function Avatar({ id, size = 'sm', className = '', title }: Avata
         width: px,
         height: px,
         backgroundColor: colorHex(profile.colorToken),
-        fontSize: font,
+        // An emoji needs the room the two-letter initials never did, so it is
+        // sized against the circle rather than against the type scale.
+        fontSize: profile.avatar ? Math.round(px * 0.6) : font,
       }}
       className={`inline-grid shrink-0 place-items-center rounded-full font-semibold leading-none tracking-tight text-white select-none ${className}`}
     >
-      {profile.initials}
+      {profile.avatar ?? profile.initials}
     </span>
   );
 }

@@ -9,6 +9,7 @@ import TimelineView from '../timeline/TimelineView';
 import MapView from '../map/MapView';
 import MemoView from '../memo/MemoView';
 import Icon from '../common/Icon';
+import NoticeBanner from '../common/NoticeBanner';
 import PersistBanner from '../common/PersistBanner';
 import ProfilePicker from '../common/ProfilePicker';
 import UndoToast from '../common/UndoToast';
@@ -76,6 +77,10 @@ export default function AppShell() {
             desktop it rides in the top bar's utility zone, and on a phone each
             view mounts the banner variant under its own h1 (M9 §3.5). */}
         <PersistBanner />
+        {/* 공지·보관 안내 (M47) — 저장 실패 배너 **아래**다. 그 배너는 지금
+            이 순간 데이터가 사라지고 있다는 뜻이고, 이것은 읽어 두라는 뜻이다.
+            둘이 같이 뜬 화면에서 순서가 곧 우선순위다. */}
+        <NoticeBanner />
         <View />
       </main>
       <TabBar />

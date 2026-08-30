@@ -49,6 +49,7 @@ import { getPhotoBlob, setRemotePhotoSource } from '../stores/photoBlobs';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import type { Id } from '../types/models';
 import { referencedPhotoIds } from '../utils/photos';
+import { loadServerSession } from './session';
 import { isConfigured, loadSettings, normalizeBaseUrl, type SyncSettings } from './settings';
 
 /** Per-server record of what has been uploaded: `{ [baseUrl]: id[] }`. */
@@ -218,7 +219,15 @@ async function photoRequest(
   try {
     return await fetch(endpoint(settings, id), {
       ...init,
-      headers: { 'X-Sync-Token': settings.token, ...((init.headers as Record<string, string>) ?? {}) },
+      headers: {
+        'X-Sync-Token': settings.token,
+        // 세션 오염 방지 (M46): a PUT or DELETE aimed at a session that is no
+        // longer active is refused with 409 rather than writing a photo into
+        // another group's folder. Sent on reads too — harmless there, and one
+        // header is easier to reason about than two code paths.
+        'X-Session': loadServerSession(),
+        ...((init.headers as Record<string, string>) ?? {}),
+      },
       signal: timeoutSignal(),
       cache: 'no-store',
       credentials: 'omit',
@@ -268,6 +277,14 @@ export async function uploadPendingPhotos(): Promise<void> {
       headers: { 'Content-Type': 'image/jpeg' },
       body: buf,
     });
+
+    if (response?.status === 409) {
+      // 세션이 바뀌었다 (M46). Every remaining photo in this batch belongs to
+      // the workspace we just left, so there is nothing here worth retrying —
+      // the sync engine is already on its way to the new namespace, and its
+      // own photos will be offered on the next cycle.
+      return;
+    }
 
     if (response?.ok) {
       markUploaded(settings.baseUrl, id);

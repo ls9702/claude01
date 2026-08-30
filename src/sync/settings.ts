@@ -36,6 +36,15 @@ export interface SyncBookkeeping {
   serverVersion: number;
   /** When the last successful push/pull finished. */
   lastSyncedAt?: Millis;
+  /**
+   * The newest `restoredAt` this device has already acted on (M47).
+   *
+   * Persisted so a restore is adopted **once**: without it, every reload would
+   * decide the restore is news again and throw away whatever has been edited
+   * since. `0` / absent means "never seen one", which is every device until an
+   * administrator presses 복원.
+   */
+  lastRestoredAt?: Millis;
 }
 
 export const EMPTY_SETTINGS: SyncSettings = { baseUrl: '', token: '' };
@@ -126,7 +135,11 @@ export function loadBookkeeping(): SyncBookkeeping {
     typeof stored?.lastSyncedAt === 'number' && Number.isFinite(stored.lastSyncedAt)
       ? stored.lastSyncedAt
       : undefined;
-  return { serverVersion, lastSyncedAt };
+  const lastRestoredAt =
+    typeof stored?.lastRestoredAt === 'number' && Number.isFinite(stored.lastRestoredAt)
+      ? stored.lastRestoredAt
+      : undefined;
+  return { serverVersion, lastSyncedAt, lastRestoredAt };
 }
 
 /** Persists the `serverVersion` / `lastSyncedAt` pair. */

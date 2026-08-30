@@ -38,10 +38,17 @@
  *
  * ## Storage
  *
- * `DATA_DIR/photos/<id>.jpg`, one flat directory. A two-person trip planner
- * produces hundreds of files, not millions, so sharding would be cosplay.
- * Writes go through a temp file + `rename()` — atomic on one filesystem — so a
- * reader never sees a half-uploaded photo.
+ * `DATA_DIR/sessions/<active>/photos/<id>.jpg`, one flat directory per session
+ * (M46 — it was `DATA_DIR/photos/` before, and `data.php` moves it there on the
+ * first request after the upgrade). A two-person trip planner produces hundreds
+ * of files, not millions, so sharding would be cosplay. Writes go through a
+ * temp file + `rename()` — atomic on one filesystem — so a reader never sees a
+ * half-uploaded photo.
+ *
+ * Writes also carry `X-Session` and are refused with 409 `session_changed` when
+ * it names a session that is no longer the active one — the same guard, and for
+ * the same reason, as the one on `data.php`'s PUT. Reads are not guarded: a GET
+ * for an id the active session does not hold is already a harmless 404.
  *
  * CORS is deliberately absent, same as `data.php`: same-origin deployment.
  */
@@ -59,6 +66,12 @@ const MAX_BODY_BYTES = 600 * 1024;
 
 /** Ids are client-minted nanoids. Anything outside this set never sees the disk. */
 const ID_PATTERN = '/^[A-Za-z0-9_-]{6,64}$/';
+
+/** Session ids that may become a path segment (M46) — same rule as data.php. */
+const SESSION_ID_PATTERN = '/^[a-z0-9][a-z0-9-]{0,31}$/';
+
+/** The session a pre-M46 install becomes, and the fallback whenever none is set. */
+const DEFAULT_SESSION = 'default';
 
 header('X-Content-Type-Options: nosniff');
 
@@ -123,6 +136,31 @@ function write_atomic(string $target, string $contents): bool
     return true;
 }
 
+/**
+ * Which session everybody is looking at right now (M46).
+ *
+ * Copied from `data.php` rather than shared — see the note there; this backend
+ * is a set of files you drop into Web Station, and an include is one more file
+ * that can go missing at deploy time.
+ */
+function active_session(string $dataDir): string
+{
+    $file = $dataDir . '/active.json';
+    if (!is_file($file)) {
+        return DEFAULT_SESSION;
+    }
+    $raw = @file_get_contents($file);
+    if ($raw === false || $raw === '') {
+        return DEFAULT_SESSION;
+    }
+    $parsed = json_decode($raw, true);
+    $id = is_array($parsed) && isset($parsed['active']) ? $parsed['active'] : '';
+    if (!is_string($id) || preg_match(SESSION_ID_PATTERN, $id) !== 1) {
+        return DEFAULT_SESSION;
+    }
+    return $id;
+}
+
 /* ------------------------------------------------------------------ *
  * Configuration
  * ------------------------------------------------------------------ */
@@ -140,7 +178,7 @@ if (!is_array($config) || !isset($config['SYNC_TOKEN'], $config['DATA_DIR'])) {
 }
 
 $syncToken = (string) $config['SYNC_TOKEN'];
-$photoDir  = rtrim((string) $config['DATA_DIR'], '/') . '/photos';
+$dataDir   = rtrim((string) $config['DATA_DIR'], '/');
 
 if ($syncToken === '' || $syncToken === 'change-me-to-a-long-random-string') {
     fail(500, 'not_configured', 'SYNC_TOKEN을 바꿔주세요.');
@@ -156,6 +194,28 @@ if (!is_string($presented) || !hash_equals($syncToken, $presented)) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Which session (M46)
+ *
+ * The legacy move lives in `data.php` alone: it is the endpoint every client
+ * calls first (and on every poll), so by the time a photo request arrives the
+ * layout has long since been migrated. Doing it here too would mean two copies
+ * of a one-time operation, each able to race the other.
+ * ------------------------------------------------------------------ */
+
+$sessionId  = active_session($dataDir);
+$sessionDir = $dataDir . '/sessions/' . $sessionId;
+$photoDir   = $sessionDir . '/photos';
+
+// 보관 (M47) — the same read-only lock `data.php` enforces. A session whose
+// workspace cannot change has no business gaining photos either.
+$archived = false;
+$metaRaw = @file_get_contents($sessionDir . '/session.json');
+if (is_string($metaRaw) && $metaRaw !== '') {
+    $meta = json_decode($metaRaw, true);
+    $archived = is_array($meta) && ($meta['archived'] ?? false) === true;
+}
+
+/* ------------------------------------------------------------------ *
  * Id — the only piece of user input that becomes a path
  * ------------------------------------------------------------------ */
 
@@ -166,6 +226,25 @@ if (!is_string($id) || preg_match(ID_PATTERN, $id) !== 1) {
 
 $file   = $photoDir . '/' . $id . '.jpg';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+/* ------------------------------------------------------------------ *
+ * 세션 오염 방지 (M46) — writes only
+ * ------------------------------------------------------------------ */
+
+$claimedSession = $_SERVER['HTTP_X_SESSION'] ?? '';
+$sessionMismatch =
+    is_string($claimedSession) && $claimedSession !== '' && $claimedSession !== $sessionId;
+
+if ($sessionMismatch && ($method === 'PUT' || $method === 'DELETE')) {
+    // A DELETE is guarded too, and not only for tidiness: the photo GC deletes
+    // ids it believes are unreferenced *in the workspace it is holding*, and
+    // that belief is about the old session.
+    respond(409, ['error' => 'session_changed', 'session' => $sessionId]);
+}
+
+if ($archived && ($method === 'PUT' || $method === 'DELETE')) {
+    fail(423, 'locked', '보관된 세션이에요. 관리자가 보관을 해제해야 저장할 수 있어요.');
+}
 
 /* ------------------------------------------------------------------ *
  * Routing

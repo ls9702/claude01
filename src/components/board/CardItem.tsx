@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
+import { useHoverNote } from '../common/HoverNote';
 import { DND_CARD } from '../../dnd/boardDnd';
 import { isProfileId } from '../../profile/profile';
 import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
@@ -358,7 +359,16 @@ export default function CardItem({
     data: { type: DND_CARD, columnId: card.columnId },
   });
 
+  /**
+   * 메모 미리보기 (M47) — the truncated line on the surface says a note exists;
+   * this says what it is. Desktop pointers only, and attached to the drag
+   * wrapper rather than to the surface so the rectangle it measures is the card
+   * the eye sees.
+   */
+  const hoverNote = useHoverNote(card.memo, 'card-note-hover');
+
   return (
+    <>
     <div
       ref={setNodeRef}
       style={{
@@ -371,6 +381,7 @@ export default function CardItem({
       }}
       {...attributes}
       {...listeners}
+      {...hoverNote.anchorProps}
       onClick={() => onOpen(card)}
       data-testid="board-card"
       data-card-id={card.id}
@@ -391,5 +402,7 @@ export default function CardItem({
         onToggleDone={onToggleDone ? () => onToggleDone(card) : undefined}
       />
     </div>
+    {hoverNote.popover}
+    </>
   );
 }

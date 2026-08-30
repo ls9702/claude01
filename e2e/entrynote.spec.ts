@@ -145,11 +145,12 @@ test('배치에 메모를 달면 모서리에 자국이 서고, 비우면 사라
   const after = await block.boundingBox();
   expect(Math.round(after?.height ?? 0)).toBe(Math.round(before?.height ?? 0));
 
-  // 데스크톱 호버 미리보기 — 카드 이름·시각 아래에 메모의 앞 줄들이 붙는다.
+  // 데스크톱 호버 미리보기는 M47에서 브라우저 기본 툴팁 대신 팝오버가 됐다
+  // (`e2e/hovernote.spec.ts`가 그 내용을 검사한다). `title`은 M39 이전처럼
+  // 카드 이름과 시각만 말한다 — 둘 다 뜨면 같은 블록 위에 툴팁이 두 개다.
   const tooltip = await block.getAttribute('title');
   expect(tooltip).toContain('이치란');
-  expect(tooltip).toContain('개장 30분 전 도착');
-  expect(tooltip).toContain('짐은 호텔에 맡기고 출발');
+  expect(tooltip).not.toContain('개장 30분 전 도착');
 
   // 자국은 탭을 가로채지 않는다 — 그 위를 눌러도 열리는 것은 상세 시트다.
   const markBox = await page.getByTestId('entry-note-mark').boundingBox();

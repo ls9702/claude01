@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, TimelineEntry } from '../../types/models';
 import type { VisualPlacement } from '../../timeline/dayWindow';
 import { noteHint } from '../../timeline/entryNote';
+import { useHoverNote } from '../common/HoverNote';
 import { PX_PER_MIN, type LaneBox } from '../../timeline/layout';
 import { colorClasses } from '../../utils/colors';
 import { FLIGHT_CARD_PREFIX } from '../../utils/flights';
@@ -206,6 +207,17 @@ export default function EntryBlock({
   /** '' when this placement carries no memo — the one test both marks use. */
   const hint = noteHint(entry.note);
 
+  /**
+   * 메모 미리보기 (M47).
+   *
+   * This replaces M39's `title=` note line rather than joining it: the native
+   * tooltip and the popover would otherwise both appear over the same block,
+   * one 300ms after the pointer stops and the other a second later. The title
+   * keeps the card name and the time range, which is what it said before the
+   * note was ever put in it.
+   */
+  const hoverNote = useHoverNote(entry.note, 'entry-note-hover');
+
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     // Keep the drag sensor out of it: this gesture belongs to the handle.
     event.preventDefault();
@@ -257,13 +269,8 @@ export default function EntryBlock({
       data-dawn={placement.dawn ? 'true' : 'false'}
       data-clipped={placement.clipped ? 'true' : 'false'}
       data-note={hint === '' ? 'false' : 'true'}
-      // 데스크톱에서 거의 공짜로 얻는 미리보기 — 메모의 앞 두 줄까지만 (M39).
-      title={[
-        `${card?.title ?? ''} ${formatTimeRange(entry.startMin, entry.durationMin)}`,
-        hint,
-      ]
-        .filter((line) => line !== '')
-        .join('\n')}
+      {...hoverNote.anchorProps}
+      title={`${card?.title ?? ''} ${formatTimeRange(entry.startMin, entry.durationMin)}`}
       style={{
         position: 'absolute',
         top: minToY(placement.offsetMin, PX_PER_MIN),
@@ -291,6 +298,7 @@ export default function EntryBlock({
         dawn={placement.dawn}
         hasNote={hint !== ''}
       />
+      {hoverNote.popover}
 
       {resizable ? (
       <div

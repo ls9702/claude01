@@ -7,6 +7,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import AiAskButton from '../ai/AiAskButton';
 import Icon, { type IconName } from '../common/Icon';
 import PatchNotesButton from '../common/PatchNotesButton';
+import PhotoArchiveButton from '../common/PhotoArchiveButton';
 import SyncStatusChip from '../common/SyncStatusChip';
 import { UNREAD_BADGE_CLASS } from '../common/formStyles';
 
@@ -112,6 +113,9 @@ export default function TabBar() {
             tab bar with things in it that are not tabs is not a tab bar. */}
         {isDesktop ? (
           <div className="ml-auto flex items-center gap-2">
+            {/* 사진 보관 (M46) — 유틸 존의 첫 자리. 패치노트·AI와 같은 34px
+                아이콘 버튼 하나이고, 서버가 없는 기기에서는 스스로 사라진다. */}
+            <PhotoArchiveButton />
             <PatchNotesButton />
             <AiAskButton />
             <SyncStatusChip />

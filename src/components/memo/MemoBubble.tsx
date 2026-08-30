@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PROFILES, isProfileId } from '../../profile/profile';
+import { isProfileId, useProfileDef } from '../../profile/profile';
 import { usePhotoUrl } from '../../stores/photoBlobs';
 import { memoClock, isRemoved } from '../../memo/thread';
 import type { CardPhoto, MemoMessage } from '../../types/models';
@@ -90,7 +90,8 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
 
   const removed = isRemoved(memo);
   const photos = memo.photos ?? [];
-  const authorLabel = isProfileId(memo.by) ? PROFILES[memo.by].label : null;
+  const author = useProfileDef(isProfileId(memo.by) ? memo.by : 'song');
+  const authorLabel = isProfileId(memo.by) ? author.label : null;
   /** Only one's own live message has a menu to offer. */
   const deletable = own && !removed;
 

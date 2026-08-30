@@ -1,5 +1,10 @@
 import { createPortal } from 'react-dom';
-import { PROFILES, PROFILE_IDS, useProfileStore, type ProfileId } from '../../profile/profile';
+import {
+  PROFILE_IDS,
+  useProfileDefs,
+  useProfileStore,
+  type ProfileId,
+} from '../../profile/profile';
 import Avatar from './Avatar';
 import { SECONDARY_BUTTON_CLASS } from './formStyles';
 
@@ -28,6 +33,8 @@ interface ProfilePickerProps {
  */
 export default function ProfilePicker({ onCancel, onChosen }: ProfilePickerProps) {
   const setProfile = useProfileStore((s) => s.setProfile);
+  // 세션이 정한 이름 (M47) — `PROFILE_IDS` 순서와 같은 배열이라 인덱스로 짝짓는다.
+  const labels = useProfileDefs().map((profile) => profile.label);
 
   const choose = (id: ProfileId): void => {
     setProfile(id);
@@ -50,7 +57,7 @@ export default function ProfilePicker({ onCancel, onChosen }: ProfilePickerProps
       </div>
 
       <div className="flex w-full max-w-sm flex-col gap-3 sm:flex-row sm:justify-center">
-        {PROFILE_IDS.map((id) => (
+        {PROFILE_IDS.map((id, index) => (
           <button
             key={id}
             type="button"
@@ -65,7 +72,7 @@ export default function ProfilePicker({ onCancel, onChosen }: ProfilePickerProps
             ].join(' ')}
           >
             <Avatar id={id} size="lg" />
-            <span className="text-title text-ink">{PROFILES[id].label}</span>
+            <span className="text-title text-ink">{labels[index]}</span>
           </button>
         ))}
       </div>

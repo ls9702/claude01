@@ -16,6 +16,7 @@
  */
 
 import type { Millis, Workspace } from '../types/models';
+import { isValidSessionId, loadServerSession } from './session';
 import { isConfigured, loadSettings, normalizeBaseUrl, type SyncSettings } from './settings';
 
 /** How long a single request may take before we call it offline. */
@@ -32,7 +33,14 @@ export type SyncErrorKind =
   /** Any other non-2xx from the server. */
   | 'server'
   /** 2xx whose body was not the JSON we expect. */
-  | 'parse';
+  | 'parse'
+  /**
+   * 423 — the administrator put this session in 보관 (read-only, M47). Edits
+   * stay on the device and nothing is lost; the server simply will not take
+   * them. Retrying does not help until somebody unlocks it, which is why it is
+   * its own kind rather than a `server` error with a nicer message.
+   */
+  | 'locked';
 
 /** Typed failure from any of the three calls. */
 export class SyncError extends Error {
@@ -52,17 +60,77 @@ export class SyncError extends Error {
 export interface SyncMeta {
   version: number;
   updatedAt: Millis;
+  /**
+   * Which workspace the server is serving (M46), when it is new enough to say.
+   *
+   * Additive on both sides: a pre-M46 server simply omits it and every caller
+   * here treats that as "the session cannot have changed", which is exactly
+   * true for a server that only has one.
+   */
+  session?: string;
+  /** Is the active session read-only right now (M47 보관)? */
+  locked?: boolean;
+  /** The administrator's 공지, or `null` when there is none (M47). */
+  notice?: ServerNotice | null;
+  /** Per-session display overrides for the two profiles (M47). */
+  profiles?: ProfileOverrides | null;
+  /**
+   * When the administrator last restored this session from a backup (M47).
+   *
+   * `0` for a session that has never been restored, and for a pre-M47 server.
+   * The engine treats a stamp newer than the one it last acted on as "adopt the
+   * server copy whole" — see `syncEngine.pullMerge`.
+   */
+  restoredAt?: Millis;
 }
+
+/** One 공지 line the administrator posted (M47). */
+export interface ServerNotice {
+  text: string;
+  /** When it was posted — what makes a re-posted identical line show again. */
+  at: Millis;
+}
+
+/**
+ * What the administrator may change about how a person is drawn (M47).
+ *
+ * Presentation only, keyed by the two profile ids the app has always had.
+ * The **ids** stay `song` / `hoyabom` because they are written into every card,
+ * comment and receipt — renaming those would rewrite history. What is on the
+ * screen is a label and an avatar, and those are the two things a different
+ * group of two people actually needs to change.
+ */
+export type ProfileOverrides = Record<string, { label?: string; avatar?: string }>;
 
 /** {@link SyncMeta} with the payload attached. */
 export interface SyncEnvelope extends SyncMeta {
   data: Workspace;
 }
 
-/** Outcome of a {@link push}: accepted, or rejected with the server's copy. */
+/**
+ * A workspace GET, session and all (M46).
+ *
+ * The session arrives even when the envelope does not: a 404 means "the active
+ * session has nothing yet", and *which* empty session that is decides whether
+ * this device may push its copy into it. Pushing session A's trips into a
+ * freshly created session B is the exact accident this milestone exists to make
+ * impossible, so the 404 has to be able to say the id too.
+ */
+export interface WorkspaceFetch {
+  session: string | null;
+  envelope: SyncEnvelope | null;
+}
+
+/**
+ * Outcome of a {@link push}: accepted, rejected with the server's copy, or
+ * refused because the administrator moved everyone somewhere else mid-edit
+ * (M46 — `409 session_changed`, which is *not* a version conflict and must not
+ * be merged its way out of).
+ */
 export type PushResult =
   | { ok: true; version: number; updatedAt: Millis }
-  | { ok: false; conflict: SyncEnvelope };
+  | { ok: false; conflict: SyncEnvelope }
+  | { ok: false; sessionChanged: true; session: string | null };
 
 /** Korean, user-facing message for a failure kind. */
 const MESSAGES: Record<SyncErrorKind, string> = {
@@ -71,6 +139,7 @@ const MESSAGES: Record<SyncErrorKind, string> = {
   auth: '토큰이 올바르지 않아요',
   server: '서버가 오류를 돌려줬어요',
   parse: '서버 응답을 이해할 수 없어요',
+  locked: '보관된 세션이라 저장되지 않아요 (읽기 전용)',
 };
 
 /**
@@ -128,6 +197,9 @@ function statusError(response: Response): SyncError {
   if (response.status === 401 || response.status === 403) {
     return new SyncError('auth', MESSAGES.auth, response.status);
   }
+  if (response.status === 423) {
+    return new SyncError('locked', MESSAGES.locked, response.status);
+  }
   return new SyncError('server', `${MESSAGES.server} (HTTP ${response.status})`, response.status);
 }
 
@@ -142,14 +214,60 @@ async function parseJson(response: Response): Promise<unknown> {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
+/** The session id in a body, or `null` — junk and absence are the same thing. */
+const readSession = (body: unknown): string | null => {
+  const value = isRecord(body) ? body.session : null;
+  return isValidSessionId(value) ? value : null;
+};
+
+/**
+ * The 공지 in a body (M47), or `null`.
+ *
+ * `null` for a body that has no `notice` key **and** for one whose `notice` is
+ * explicitly null — "the administrator took the notice down" and "this server
+ * has never heard of notices" reach the banner as the same absence, which is
+ * the only reading under which a pre-M47 server behaves like it always did.
+ */
+export function readNotice(body: unknown): ServerNotice | null {
+  const raw = isRecord(body) ? body.notice : null;
+  if (!isRecord(raw)) return null;
+  const text = typeof raw.text === 'string' ? raw.text.trim() : '';
+  if (text === '') return null;
+  return { text, at: typeof raw.at === 'number' ? raw.at : 0 };
+}
+
+/** The per-session profile overrides in a body (M47), or `null`. */
+export function readProfileOverrides(body: unknown): ProfileOverrides | null {
+  const raw = isRecord(body) ? body.profiles : null;
+  if (!isRecord(raw)) return null;
+
+  const out: ProfileOverrides = {};
+  for (const [id, value] of Object.entries(raw)) {
+    if (!isRecord(value)) continue;
+    const label = typeof value.label === 'string' ? value.label.trim() : '';
+    const avatar = typeof value.avatar === 'string' ? value.avatar.trim() : '';
+    // An override that overrides nothing is not stored: the defaults must stay
+    // the defaults, byte for byte, on a server that has never been edited.
+    if (label === '' && avatar === '') continue;
+    out[id] = { ...(label ? { label } : {}), ...(avatar ? { avatar } : {}) };
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /** Narrows a raw body to {@link SyncMeta}, or throws `SyncError('parse')`. */
 function asMeta(body: unknown, status: number): SyncMeta {
   if (!isRecord(body) || typeof body.version !== 'number') {
     throw new SyncError('parse', MESSAGES.parse, status);
   }
+  const session = readSession(body);
   return {
     version: body.version,
     updatedAt: typeof body.updatedAt === 'number' ? body.updatedAt : 0,
+    ...(session ? { session } : {}),
+    locked: body.locked === true,
+    notice: readNotice(body),
+    profiles: readProfileOverrides(body),
+    restoredAt: typeof body.restoredAt === 'number' ? body.restoredAt : 0,
   };
 }
 
@@ -219,15 +337,43 @@ export async function fetchMeta(settings: SyncSettings = loadSettings()): Promis
 }
 
 /**
- * The full server copy, or `null` when the server has no workspace yet — a
- * fresh NAS answers 404, and the engine treats that as "push mine as v1".
+ * The full server copy plus the session it belongs to (M46).
+ *
+ * The session survives a 404 on purpose — see {@link WorkspaceFetch}. A body
+ * that cannot be parsed at all on the 404 path is not an error either: an
+ * unknown session simply means "this server does not do sessions", which is the
+ * pre-M46 behaviour the engine already knows how to handle.
  */
-export async function fetchAll(settings: SyncSettings = loadSettings()): Promise<SyncEnvelope | null> {
+export async function fetchWorkspace(
+  settings: SyncSettings = loadSettings(),
+): Promise<WorkspaceFetch> {
   requireConfigured(settings);
   const response = await request(endpoint(settings), settings, { method: 'GET' });
-  if (response.status === 404) return null;
+
+  if (response.status === 404) {
+    let session: string | null = null;
+    try {
+      session = readSession(await response.json());
+    } catch {
+      /* pre-M46 servers answer a bare {"error":"not_found"} */
+    }
+    return { session, envelope: null };
+  }
   if (!response.ok) throw statusError(response);
-  return asEnvelope(await parseJson(response), response.status);
+
+  const envelope = asEnvelope(await parseJson(response), response.status);
+  return { session: envelope.session ?? null, envelope };
+}
+
+/**
+ * The full server copy, or `null` when the server has no workspace yet — a
+ * fresh NAS answers 404, and the engine treats that as "push mine as v1".
+ *
+ * Kept as the plain shape for callers that have no interest in sessions; the
+ * engine uses {@link fetchWorkspace} because it very much does.
+ */
+export async function fetchAll(settings: SyncSettings = loadSettings()): Promise<SyncEnvelope | null> {
+  return (await fetchWorkspace(settings)).envelope;
 }
 
 /**
@@ -239,16 +385,31 @@ export async function push(
   baseVersion: number,
   data: Workspace,
   settings: SyncSettings = loadSettings(),
+  sessionId: string = loadServerSession(),
 ): Promise<PushResult> {
   requireConfigured(settings);
   const response = await request(endpoint(settings), settings, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // 세션 오염 방지 (M46): the server refuses this write outright if the
+      // administrator has since moved everyone somewhere else. Saying which
+      // workspace an edit was built on is the client's whole share of that
+      // guarantee — the enforcement is deliberately on the far side.
+      'X-Session': sessionId,
+    },
     body: JSON.stringify({ baseVersion, data }),
   });
 
   if (response.status === 409) {
-    return { ok: false, conflict: asEnvelope(await parseJson(response), response.status) };
+    const body = await parseJson(response);
+    // Two different 409s. A version conflict hands back a workspace to merge;
+    // `session_changed` hands back an id, and merging is precisely what must
+    // not happen — the local copy belongs to a different trip entirely.
+    if (isRecord(body) && body.error === 'session_changed') {
+      return { ok: false, sessionChanged: true, session: readSession(body) };
+    }
+    return { ok: false, conflict: asEnvelope(body, response.status) };
   }
   if (!response.ok) throw statusError(response);
 
