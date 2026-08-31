@@ -71,6 +71,36 @@ describe('placeHoverPopover', () => {
     expect(placed.top).toBe(HOVER_MARGIN_PX);
   });
 
+  // 표식 탭 (M48) — 폰에서도 같은 함수가 자리를 잡는다. 390px에는 카드 옆에
+  // 280px를 세울 자리가 어느 쪽에도 없으므로, 유일하게 참이어야 하는 것은
+  // 「화면 밖으로 나가지 않는다」다.
+  it('390px 폰에서 보드 카드 옆이든 위든 창 안에 들어온다', () => {
+    const phone = { width: 390, height: 844 };
+    const placed = placeHoverPopover({
+      // 폰의 보드 카드는 화면 폭을 거의 다 쓴다.
+      anchor: { left: 16, top: 300, width: 358, height: 92 },
+      popover: { width: 280, height: 64 },
+      viewport: phone,
+    });
+    expect(placed.left).toBeGreaterThanOrEqual(HOVER_MARGIN_PX);
+    expect(placed.left + 280).toBeLessThanOrEqual(phone.width - HOVER_MARGIN_PX);
+    expect(placed.top).toBeGreaterThanOrEqual(HOVER_MARGIN_PX);
+    expect(placed.top + 64).toBeLessThanOrEqual(phone.height - HOVER_MARGIN_PX);
+  });
+
+  it('390px 폰에서 일정 그리드 맨 아래 블록도 창 안에 들어온다', () => {
+    const phone = { width: 390, height: 844 };
+    const placed = placeHoverPopover({
+      // 하단 탭 바 위, 창 바닥에 걸친 15분짜리 블록.
+      anchor: { left: 60, top: 820, width: 300, height: 14 },
+      popover: { width: 280, height: 120 },
+      viewport: phone,
+    });
+    expect(placed.left).toBeGreaterThanOrEqual(HOVER_MARGIN_PX);
+    expect(placed.left + 280).toBeLessThanOrEqual(phone.width - HOVER_MARGIN_PX);
+    expect(placed.top).toBe(phone.height - 120 - HOVER_MARGIN_PX);
+  });
+
   it('gap과 margin은 바꿀 수 있다', () => {
     const placed = placeHoverPopover({
       anchor: { left: 0, top: 0, width: 100, height: 40 },

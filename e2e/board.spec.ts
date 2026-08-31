@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-const SEED_COLUMN_NAMES = ['이동수단', '할일', '식사', '숙소', '볼거리'];
+const SEED_COLUMN_NAMES = ['이동수단', '할일', '식사', '숙소', '볼거리', '맛집'];
 
 /** Creates a trip from the 여행 tab and opens its board. */
 async function createTrip(page: Page, title: string): Promise<void> {
@@ -69,11 +69,12 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('tab-bar')).toBeVisible();
 });
 
-test('여행을 만들면 보드에 기본 카테고리 5개가 생긴다', async ({ page }) => {
+test('여행을 만들면 보드에 기본 카테고리 6개가 생긴다', async ({ page }) => {
   await createTrip(page, '오사카 3박4일');
 
   const columns = page.getByTestId('board-column');
-  await expect(columns).toHaveCount(5);
+  // M49 — 「맛집」이 여섯 번째 씨앗 칸으로 붙었다.
+  await expect(columns).toHaveCount(6);
   await expect(columns).toContainText(SEED_COLUMN_NAMES);
   await expect(page.getByTestId('board-trip-title')).toHaveText('오사카 3박4일');
   await expect(page.getByTestId('add-column')).toBeVisible();
@@ -131,7 +132,7 @@ test('새로고침해도 IndexedDB에 저장된 보드가 남아 있다', async 
   await expect(page.getByTestId('board-trip-option')).toHaveCount(0);
 
   const columns = page.getByTestId('board-column');
-  await expect(columns).toHaveCount(5);
+  await expect(columns).toHaveCount(6);
   await expect(columns.nth(2).getByTestId('board-card')).toHaveCount(1);
   await expect(columns.nth(2)).toContainText('반쎄오 맛집');
 
@@ -165,8 +166,8 @@ test('＋ 카테고리로 칸을 추가한다', async ({ page }) => {
   await page.getByTestId('add-column-submit').click();
 
   const columns = page.getByTestId('board-column');
-  await expect(columns).toHaveCount(6);
-  await expect(columns.nth(5)).toContainText('쇼핑');
+  await expect(columns).toHaveCount(7);
+  await expect(columns.nth(6)).toContainText('쇼핑');
 });
 
 /**

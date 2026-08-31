@@ -23,6 +23,11 @@ export interface ColumnFormValues {
    * 참/거짓 둘 중 하나다 — 「없음」은 자동 이행의 상태다.
    */
   budgetOnce: boolean;
+  /**
+   * 우리 맛집 칸인가 (M49). `todo`와 같은 이유로 언제나 참/거짓 둘 중 하나다 —
+   * 「없음」은 상설 칸의 자동 이행이 쓰는 상태다.
+   */
+  gourmet: boolean;
 }
 
 /**
@@ -102,6 +107,7 @@ export default function ColumnEditSheet({
   );
   const [todo, setTodo] = useState(column.todo === true);
   const [budgetOnce, setBudgetOnce] = useState(column.budgetOnce === true);
+  const [gourmet, setGourmet] = useState(column.gourmet === true);
 
   const canSubmit = name.trim().length > 0;
 
@@ -127,7 +133,7 @@ export default function ColumnEditSheet({
             data-testid="column-submit"
             disabled={!canSubmit}
             onClick={() =>
-              canSubmit && onSubmit({ name: name.trim(), color, icon, todo, budgetOnce })
+              canSubmit && onSubmit({ name: name.trim(), color, icon, todo, budgetOnce, gourmet })
             }
             className={`flex-1 ${PRIMARY_BUTTON_CLASS}`}
           >
@@ -167,6 +173,17 @@ export default function ColumnEditSheet({
         checked={budgetOnce}
         onToggle={() => setBudgetOnce((current) => !current)}
         testId="column-budget-once-toggle"
+      />
+
+      {/* M49 — 우리가 고른 맛집 목록. 켜면 카드마다 장르 픽커가 생기고, 지도의
+          ⭐ 층이 이 칸의 위치 있는 카드를 전부 올린다. 끄면 「명시적 false」가
+          남아 상설 칸의 자동 이행이 이 여행을 다시 건드리지 않는다. */}
+      <ColumnBehaviorToggle
+        title="우리 맛집 카테고리"
+        description="가 보고 싶은 집들을 모아 두는 칸이에요. 카드마다 장르를 고를 수 있고, 지도의 ⭐ 버튼으로 켜고 끄며 봐요."
+        checked={gourmet}
+        onToggle={() => setGourmet((current) => !current)}
+        testId="column-gourmet-toggle"
       />
 
       {!canDelete ? (

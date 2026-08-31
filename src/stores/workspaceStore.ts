@@ -59,7 +59,17 @@ export type ColumnPatch = Partial<Pick<BoardColumn, 'name' | 'color' | 'icon'>>;
  * the `cardOrder` arrays stay in sync. Passing `undefined` clears a field.
  */
 export type CardPatch = Partial<
-  Pick<Card, 'title' | 'memo' | 'url' | 'location' | 'budget' | 'defaultDurationMin'>
+  Pick<
+    Card,
+    | 'title'
+    | 'memo'
+    | 'url'
+    | 'location'
+    | 'budget'
+    | 'defaultDurationMin'
+    /** M49 — 장르 칩을 다시 눌러 해제하면 `undefined`가 실려 비워진다. */
+    | 'gourmetGenre'
+  >
 >;
 
 /**
@@ -118,9 +128,11 @@ export interface NewCardData {
   location?: GeoPoint;
   budget?: number;
   defaultDurationMin?: number;
+  /** 맛집 카드의 장르 (M49) — 맛집 칸의 편집 시트만 이 값을 싣는다. */
+  gourmetGenre?: string;
 }
 
-/** One of the five columns seeded into every new trip. */
+/** One of the columns seeded into every new trip. */
 export interface SeedColumn {
   name: string;
   color: string;
@@ -129,6 +141,8 @@ export interface SeedColumn {
   todo?: boolean;
   /** 예산을 시트마다 한 번만 세는 칸인가 (M31). 없으면 배치 단위. */
   budgetOnce?: boolean;
+  /** 우리가 고른 맛집 칸인가 (M49). 없으면 평범한 칸. */
+  gourmet?: boolean;
 }
 
 /**
@@ -148,6 +162,12 @@ export const SEED_COLUMNS: readonly SeedColumn[] = [
   // 결제는 한 번이고, 배치 단위로 세면 40만원이 160만원이 된다.
   { name: '숙소', color: 'rose', icon: '🏨', budgetOnce: true },
   { name: '볼거리', color: 'emerald', icon: '🎡' },
+  // 「맛집」은 처음부터 우리 목록이다 (M49): 🍽️ 식사가 「이번 여행에서 밥을
+  // 언제 먹나」의 칸이라면 이 칸은 「가 보고 싶은 집들」의 칸이고, 카드마다 장르
+  // 이모지를 달아 지도에서 켜고 끄며 본다. 맨 뒤에 서는 이유는 앞의 다섯이
+  // M0부터 이 순서였기 때문이다 — 새 칸 하나 때문에 사람이 외운 자리가 밀리면
+  // 그건 새 기능이 아니라 이사다.
+  { name: '맛집', color: 'orange', icon: '🍚', gourmet: true },
 ];
 
 /* ------------------------------------------------------------------ *
@@ -489,6 +509,15 @@ export interface WorkspaceState {
    */
   setColumnBudgetOnce: (id: Id, budgetOnce: boolean) => void;
   /**
+   * 이 칸을 「우리 맛집」 칸으로 켜거나 끈다 (M49).
+   *
+   * {@link setColumnTodo}·{@link setColumnBudgetOnce}와 **같은 이유로** 여기
+   * 있다: 끄기가 필드를 지우는 것이 아니라 **명시적 `false`를 남기는** 것이어야
+   * 상설 칸의 자동 이행(`board/gourmetColumn.ts`)이 그 칸을, 그리고 그 여행을
+   * 다시 건드리지 않는다. No-op for an unknown id.
+   */
+  setColumnGourmet: (id: Id, gourmet: boolean) => void;
+  /**
    * Deletes a column, moving its cards to the trip's first remaining column.
    * Returns `false` (and changes nothing) when the column is unknown or is the
    * trip's last one — a board always keeps at least one category.
@@ -789,6 +818,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 ...(seed.todo ? { todo: true } : {}),
                 // 같은 이유로 같은 모양 (M31): 평범한 칸에는 키가 아예 없다.
                 ...(seed.budgetOnce ? { budgetOnce: true } : {}),
+                // 그리고 세 번째 (M49) — 맛집 칸도 키를 든 칸만 든다.
+                ...(seed.gourmet ? { gourmet: true } : {}),
                 cardOrder: [],
                 createdAt: now,
                 updatedAt: now,
@@ -911,6 +942,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             // 같은 값이면 아무 일도 없다 — `setColumnTodo`와 같은 이유다.
             if (column.budgetOnce === budgetOnce) return null;
             return touch<BoardColumn>(draft.columns, id, { budgetOnce }, now);
+          });
+        },
+
+        setColumnGourmet: (id, gourmet) => {
+          run((draft, now) => {
+            const column = draft.columns[id];
+            if (!column) return null;
+            // 같은 값이면 아무 일도 없다 — `setColumnTodo`와 같은 이유다.
+            if (column.gourmet === gourmet) return null;
+            return touch<BoardColumn>(draft.columns, id, { gourmet }, now);
           });
         },
 

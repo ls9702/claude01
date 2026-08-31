@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
-import { useHoverNote } from '../common/HoverNote';
+import { useHoverNote, type NoteMarkProps } from '../common/HoverNote';
 import { DND_CARD } from '../../dnd/boardDnd';
 import { isProfileId } from '../../profile/profile';
 import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
@@ -11,6 +11,7 @@ import { formatBudget } from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
 import { isCardDone } from '../../todo/checklist';
+import { USER_GENRE_EMOJI, USER_GENRE_LABEL, userGenreOf } from '../../gourmet/userGenres';
 import Avatar from '../common/Avatar';
 import Icon, { type IconName } from '../common/Icon';
 import TodoCheck from '../common/TodoCheck';
@@ -52,6 +53,11 @@ interface CardSurfaceProps {
    * 유령 카드처럼 누를 수 없는 사본이 쓰는 길이다.
    */
   onToggleDone?: () => void;
+  /**
+   * 메모 줄을 **누를 수 있게** 만드는 손잡이 (M48). 없으면 메모 줄은 예전 그대로
+   * 읽기만 하는 한 줄이다 — 체크박스와 같은 규칙이고, 같은 이유(유령 카드)다.
+   */
+  noteMarkProps?: NoteMarkProps;
 }
 
 /** How many chips a card may show before the rest fold into `＋N`. */
@@ -77,12 +83,22 @@ export function CardSurface({
   hasNewComments = false,
   todo = false,
   onToggleDone,
+  noteMarkProps,
 }: CardSurfaceProps) {
   const colors = colorClasses(color);
   // 트레이의 terse 카드는 끌기 위한 손잡이라 상자를 달지 않는다 — 아바타와
   // NEW가 같은 이유로 빠져 있는 자리다.
   const showCheck = todo && !terse;
   const done = showCheck && isCardDone(card);
+  /**
+   * 이 카드가 든 맛집 장르 (M49) — 모르는 값은 `null`이라 아무것도 그리지 않는다.
+   *
+   * 칸이 맛집 칸인지 **묻지 않는다**: 그건 픽커를 그릴지의 규칙이고
+   * (`CardEditSheetProps.gourmet`), 카드를 옮겼다고 그 집이 라멘집이 아니게 되지는
+   * 않는다 (`Card.doneAt`이 체크리스트 칸을 묻지 않는 것과 같은 결정). 트레이의
+   * terse 카드에는 서지 않는다 — 거기 제목 줄은 끌기 위한 손잡이다.
+   */
+  const genre = terse ? null : userGenreOf(card.gourmetGenre);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const badgeRef = useRef<HTMLDivElement | null>(null);
   const hasBreakdown = (scheduleBreakdown?.length ?? 0) > 0;
@@ -194,6 +210,21 @@ export function CardSurface({
             </span>
           )
         ) : null}
+        {/* 장르 이모지 (M49) — 제목 **앞**, 체크박스와 같은 자리 규칙이다.
+            칩 줄에 넣지 않은 이유는 M48이 📝 표식을 칩으로 넣지 않은 이유와 같다:
+            칩은 우선순위대로 ＋N으로 접히는 자리라, 정작 바쁜 카드에서 이름표가
+            사라진다. 여기 있으면 접히지 않고, 카드 높이도 늘지 않는다. */}
+        {genre ? (
+          <span
+            data-testid="card-genre-mark"
+            data-genre={genre}
+            title={USER_GENRE_LABEL[genre]}
+            aria-label={USER_GENRE_LABEL[genre]}
+            className="shrink-0 text-label leading-tight"
+          >
+            <span aria-hidden="true">{USER_GENRE_EMOJI[genre]}</span>
+          </span>
+        ) : null}
         <h3
           data-done={done ? 'true' : 'false'}
           className={[
@@ -288,8 +319,40 @@ export function CardSurface({
         ) : null}
       </div>
 
+      {/* 메모 줄 — 그리고 M48부터는 그 **끝에 표식 하나**가 선다.
+
+          폰에서 메모를 통째로 보려면 누를 자리가 필요하고, 카드의 탭(편집)과
+          롱프레스(드래그)는 이미 임자가 있다. 그래서 표식을 하나 만든다.
+
+          **줄 전체를 탭 타깃으로 삼지 않는다.** 잘린 줄을 눌러 펼치는 것이 말은
+          되지만, 이 줄은 카드 한가운데를 가로지른다 — 그 자리를 가져가면 카드
+          가운데를 눌러 카드를 여는 길이 막힌다(실제로 막혔다). 표식은 줄 끝의
+          32px 하나로 족하다.
+
+          칩 줄에 📝 칩으로 넣지 않은 이유도 같은 종류다: 칩은 우선순위대로 ＋N
+          으로 접히는 자리라(사진 칩이 늘 먼저 접힌다) 정작 바쁜 카드에서 표식이
+          사라진다. 카드 높이는 그대로다 — 32px 버튼의 위아래 9px를 마진으로
+          되돌려 놓아 줄 높이가 글자 한 줄 그대로다. */}
       {card.memo && !terse ? (
-        <p className="mt-1 truncate text-micro font-normal text-ink-faint">{card.memo}</p>
+        noteMarkProps ? (
+          <div className="mt-1 flex items-center gap-1">
+            <p className="min-w-0 flex-1 truncate text-micro font-normal text-ink-faint">
+              {card.memo}
+            </p>
+            <button
+              type="button"
+              data-testid="card-note-mark"
+              aria-label="메모 보기"
+              {...noteMarkProps}
+              style={{ marginTop: -9, marginBottom: -9, touchAction: 'manipulation' }}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-micro leading-none transition-colors duration-[140ms] ease-quick hover:bg-sunken"
+            >
+              <span aria-hidden="true">📝</span>
+            </button>
+          </div>
+        ) : (
+          <p className="mt-1 truncate text-micro font-normal text-ink-faint">{card.memo}</p>
+        )
       ) : null}
 
       {shown.length > 0 ? (
@@ -360,10 +423,10 @@ export default function CardItem({
   });
 
   /**
-   * 메모 미리보기 (M47) — the truncated line on the surface says a note exists;
-   * this says what it is. Desktop pointers only, and attached to the drag
-   * wrapper rather than to the surface so the rectangle it measures is the card
-   * the eye sees.
+   * 메모 미리보기 (M47) + 메모 줄 탭 (M48) — the truncated line on the surface
+   * says a note exists; this says what it is. Hover is desktop pointers only;
+   * the tap works anywhere, and both are attached to the drag wrapper rather
+   * than to the surface so the rectangle they measure is the card the eye sees.
    */
   const hoverNote = useHoverNote(card.memo, 'card-note-hover');
 
@@ -400,6 +463,7 @@ export default function CardItem({
         hasNewComments={hasNewComments}
         todo={todo}
         onToggleDone={onToggleDone ? () => onToggleDone(card) : undefined}
+        noteMarkProps={hoverNote.markProps}
       />
     </div>
     {hoverNote.popover}

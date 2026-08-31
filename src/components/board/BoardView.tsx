@@ -110,6 +110,7 @@ export default function BoardView() {
   const updateColumn = useWorkspaceStore((s) => s.updateColumn);
   const setColumnTodo = useWorkspaceStore((s) => s.setColumnTodo);
   const setColumnBudgetOnce = useWorkspaceStore((s) => s.setColumnBudgetOnce);
+  const setColumnGourmet = useWorkspaceStore((s) => s.setColumnGourmet);
   const deleteColumn = useWorkspaceStore((s) => s.deleteColumn);
   const moveCard = useWorkspaceStore((s) => s.moveCard);
   const activeTripId = useUiStore((s) => s.activeTripId);
@@ -268,7 +269,7 @@ export default function BoardView() {
 
   const submitColumn = (values: ColumnFormValues) => {
     if (dialog?.kind !== 'column-edit') return;
-    const { todo, budgetOnce, ...patch } = values;
+    const { todo, budgetOnce, gourmet, ...patch } = values;
     updateColumn(dialog.column.id, patch);
     // 값이 실제로 바뀔 때만 쓴다 (M29). 이름만 고친 칸에 `todo: false`를 남기면
     // 그 칸은 자동 이행이 영원히 손댈 수 없는 칸이 되는데, 사람은 토글을 건드린
@@ -277,6 +278,11 @@ export default function BoardView() {
     // 숙소 셈법도 같은 규칙으로 (M31).
     if (budgetOnce !== (dialog.column.budgetOnce === true)) {
       setColumnBudgetOnce(dialog.column.id, budgetOnce);
+    }
+    // 맛집 칸도 같은 규칙으로 (M49) — 이름만 고친 칸에 `gourmet: false`를 남기면
+    // 그 여행은 상설 칸 이행이 영원히 손댈 수 없는 여행이 된다.
+    if (gourmet !== (dialog.column.gourmet === true)) {
+      setColumnGourmet(dialog.column.id, gourmet);
     }
     setDialog(null);
   };
@@ -425,6 +431,8 @@ export default function BoardView() {
           columnName={dialog.column.name}
           columnColor={dialog.column.color}
           columnIcon={dialog.column.icon}
+          // 맛집 칸이면 장르 픽커 한 줄이 선다 (M49).
+          gourmet={dialog.column.gourmet === true}
           tripDestination={trip.destination}
           onSubmit={submitCard}
           onClose={() => setDialog(null)}
@@ -437,6 +445,7 @@ export default function BoardView() {
           columnName={columnNameOf(dialog.card.columnId)}
           columnColor={columnOf(dialog.card.columnId)?.color}
           columnIcon={columnOf(dialog.card.columnId)?.icon}
+          gourmet={columnOf(dialog.card.columnId)?.gourmet === true}
           currency={trip.currency}
           tripDestination={trip.destination}
           localCurrency={trip.localCurrency}

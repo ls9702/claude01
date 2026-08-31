@@ -227,6 +227,92 @@ export function createGourmetPinElement({
   return pin;
 }
 
+/**
+ * 「우리 맛집」 핀 (M49) — AI 추천 핀과 **같은 크기, 다른 링**.
+ *
+ * 같은 32px 흰 원에 같은 자리의 이름표를 쓴다: 둘 다 「지도 위에 얹힌 참고 층」
+ * 이라 카드 핀(30px 물방울)과 갈라져야 하는 쪽은 같다. 대신 링이 다르다 —
+ * AI 추천은 금색(큐레이션)·잉크(구글)이고, 우리 목록은 **초록**이다. 그리고
+ * 이름표가 「내 맛집」이라고 말한다.
+ *
+ * 색으로만 가르지 않는 것이 요점이다(M15 §3의 그 규칙): 링이 안 보이는 눈에도
+ * 이름표 두 글자가 어느 층인지 말한다.
+ */
+
+/** 우리 목록의 링 — 카테고리 팔레트의 emerald와 같은 계열의 짙은 초록. */
+const USER_GOURMET_RING_HEX = '#047857';
+
+/** 이름표에 적히는 말. */
+export const USER_GOURMET_PIN_LABEL = '내 맛집';
+
+export interface UserGourmetPinOptions {
+  /** 핀 위에 설 글자 — 장르 이모지, 안 골랐으면 🍽️. */
+  emoji: string;
+  /** 이 한 곳의 카드 id. */
+  cardId: string;
+  /** 갈래 이름, 안 골랐으면 `none`. */
+  genre: string;
+  testId?: string;
+}
+
+export function createUserGourmetPinElement({
+  emoji,
+  cardId,
+  genre,
+  testId = 'usergourmet-pin',
+}: UserGourmetPinOptions): HTMLElement {
+  const pin = document.createElement('div');
+  pin.setAttribute('data-testid', testId);
+  pin.setAttribute('data-card-id', cardId);
+  pin.setAttribute('data-genre', genre);
+  pin.style.cssText = [
+    'display:flex',
+    'flex-direction:column',
+    'align-items:center',
+    'gap:2px',
+    'cursor:pointer',
+    'white-space:nowrap',
+  ].join(';');
+
+  const disc = document.createElement('div');
+  disc.setAttribute('data-testid', `${testId}-disc`);
+  disc.style.cssText = [
+    `width:${GOURMET_PIN_PX}px`,
+    `height:${GOURMET_PIN_PX}px`,
+    'background:#fff',
+    `border:2px solid ${USER_GOURMET_RING_HEX}`,
+    'border-radius:9999px',
+    'box-shadow:0 2px 6px rgba(28,25,23,0.45)',
+    'display:flex',
+    'align-items:center',
+    'justify-content:center',
+  ].join(';');
+
+  const glyph = document.createElement('span');
+  glyph.style.cssText = 'font-size:17px;line-height:1';
+  glyph.textContent = emoji;
+  disc.appendChild(glyph);
+  pin.appendChild(disc);
+
+  const label = document.createElement('span');
+  label.setAttribute('data-testid', 'usergourmet-pin-label');
+  label.style.cssText = [
+    'padding:0 5px',
+    'border-radius:9999px',
+    'background:#fff',
+    `color:${USER_GOURMET_RING_HEX}`,
+    'font-size:10px',
+    'line-height:15px',
+    'font-weight:700',
+    'letter-spacing:-0.01em',
+    'box-shadow:0 1px 3px rgba(28,25,23,0.4)',
+  ].join(';');
+  label.textContent = USER_GOURMET_PIN_LABEL;
+  pin.appendChild(label);
+
+  return pin;
+}
+
 /** 보정 팝업의 두 점 (M41) — 기존은 물러나고 제안이 앞에 선다. */
 export function createDotElement(
   variant: 'existing' | 'suggested',

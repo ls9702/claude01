@@ -32,7 +32,7 @@ import { lookupQuery } from '../src/gourmet/spots';
  * 5. 실시간 검색은 우리가 정한 타입 셋으로 나가고, 그 결과도 핀이 된다.
  *    지도를 미는 것만으로는 다시 나가지 않고, 버튼을 눌러야 나간다.
  * 6. 팝업의 「구글 지도 앱에서 보기」는 `query_place_id`까지 달고 나간다.
- * 7. 「보드에 카드로 추가」는 위치를 든 카드를 식사 칸에 만든다.
+ * 7. 「보드에 카드로 추가」는 위치를 든 카드를 맛집 칸에 만든다 (M49: 식사 → 맛집).
  * 8. 390px에서 패널도 팝업도 가로로 넘치지 않는다.
  * 9. 끄면 전부 사라진다.
  * 10. 그리고 아무것도 심지 않으면 앱은 **진짜 조사 배열**을 조회한다.
@@ -689,7 +689,15 @@ test('카드 핀을 누르면 맛집 팝업이 물러난다 — 두 장이 겹�
  * 6. 보드에 카드로 추가
  * ------------------------------------------------------------------ */
 
-test('「보드에 카드로 추가」가 위치를 든 카드를 식사 칸에 만든다', async ({ page }) => {
+/**
+ * M49 — 목적지가 「식사」에서 **「맛집」**으로 옮겨졌다.
+ *
+ * 이제 모든 여행이 상설 맛집 칸을 달고 태어나므로(`SEED_COLUMNS`), 지도에서 고른
+ * 집은 그 칸으로 간다 — 거기 놓여야 ⭐ 층에도 뜬다. 맛집 칸이 없는 여행에서는
+ * M43 그대로 「식사」로 내려간다(`board/gourmetColumn.pickGourmetColumn`의 계약이고
+ * 그 갈래는 단위 테스트가 지킨다).
+ */
+test('「보드에 카드로 추가」가 위치를 든 카드를 맛집 칸에 만든다', async ({ page }) => {
   await openWithGoogle(page);
   await openGoogleMap(page);
   await activateGourmet(page);
@@ -698,12 +706,12 @@ test('「보드에 카드로 추가」가 위치를 든 카드를 식사 칸에 
   await page.getByTestId('gourmet-popup-add').click();
 
   // 무슨 일이 벌어졌는지 한 줄로 말한다.
-  await expect(page.getByTestId('undo-toast')).toContainText('식사');
+  await expect(page.getByTestId('undo-toast')).toContainText('맛집');
   await expect(page.getByTestId('gourmet-popup')).toHaveCount(0);
 
   await page.getByTestId('tab-board').click();
-  const column = page.getByTestId('board-column').nth(2);
-  await expect(column).toContainText('식사');
+  const column = page.getByTestId('board-column').nth(5);
+  await expect(column).toContainText('맛집');
   const card = column.getByTestId('board-card').filter({ hasText: '스펙 오코노미' });
   await expect(card).toHaveCount(1);
 

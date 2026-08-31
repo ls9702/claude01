@@ -33,7 +33,13 @@ import {
   SECONDARY_BUTTON_CLASS,
 } from '../common/formStyles';
 import GourmetLayer from './GourmetLayer';
-import { createDurationChipElement, createMyLocationElement, createPinElement } from './googlePin';
+import type { UserGourmetSpot } from '../../gourmet/userSpots';
+import {
+  createDurationChipElement,
+  createMyLocationElement,
+  createPinElement,
+  createUserGourmetPinElement,
+} from './googlePin';
 import type { RouteDrawing } from './RouteLayer';
 import { DESTINATION_ZOOM, FIT_MAX_ZOOM, MY_LOCATION_ZOOM, WORLD_ZOOM } from './mapBase';
 
@@ -67,6 +73,17 @@ interface GoogleMapViewProps {
    * 나가는 유료 호출을 막는 것은 규칙이 아니라 이 한 줄의 존재다.
    */
   routeDayId?: Id;
+  /**
+   * 「우리 맛집」 층이 세울 곳들 (M49) — 꺼져 있으면 빈 배열.
+   *
+   * 이 컴포넌트는 이 층을 **켜고 끄지 않는다**: 무엇을 그릴지는 `MapView`가
+   * 정하고(그래야 OSM 갈래와 같은 목록이다) 여기는 마커로 얹기만 한다. M43의
+   * 🍜 레이어가 이 파일 **안에** 사는 것과 정반대인데, 이유도 정반대다 — 그쪽은
+   * 구글 Places가 원천이라 구글 지도에서만 성립하고, 이쪽은 그냥 카드다.
+   */
+  userSpots?: readonly UserGourmetSpot[];
+  /** 그 핀을 눌렀다 — 팝업은 `MapView`의 오버레이가 연다. */
+  onSelectUserSpot?: (cardId: Id) => void;
   /** 「내 위치」의 마지막 좌표 (M42). 꺼져 있으면 `null`. */
   myLocation?: GeoFix | null;
   /** 켠 횟수 — 이 값이 바뀐 뒤 처음 오는 좌표에서만 화면이 그리로 간다. */
@@ -96,6 +113,9 @@ const DASH_SYMBOL = { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 };
 
 /** 점선 눈금 사이 간격. */
 const DASH_REPEAT = '12px';
+
+/** 아무것도 안 넘어왔을 때의 「우리 맛집」 목록 — 신원이 고정이라 효과가 헛돌지 않는다. */
+const EMPTY_SPOTS: readonly UserGourmetSpot[] = [];
 
 /** 다리 하나의 이름 — 그 날 안에서만 유일하면 된다. */
 const legKey = (index: number, fromCardId: Id, toCardId: Id): string =>
@@ -127,6 +147,8 @@ export default function GoogleMapView({
   routePoints,
   routeKey,
   routeDayId,
+  userSpots = EMPTY_SPOTS,
+  onSelectUserSpot,
   myLocation,
   myLocationSession = 0,
   fallback,
@@ -290,6 +312,51 @@ export default function GoogleMapView({
       markersRef.current = [];
     };
   }, [status, pins, dimmed]);
+
+  /* --- 우리 맛집 핀 (M49) -------------------------------------------- */
+
+  /**
+   * 카드 핀과 **다른 배열, 다른 효과**다.
+   *
+   * 한 효과에 합치면 맛집 층을 켰다 끌 때마다 카드 핀이 통째로 지워졌다 다시
+   * 붙는다 — 화면에서는 깜빡임이고, 지도에서는 그 순간 열려 있던 카드 팝업의
+   * 핀이 사라지는 사고다. 두 층이 서로를 모르는 것이 이 레이어의 계약이다.
+   */
+  const userMarkersRef = useRef<{ marker: GoogleMarker; element: HTMLElement }[]>([]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const markerLib = markerLibRef.current;
+
+    const clear = () => {
+      for (const { marker, element } of userMarkersRef.current) {
+        marker.map = null;
+        element.remove();
+      }
+      userMarkersRef.current = [];
+    };
+    clear();
+    if (status !== 'ready' || !map || !markerLib) return;
+
+    for (const spot of userSpots) {
+      const element = createUserGourmetPinElement({
+        emoji: spot.emoji,
+        cardId: spot.cardId,
+        genre: spot.genre ?? 'none',
+      });
+      element.addEventListener('click', () => onSelectUserSpot?.(spot.cardId));
+      const marker = new markerLib.AdvancedMarkerElement({
+        map,
+        position: { lat: spot.lat, lng: spot.lng },
+        content: element,
+        title: spot.title,
+        zIndex: 50,
+      });
+      userMarkersRef.current.push({ marker, element });
+    }
+
+    return clear;
+  }, [status, userSpots, onSelectUserSpot]);
 
   /* --- 실제 경로 물어보기 (M42) --------------------------------------- */
 
@@ -630,7 +697,10 @@ export default function GoogleMapView({
         <div
           data-testid="gmap-popup"
           data-card-id={openCard.id}
-          className="absolute inset-x-2 bottom-2 z-10 space-y-3 rounded-lg bg-surface/97 p-4 shadow-float"
+          // z가 1150인 이유 (M49): 지도 아래쪽에는 이제 ⭐ 층의 패널(z-1050)도
+          // 설 수 있고, 팝업은 언제나 패널을 이겨야 한다. 이 상자는 화면 **아래**
+          // 두 칸에만 서므로, 위쪽의 둥근 버튼들(z-1100)을 가리는 일은 없다.
+          className="absolute inset-x-2 bottom-2 z-[1150] space-y-3 rounded-lg bg-surface/97 p-4 shadow-float"
         >
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">

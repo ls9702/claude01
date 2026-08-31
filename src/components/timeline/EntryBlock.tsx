@@ -5,7 +5,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { Card, TimelineEntry } from '../../types/models';
 import type { VisualPlacement } from '../../timeline/dayWindow';
 import { noteHint } from '../../timeline/entryNote';
-import { useHoverNote } from '../common/HoverNote';
+import { useHoverNote, type NoteMarkProps } from '../common/HoverNote';
 import { PX_PER_MIN, type LaneBox } from '../../timeline/layout';
 import { colorClasses } from '../../utils/colors';
 import { FLIGHT_CARD_PREFIX } from '../../utils/flights';
@@ -32,6 +32,11 @@ interface EntrySurfaceProps {
    * 문자열이 아니라 참/거짓만 받는다: 이 표면은 메모를 *그리지* 않는다.
    */
   hasNote?: boolean;
+  /**
+   * 자국을 **누를 수 있게** 만드는 손잡이 (M48). 주지 않으면 자국은 예전처럼
+   * 장식이다 — `DragOverlay`의 유령이 쓰는 길이고, 유령을 누를 사람은 없다.
+   */
+  noteMarkProps?: NoteMarkProps;
 }
 
 /**
@@ -46,6 +51,7 @@ export function EntrySurface({
   short,
   dawn,
   hasNote,
+  noteMarkProps,
 }: EntrySurfaceProps) {
   const colors = colorClasses(color);
   // The card title already carries ✈️ for a flight; the column's icon beside it
@@ -56,6 +62,15 @@ export function EntrySurface({
   // the title cannot all be had. The title is the one the user is looking for —
   // the badge shrinks to a dot and the disc goes, so at least 「이치…」 survives.
   const showIcon = !dawn && !title.trimStart().startsWith(FLIGHT_CARD_PREFIX);
+
+  /** 접힌 종이 모서리 그 자체 — 크기도 색도 M39 그대로다. */
+  const mark = (
+    <span
+      data-testid="entry-note-mark"
+      aria-hidden="true"
+      className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[9px] border-t-[9px] border-l-transparent border-t-ink/70"
+    />
+  );
 
   return (
     <div
@@ -71,14 +86,32 @@ export function EntrySurface({
           「지금」(now)이 이미 쓰고 있고, 메모는 둘 중 어느 것도 아니다. 접힌
           종이 모서리는 색을 빌리지 않고도 같은 말을 한다.
 
-          `pointer-events-none` — 블록을 누르면 상세 시트가 열려야 하고, 메모를
-          고치는 자리도 거기다. 손가락 밑에서 표시가 탭을 가로채면 안 된다. */}
+          M48에서 이 자국은 **누를 수 있는 것**이 됐다. 폰에는 호버가 없고 블록의
+          탭(상세 시트)과 롱프레스(드래그)는 이미 임자가 있으므로, 「메모가 있다」
+          고 말하는 표식 자신이 「메모를 보여 달라」는 버튼이 된다. 자국의 크기는
+          9px 그대로 두고 **투명한 손가락 자리만 32px로** 넓힌다 — 보이는 것은
+          M39와 한 픽셀도 다르지 않다.
+
+          자국 자신은 여전히 `pointer-events-none`이다. 누르는 것은 바깥 버튼이고,
+          그 버튼이 pointerdown·mousedown·touchstart 셋을 멈춰 세우므로 손가락이
+          여기 얹혀도 드래그 센서(250ms)는 시작될 기회가 없다. */}
       {hasNote ? (
-        <span
-          data-testid="entry-note-mark"
-          aria-hidden="true"
-          className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[9px] border-t-[9px] border-l-transparent border-t-ink/70"
-        />
+        noteMarkProps ? (
+          <button
+            type="button"
+            data-testid="entry-note-tap"
+            aria-label="메모 보기"
+            {...noteMarkProps}
+            // 32px — 9px 자국은 손가락으로 겨눌 수 없다. 블록이 그보다 낮으면
+            // 바깥의 `overflow-hidden`이 잘라 주므로 넘치지 않는다.
+            className="absolute right-0 top-0 h-8 w-8 cursor-pointer"
+            style={{ touchAction: 'manipulation' }}
+          >
+            {mark}
+          </button>
+        ) : (
+          mark
+        )
       ) : null}
       <p className="flex items-center gap-1 truncate text-micro text-ink">
         {dawn ? (
@@ -208,13 +241,16 @@ export default function EntryBlock({
   const hint = noteHint(entry.note);
 
   /**
-   * 메모 미리보기 (M47).
+   * 메모 미리보기 (M47) + 표식 탭 (M48).
    *
    * This replaces M39's `title=` note line rather than joining it: the native
    * tooltip and the popover would otherwise both appear over the same block,
    * one 300ms after the pointer stops and the other a second later. The title
    * keeps the card name and the time range, which is what it said before the
    * note was ever put in it.
+   *
+   * 같은 훅이 호버와 탭을 함께 든다 — 상태가 하나이므로 마우스로 띄워 둔 위에
+   * 탭이 두 번째를 겹쳐 놓는 일이 없다.
    */
   const hoverNote = useHoverNote(entry.note, 'entry-note-hover');
 
@@ -297,6 +333,7 @@ export default function EntryBlock({
         short={height < 34}
         dawn={placement.dawn}
         hasNote={hint !== ''}
+        noteMarkProps={hoverNote.markProps}
       />
       {hoverNote.popover}
 

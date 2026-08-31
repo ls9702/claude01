@@ -13,7 +13,8 @@ import { expect, test, type Page } from '@playwright/test';
  * 1. **자국은 적어 둔 것이 있을 때만 선다.** 블록 오른쪽 위 모서리의 접힌 자국
  *    하나(`entry-note-mark`)이고, 블록은 그 때문에 커지지 않는다.
  * 2. **읽는 자리와 쓰는 자리가 같다.** 블록을 누르면 상세 시트가 열리고 메모가
- *    거기 들어 있다. 자국 위를 눌러도 마찬가지다 — 표시가 탭을 가로채지 않는다.
+ *    거기 들어 있다. (M48부터 **자국 자신은** 메모 팝오버를 여는 탭 타깃이다 —
+ *    `e2e/notetap.spec.ts`. 쓰는 자리는 여전히 여기 하나뿐이다.)
  * 3. **배치마다 따로다.** 같은 카드의 두 번째 배치는 자기 메모를 갖는다.
  * 4. **비우면 자국까지 사라지고**, 그 상태도 새로고침을 건너간다.
  */
@@ -152,12 +153,10 @@ test('배치에 메모를 달면 모서리에 자국이 서고, 비우면 사라
   expect(tooltip).toContain('이치란');
   expect(tooltip).not.toContain('개장 30분 전 도착');
 
-  // 자국은 탭을 가로채지 않는다 — 그 위를 눌러도 열리는 것은 상세 시트다.
-  const markBox = await page.getByTestId('entry-note-mark').boundingBox();
-  await page.mouse.click(
-    (markBox?.x ?? 0) + (markBox?.width ?? 0) / 2,
-    (markBox?.y ?? 0) + (markBox?.height ?? 0) / 2,
-  );
+  // 메모를 고치는 자리는 하나다 — 블록을 누르면 상세 시트가 열리고 거기 들어 있다.
+  // (M48: 자국 **위**를 누르는 것은 이제 메모 팝오버를 여는 탭이다. 그 갈림은
+  // `e2e/notetap.spec.ts`가 본다 — 여기서 보는 것은 쓰는 자리가 그대로라는 것.)
+  await block.click();
   await expect(page.getByTestId('entry-sheet')).toBeVisible();
   await expect(page.getByTestId('entry-note-input')).toHaveValue(NOTE);
   await page.getByTestId('sheet-close').click();

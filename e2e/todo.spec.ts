@@ -116,7 +116,7 @@ test('새 여행의 할일 칸에서만 체크박스가 보이고, 체크는 새
 
   await waitForPersisted(page, 'doneAt');
   await page.reload();
-  await expect(page.getByTestId('board-column')).toHaveCount(5);
+  await expect(page.getByTestId('board-column')).toHaveCount(6);
   const afterReload = page.getByTestId('board-column').nth(1).getByTestId('card-done-toggle');
   await expect(afterReload).toHaveAttribute('data-done', 'true');
 
@@ -241,7 +241,7 @@ test('이름이 할 일인 옛 칸은 다음 로드에서 스스로 체크리스
 
   await waitForPersisted(page, '할 일');
   await page.reload();
-  await expect(page.getByTestId('board-column')).toHaveCount(5);
+  await expect(page.getByTestId('board-column')).toHaveCount(6);
   await expect(
     page.getByTestId('board-column').nth(0).getByTestId('card-done-toggle'),
   ).toHaveCount(1);
@@ -258,7 +258,7 @@ test('사람이 직접 끈 칸은 이행이 되살리지 않는다', async ({ pa
 
   await waitForPersisted(page, '"todo":false');
   await page.reload();
-  await expect(page.getByTestId('board-column')).toHaveCount(5);
+  await expect(page.getByTestId('board-column')).toHaveCount(6);
   await expect(
     page.getByTestId('board-column').nth(1).getByTestId('card-done-toggle'),
   ).toHaveCount(0);

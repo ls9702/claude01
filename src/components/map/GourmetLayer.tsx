@@ -62,6 +62,7 @@ import {
   saveGourmetFilter,
   saveGourmetPanelCollapsed,
 } from '../../stores/gourmetPref';
+import { pickGourmetColumn } from '../../board/gourmetColumn';
 import type { BoardColumn } from '../../types/models';
 import { matchColumn } from '../ai/AiSuggestSheet';
 import Icon from '../common/Icon';
@@ -403,19 +404,24 @@ export default function GourmetLayer({
   /* --- 보드에 카드로 추가 -------------------------------------------- */
 
   /**
-   * 어느 칸에 넣을 것인가 — 🍽️ 식사.
+   * 어느 칸에 넣을 것인가 — 🍚 맛집이 있으면 거기, 없으면 🍽️ 식사 (M43 → M49).
    *
-   * 이름으로 찾는다({@link matchColumn}): 새 여행은 「식사」 칸을 달고 태어나지만
-   * (`SEED_COLUMNS`) 사용자가 이름을 바꿨을 수도, 지웠을 수도 있다. 정확히 맞는
-   * 이름 → 느슨하게 걸치는 이름 → 그래도 없으면 **첫 칸**. 잘못된 칸에 놓인
-   * 카드는 2초짜리 드래그지만, 만들어지지 않은 카드는 막다른 길이다.
+   * M49가 계단을 하나 위에 얹었다. 상설 「맛집」 칸이 생겼으므로, 그 칸을 든
+   * 여행에서는 **거기가 옳은 자리**다: 방금 지도에서 고른 집은 「가 보고 싶은
+   * 집」이고 그 목록이 사는 곳이 맛집 칸이다(그리고 거기 놓여야 ⭐ 층에 뜬다).
+   * 판정은 이름이 아니라 **플래그**로 한다 — 사람이 칸 이름을 「먹킷리스트」로
+   * 바꿔도 그 칸은 여전히 맛집 칸이다 (`board/gourmetColumn.pickGourmetColumn`).
+   *
+   * 없으면 M43 그대로다({@link matchColumn}): 정확히 맞는 이름 → 느슨하게 걸치는
+   * 이름 → 그래도 없으면 **첫 칸**. 잘못된 칸에 놓인 카드는 2초짜리 드래그지만,
+   * 만들어지지 않은 카드는 막다른 길이다.
    */
   const addToBoard = (spot: GourmetSpot) => {
     if (!activeTripId) return;
     const columns = (workspace.trips[activeTripId]?.columnOrder ?? [])
       .map((columnId) => workspace.columns[columnId])
       .filter((column): column is BoardColumn => Boolean(column));
-    const column = matchColumn(columns, '식사');
+    const column = pickGourmetColumn(columns) ?? matchColumn(columns, '식사');
     if (!column) return;
 
     addCard(activeTripId, column.id, {
@@ -472,7 +478,7 @@ export default function GourmetLayer({
           data-testid="gourmet-panel"
           data-collapsed="true"
           data-spot-count={spots.length}
-          className="absolute left-2 right-2 top-[9.5rem] z-[1050] flex flex-col items-start gap-1"
+          className="absolute left-2 right-2 top-[12.25rem] z-[1050] flex flex-col items-start gap-1"
         >
           <button
             type="button"
@@ -504,7 +510,7 @@ export default function GourmetLayer({
           data-testid="gourmet-panel"
           data-collapsed="false"
           data-spot-count={spots.length}
-          className="absolute inset-x-2 top-[9.5rem] z-[1050] max-h-[55%] space-y-2 overflow-y-auto rounded-lg bg-surface/97 p-3 shadow-float"
+          className="absolute inset-x-2 top-[12.25rem] z-[1050] max-h-[55%] space-y-2 overflow-y-auto rounded-lg bg-surface/97 p-3 shadow-float"
         >
           <div className="flex items-center gap-2">
             <p className="min-w-0 flex-1 truncate text-label text-ink">
@@ -624,7 +630,10 @@ export default function GourmetLayer({
           data-testid="gourmet-popup"
           data-spot-key={openSpot.key}
           data-source={openSpot.source}
-          className="absolute inset-x-2 bottom-2 z-20 space-y-3 rounded-lg bg-surface/97 p-4 shadow-float"
+          // z가 1160인 이유 (M49): 지도 아래쪽에 ⭐ 층의 패널(z-1050)이 설 수
+          // 있게 되면서, 팝업이 패널 뒤로 숨는 일이 없도록 카드 팝업(1150) 바로
+          // 위로 올렸다. 서는 자리는 그대로 화면 아래 두 칸이다.
+          className="absolute inset-x-2 bottom-2 z-[1160] space-y-3 rounded-lg bg-surface/97 p-4 shadow-float"
         >
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">

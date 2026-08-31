@@ -98,13 +98,13 @@ test('여행을 지워도 실행 취소하면 보드까지 그대로 돌아온�
   await expect(page.getByTestId('undo-toast')).toHaveCount(0);
   const restored = page.getByTestId('trip-card').filter({ hasText: '오사카' });
   await expect(restored).toHaveCount(1);
-  await expect(restored).toContainText('카테고리 5');
+  await expect(restored).toContainText('카테고리 6');
   await expect(restored).toContainText('카드 2');
 
   // The board underneath survived intact, cards in their original columns.
   await restored.getByTestId('trip-open').click();
   const columns = page.getByTestId('board-column');
-  await expect(columns).toHaveCount(5);
+  await expect(columns).toHaveCount(6);
   await expect(columns.nth(0)).toContainText('간사이공항 리무진');
   await expect(columns.nth(2)).toContainText('이치란 라멘');
 });
@@ -133,12 +133,12 @@ test('카드와 카테고리 삭제도 같은 토스트로 되돌린다', async 
   await expect(page.getByTestId('column-delete-confirm')).toBeVisible();
   await page.getByTestId('confirm-accept').click();
 
-  await expect(page.getByTestId('board-column')).toHaveCount(4);
+  await expect(page.getByTestId('board-column')).toHaveCount(5);
   await expect(page.getByTestId('undo-message')).toHaveText('카테고리 「할일」 삭제됨');
   await page.getByTestId('undo-action').click();
 
   const columns = page.getByTestId('board-column');
-  await expect(columns).toHaveCount(5);
+  await expect(columns).toHaveCount(6);
   await expect(columns.nth(1)).toContainText('할일');
   await expect(columns.nth(1)).toContainText('유심 사기');
   await expect(columns.nth(0).getByTestId('board-card')).toHaveCount(0);

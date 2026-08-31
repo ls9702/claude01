@@ -1,4 +1,11 @@
 import { useState } from 'react';
+import {
+  USER_GENRE_EMOJI,
+  USER_GENRE_LABEL,
+  USER_GOURMET_GENRES,
+  userGenreOf,
+  type UserGourmetGenre,
+} from '../../gourmet/userGenres';
 import type { Card, GeoPoint } from '../../types/models';
 import { formatLatLng } from '../../utils/geo';
 import { MAX_AMOUNT, formatBudget, isValidBudget } from '../../utils/money';
@@ -32,6 +39,13 @@ export interface CardFormValues {
   location?: GeoPoint;
   budget?: number;
   defaultDurationMin?: number;
+  /**
+   * 맛집 카드의 장르 (M49) — 맛집 칸에서만 고를 수 있고, 해제하면 `undefined`다.
+   *
+   * 맛집 칸이 아닌 카드는 이 값을 **손대지 않는다**: 시트가 열 때 읽은 값을 그대로
+   * 다시 실어, 카드를 다른 칸으로 옮겼다가 편집했다고 이름표가 지워지지 않는다.
+   */
+  gourmetGenre?: string;
 }
 
 /**
@@ -56,6 +70,13 @@ interface CardEditSheetProps extends LocalMoney {
    */
   columnColor?: string;
   columnIcon?: string;
+  /**
+   * 이 카드가 **맛집 칸**에 있는가 (M49) — 장르 픽커가 서는 유일한 조건.
+   *
+   * 조건을 칸에 두는 이유는 그 줄이 모든 카드에 필요한 줄이 아니기 때문이다:
+   * 「환전하기」 카드에 🍣 초밥 칩 여덟 개가 서 있으면 그건 기능이 아니라 소음이다.
+   */
+  gourmet?: boolean;
   /** Trip currency, used by the 지출 기록 section. Defaults to `KRW`. */
   currency?: string;
   /** The trip's 목적지 (M12) — where 지도에서 선택 opens for an unplaced card. */
@@ -85,6 +106,7 @@ export default function CardEditSheet({
   columnName,
   columnColor = 'slate',
   columnIcon = '📍',
+  gourmet = false,
   currency = 'KRW',
   tripDestination,
   localCurrency,
@@ -101,6 +123,17 @@ export default function CardEditSheet({
   const [budget, setBudget] = useState(card?.budget != null ? String(card.budget) : '');
   const [duration, setDuration] = useState<number | undefined>(card?.defaultDurationMin);
   const [location, setLocation] = useState<GeoPoint | undefined>(card?.location);
+  /**
+   * 고른 장르 (M49). 모르는 값(옛 기기·다음 판이 뺀 갈래)은 「없음」으로 읽는다.
+   *
+   * 맛집 칸에서 저장하면 그 모르는 값은 정리된다 — 사람이 「아무 칩도 안 눌린」
+   * 화면을 보고 저장한 것이므로 화면과 데이터가 같아지는 쪽이 옳다. 맛집 칸이
+   * **아닌** 곳에서는 픽커 자체가 없으므로 아래 `submit`이 원래 값을 그대로
+   * 되돌려 싣는다.
+   */
+  const [genre, setGenre] = useState<UserGourmetGenre | null>(() =>
+    userGenreOf(card?.gourmetGenre),
+  );
   const [picker, setPicker] = useState<Picker>(null);
   /** 직접 입력 is open when the stored value is not one of the presets. */
   const [customOpen, setCustomOpen] = useState(
@@ -125,6 +158,9 @@ export default function CardEditSheet({
       location,
       budget: parsedBudget,
       defaultDurationMin: duration,
+      // 맛집 칸이 아니면 화면에 픽커가 없었으므로 고칠 자격도 없다 — 원래 값을
+      // 그대로 되돌려 싣는다 (`CardFormValues.gourmetGenre`).
+      gourmetGenre: gourmet ? (genre ?? undefined) : card?.gourmetGenre,
     });
   };
 
@@ -306,6 +342,40 @@ export default function CardEditSheet({
               />
             ) : null}
           </div>
+
+          {/* 장르 (M49) — 맛집 칸의 카드에만. 이모지 칩 여덟 개 한 줄이고, 고른
+              칩을 다시 누르면 해제된다(「없음」 버튼을 따로 두지 않는 이유는 그
+              해제가 이미 같은 손가락 자리에 있기 때문이다 — 소요 시간의 「없음」은
+              프리셋이 다섯이라 되돌아갈 자리가 필요했던 경우다).
+
+              계획 블록에 사는 이유: 이 값은 「무엇인가」가 아니라 「이 여행에서
+              어떻게 볼 것인가」다 — 지도에서 켜고 끄는 이름표이지 카드의 제목이
+              아니다. */}
+          {gourmet ? (
+            <div>
+              <span className={LABEL_CLASS}>장르</span>
+              <div data-testid="card-genre-row" className="mt-2 flex flex-wrap gap-2">
+                {USER_GOURMET_GENRES.map((option) => {
+                  const active = genre === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      data-testid="card-genre-chip"
+                      data-genre={option}
+                      data-active={active}
+                      aria-pressed={active}
+                      onClick={() => setGenre(active ? null : option)}
+                      className={active ? CHIP_SELECTED : CHIP_BUTTON}
+                    >
+                      <span aria-hidden="true">{USER_GENRE_EMOJI[option]}</span>
+                      {USER_GENRE_LABEL[option]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           <div>
             <span className={LABEL_CLASS}>위치</span>

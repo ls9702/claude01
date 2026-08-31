@@ -155,6 +155,27 @@ export interface BoardColumn {
    * `schemaVersion`은 그대로 1이다.
    */
   budgetOnce?: boolean;
+  /**
+   * 우리 부부가 직접 고른 **맛집 칸**인가 (M49).
+   *
+   * M43의 「주변 맛집」은 남이 추천해 준 곳이다 — 큐레이션 조사와 구글 평점이
+   * 고른 참고 자료. 이 플래그가 켜진 칸은 그 반대편이다: **우리가 가기로 한
+   * 집들**이고, 그래서 데이터가 워크스페이스 안에 산다(레이어가 아니라 카드다).
+   *
+   * 켜져 있으면 두 가지가 달라진다. 카드 편집 시트에 장르 픽커 한 줄이 서고
+   * ({@link Card.gourmetGenre}), 지도의 ⭐ 레이어가 이 칸의 **위치 있는 카드
+   * 전부**를 장르 이모지 핀으로 올린다(배치 여부와 무관 — 아직 어느 날에도
+   * 넣지 않은 후보야말로 지도에서 봐야 하는 것이다).
+   *
+   * {@link BoardColumn.todo}·{@link BoardColumn.budgetOnce}와 **같은 삼항
+   * 규칙**이다: 없으면 평범한 칸이고, 「없음」과 「명시적 false」를 가르는 이유도
+   * 같다 — 이름이 「맛집」인 기존 칸을 한 번만 올려 주는 이행이 사람이 직접 끈
+   * 칸을 되살리면 안 된다 (`board/gourmetColumn.ts`).
+   *
+   * Optional and additive — M49 이전에 저장된 칸에는 필드가 없고
+   * `schemaVersion`은 그대로 1이다.
+   */
+  gourmet?: boolean;
   createdAt: Millis;
   updatedAt: Millis;
 }
@@ -279,6 +300,27 @@ export interface Card {
    * 체크된 채다.
    */
   doneAt?: Millis;
+  /**
+   * 이 맛집 카드의 장르 (M49) — `'sushi'`·`'cafe'`처럼 여덟 갈래 중 하나.
+   *
+   * 유니온이 아니라 **평범한 `string`**이다. {@link CardExpense.by}가 프로필
+   * id를 그렇게 들고 있는 것과 같은 이유다: 이 계층은 `gourmet/`를 몰라야 하고,
+   * 나중에 갈래가 하나 늘거나 줄어도 저장된 카드는 여전히 유효한 카드여야
+   * 한다. 모르는 값은 화면에서 「장르 없음」처럼 다뤄질 뿐 데이터가 깨지지
+   * 않는다 (`gourmet/userGenres.ts`의 `isUserGourmetGenre`).
+   *
+   * 맛집 칸({@link BoardColumn.gourmet})이 **아닌** 칸의 카드에도 남아 있을 수
+   * 있다 — 카드를 옮겼다고 지우지 않는다({@link Card.doneAt}와 같은 결정).
+   * 보이지 않을 뿐이고, 되돌아오면 그대로다.
+   *
+   * 칩을 다시 눌러 해제하면 다른 선택 필드들과 **같은 길**로 비워진다:
+   * `CardPatch`에 `undefined`가 실리고(`location`·`budget`이 이미 그렇다), 저장·
+   * 동기화되는 JSON에는 키가 남지 않아 M49 이전 카드와 같은 모양이 된다.
+   *
+   * Optional and additive — M49 이전에 저장된 카드에는 필드가 없고
+   * `schemaVersion`은 그대로 1이다.
+   */
+  gourmetGenre?: string;
   createdAt: Millis;
   updatedAt: Millis;
 }

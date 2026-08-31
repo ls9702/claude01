@@ -40,6 +40,12 @@ import GoogleMapView from './GoogleMapView';
 import MapReady from './MapReady';
 import RouteLayer, { type RouteDrawing } from './RouteLayer';
 import {
+  UserGourmetPanel,
+  UserGourmetPopup,
+  UserGourmetToggle,
+  useUserGourmetLayer,
+} from './UserGourmetLayer';
+import {
   DESTINATION_ZOOM,
   FIT_MAX_ZOOM,
   FIT_PAD,
@@ -49,6 +55,7 @@ import {
   WORLD_ZOOM,
   cardPinIcon,
   myLocationIcon,
+  userGourmetIcon,
 } from './mapBase';
 
 /** A located card plus the column it draws its color and icon from. */
@@ -305,6 +312,14 @@ function useStripFade() {
 
   return { ref, overflow, measure };
 }
+
+/**
+ * 꺼져 있는 ⭐ 층이 구글 갈래에 건네는 빈 목록 (M49).
+ *
+ * 모듈 상수인 이유는 신원 때문이다: 렌더마다 새 `[]`를 지으면 `GoogleMapView`의
+ * 핀 효과가 매번 다시 돌아 마커를 지웠다 다시 붙인다.
+ */
+const EMPTY_USER_SPOTS: never[] = [];
 
 /** Which day(s) the route control is drawing: nothing, one day, or all. */
 type RouteSelection = { kind: 'off' } | { kind: 'day'; dayId: Id } | { kind: 'all' };
@@ -653,6 +668,18 @@ export default function MapView() {
         : [],
     [selection, routeCardIds, visiblePins],
   );
+
+  /* --- 우리 맛집 레이어 (M49) ---------------------------------------- */
+
+  /**
+   * ⭐ 층 — 맛집 칸의 위치 있는 카드들.
+   *
+   * 훅이 여기 사는 이유는 「내 위치」(M42)가 여기 사는 이유와 같다: 두 엔진이
+   * 나눠 쓰는 하나의 상태여야 버튼도, 패널도, 팝업도 한 벌이면 된다. 엔진이
+   * 갈리는 것은 **핀을 그리는 방법**뿐이고, 그 아래 Leaflet 갈래와 구글 갈래가
+   * 같은 `spots` 배열을 받아 각자의 방식으로 얹는다.
+   */
+  const userGourmet = useUserGourmetLayer(workspace, trip?.id);
 
   // A day (or a whole sheet) that disappears must not leave a dangling route.
   useEffect(() => {
@@ -1179,6 +1206,10 @@ export default function MapView() {
             routeDayId={selection.kind === 'day' ? selection.dayId : undefined}
             myLocation={myLocation.state.fix}
             myLocationSession={myLocation.state.session}
+            // 우리 맛집 (M49) — 켜져 있을 때만 목록이 건너간다. 꺼져 있으면 빈
+            // 배열이라 구글 갈래에는 이 층이 아예 없는 것과 같다.
+            userSpots={userGourmet.active ? userGourmet.spots : EMPTY_USER_SPOTS}
+            onSelectUserSpot={userGourmet.open}
             fallback={destination}
             currency={trip.currency}
             onEditCard={editOnBoard}
@@ -1315,6 +1346,25 @@ export default function MapView() {
             </Marker>
           ))}
 
+          {/* 우리 맛집 (M49) — 카드 핀과 **완전히 따로** 난다: 범례도, 범위
+              필터도, 동선도 이 마커들을 모른다. 끄면 통째로 사라지고, 그 사이
+              카드 핀은 한 개도 움직이지 않는다 (M43 레이어 철학 그대로).
+
+              팝업은 Leaflet의 말풍선이 아니라 아래에서 올라오는 한 장이다 —
+              구글 갈래와 같은 얼굴이어야 같은 곳이다 (`UserGourmetPopup`). */}
+          {userGourmet.active
+            ? userGourmet.spots.map((spot) => (
+                <Marker
+                  key={`usergourmet:${spot.cardId}`}
+                  position={[spot.lat, spot.lng]}
+                  icon={userGourmetIcon(spot.emoji, spot.cardId, spot.genre ?? 'none')}
+                  // 카드 핀(0)보다 위, 「내 위치」(900)보다 아래.
+                  zIndexOffset={500}
+                  eventHandlers={{ click: () => userGourmet.open(spot.cardId) }}
+                />
+              ))
+            : null}
+
           {/* Drawn on top of the pins, and deliberately not filtered by the
               legend — see RouteLayer's doc comment. */}
           <RouteLayer
@@ -1383,6 +1433,24 @@ export default function MapView() {
         >
           <Icon name="locate" size={20} />
         </button>
+
+        {/* 우리 맛집 (M49) — 지도 컨테이너 **바깥**의 오버레이라 두 엔진에서
+            자리가 같다. 왼쪽 줄의 순서는 전체화면(폰) · 🍜(구글 시트) · ⭐이고,
+            🍜이 없는 OSM 시트에서는 ⭐이 그 자리(5.5rem)로 올라선다 — 빈 칸을
+            남기면 「저기 뭔가 사라졌나」가 된다.
+
+            패널은 지도의 **아래쪽**에 산다: 위쪽 왼편은 버튼 세 칸과 M43의
+            패널이 이미 쓰고 있어, 390px에서 두 패널을 세로로 세울 자리가 없다.
+            반대편 끝에 두면 두 층을 동시에 켜도 패널이 겹치지 않는다. */}
+        <UserGourmetToggle state={userGourmet} top={googleMode ? '8.75rem' : '5.5rem'} />
+        <UserGourmetPanel state={userGourmet} />
+        <UserGourmetPopup
+          state={userGourmet}
+          onEdit={(cardId) => {
+            const card = workspace.cards[cardId];
+            if (card) editOnBoard(card);
+          }}
+        />
 
         {/* 거절·불가·시간초과는 모달이 아니라 버튼 아래 한 줄이다 (M42). 방금
             스스로 거절한 사람에게 앱이 창을 띄워 되묻는 일은 없어야 한다. */}

@@ -8,6 +8,7 @@ import { pruneActiveIds } from './stores/uiStore';
 import { useWorkspaceStore } from './stores/workspaceStore';
 import { adoptTodoColumns } from './todo/migrate';
 import { adoptStayColumns } from './board/budgetOnce';
+import { adoptGourmetColumns } from './board/gourmetColumn';
 import { applyBootstrapConfig } from './sync/bootstrap';
 import { initSyncEngine } from './sync/syncEngine';
 
@@ -73,6 +74,10 @@ export default function App() {
     // 그리고 같은 이유로 한 줄 더 (M31): 이름이 「숙소」인 기존 칸의 예산은
     // 오늘부터 시트마다 한 번만 센다. 더하기만 하고 멱등인 것도 위와 같다.
     adoptStayColumns();
+    // 그리고 세 번째 (M49): 「맛집」은 상설 칸이다. 새 여행은 그 칸을 달고
+    // 태어나고, 이미 쓰고 있는 여행은 여기서 받는다 — 이름이 맞는 칸이 있으면
+    // 플래그만, 없으면 칸 하나를. 더하기만 하고 멱등인 것은 위의 둘과 같다.
+    adoptGourmetColumns();
     // Same reason again: a sweep against an empty workspace would find every
     // photo unreferenced. Booked, not run — the first pass only marks
     // candidates (blobs a crash left behind mid-add), and the sweeper books

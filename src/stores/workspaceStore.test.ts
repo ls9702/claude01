@@ -39,18 +39,27 @@ describe('addTrip', () => {
     expect(trip.title).toBe('오사카 3박4일');
     expect(trip.currency).toBe('KRW');
     expect(trip.sheetOrder).toEqual([]);
-    expect(trip.columnOrder).toHaveLength(5);
-    expect(Object.keys(ws().columns)).toHaveLength(5);
+    // M49 — 여섯 번째 칸(「맛집」)이 맨 뒤에 붙었다. 앞의 다섯은 그대로다.
+    expect(trip.columnOrder).toHaveLength(6);
+    expect(Object.keys(ws().columns)).toHaveLength(6);
 
     const columns = trip.columnOrder.map((id) => ws().columns[id]);
-    expect(columns.map((c) => c.name)).toEqual(['이동수단', '할일', '식사', '숙소', '볼거리']);
-    expect(columns.map((c) => c.icon)).toEqual(['🚗', '📌', '🍽️', '🏨', '🎡']);
+    expect(columns.map((c) => c.name)).toEqual([
+      '이동수단',
+      '할일',
+      '식사',
+      '숙소',
+      '볼거리',
+      '맛집',
+    ]);
+    expect(columns.map((c) => c.icon)).toEqual(['🚗', '📌', '🍽️', '🏨', '🎡', '🍚']);
     expect(columns.map((c) => c.color)).toEqual([
       'sky',
       'violet',
       'amber',
       'rose',
       'emerald',
+      'orange',
     ]);
     expect(columns.every((c) => c.tripId === tripId && c.cardOrder.length === 0)).toBe(true);
     expect(columns.map((c) => c.name)).toEqual(SEED_COLUMNS.map((s) => s.name));
@@ -60,7 +69,14 @@ describe('addTrip', () => {
     const tripId = store().addTrip('오사카');
     const columns = ws().trips[tripId].columnOrder.map((id) => ws().columns[id]);
 
-    expect(columns.map((c) => c.todo)).toEqual([undefined, true, undefined, undefined, undefined]);
+    expect(columns.map((c) => c.todo)).toEqual([
+      undefined,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
     // A plain column carries **no** key — the shape every pre-M29 device reads.
     expect(columns.filter((c) => 'todo' in c).map((c) => c.name)).toEqual(['할일']);
     expect(SEED_COLUMNS.filter((s) => s.todo).map((s) => s.name)).toEqual(['할일']);
@@ -119,16 +135,26 @@ describe('deleteTrip', () => {
     expect(ws().entries.e1).toBeUndefined();
 
     expect(ws().trips[otherId]).toBeDefined();
-    expect(columnIds(otherId)).toHaveLength(5);
+    expect(columnIds(otherId)).toHaveLength(6);
 
     const buried = ws().tombstones;
-    // 1 trip + 5 columns + 1 card + 1 sheet + 1 day + 1 entry.
-    expect(buried).toHaveLength(10);
-    expect(buried.filter((t) => t.entity === 'column')).toHaveLength(5);
+    // 1 trip + 6 columns + 1 card + 1 sheet + 1 day + 1 entry (M49: 칸이 여섯).
+    expect(buried).toHaveLength(11);
+    expect(buried.filter((t) => t.entity === 'column')).toHaveLength(6);
     expect(buried.find((t) => t.entity === 'trip')?.id).toBe(tripId);
-    expect(buried.map((t) => t.entity).sort()).toEqual(
-      ['card', 'column', 'column', 'column', 'column', 'column', 'day', 'entry', 'sheet', 'trip'],
-    );
+    expect(buried.map((t) => t.entity).sort()).toEqual([
+      'card',
+      'column',
+      'column',
+      'column',
+      'column',
+      'column',
+      'column',
+      'day',
+      'entry',
+      'sheet',
+      'trip',
+    ]);
     expect(buried.every((t) => typeof t.deletedAt === 'number')).toBe(true);
   });
 
@@ -251,7 +277,7 @@ describe('deleteColumn', () => {
     expect(store().deleteColumn(second)).toBe(true);
 
     expect(ws().columns[second]).toBeUndefined();
-    expect(columnIds(tripId)).toHaveLength(4);
+    expect(columnIds(tripId)).toHaveLength(5);
     expect(columnIds(tripId)).not.toContain(second);
     // Cards keep their relative order, appended after what was already there.
     expect(ws().columns[first].cardOrder).toEqual([keeper, a, b]);
@@ -878,7 +904,7 @@ describe('duplicateSheet', () => {
     // 원본은 그대로. 카드/칸은 애초에 복사 대상이 아니다.
     expect(entriesOf(sheetId)).toHaveLength(2);
     expect(Object.keys(ws().cards)).toHaveLength(1);
-    expect(ws().trips[tripId].columnOrder).toHaveLength(5);
+    expect(ws().trips[tripId].columnOrder).toHaveLength(6);
     // 복제는 아무것도 지우지 않는다.
     expect(ws().tombstones).toHaveLength(0);
   });
@@ -1258,8 +1284,8 @@ describe('addColumn / addCard guards', () => {
   it('appends a column to columnOrder', () => {
     const tripId = store().addTrip('여행');
     const id = store().addColumn(tripId, '쇼핑', 'orange', '🛍️')!;
-    expect(columnIds(tripId)).toHaveLength(6);
-    expect(columnIds(tripId)[5]).toBe(id);
+    expect(columnIds(tripId)).toHaveLength(7);
+    expect(columnIds(tripId)[6]).toBe(id);
     expect(ws().columns[id]).toMatchObject({ name: '쇼핑', color: 'orange', icon: '🛍️' });
   });
 
