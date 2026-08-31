@@ -92,6 +92,33 @@ export function clampEntry(startMin: number, durationMin: number): EntrySpan {
   return { startMin: start, durationMin: duration };
 }
 
+/**
+ * The **move** twin of {@link clampEntry}: 이동은 길이를 깎지 않는다 (M50).
+ *
+ * `clampEntry` is a *resize/create* rule — it pins the start and shortens
+ * whatever would run past midnight. Applied to a drag or a 시작 시각 stepper
+ * that is exactly backwards: a 3시간 block nudged toward midnight lost a
+ * quarter hour on every step and never got it back on the way down, so the
+ * only record of how long the thing was supposed to take quietly evaporated
+ * (헌터A #1·#2·#5).
+ *
+ * Moving keeps the duration and stops the **start** at the last minute the
+ * block still fits: `[0, DAY_MIN - durationMin]`. A block cannot be pushed
+ * across midnight because a `TimelineEntry` is anchored to one calendar day
+ * (see `clampEntry` and `dayWindow.ts`) — that is a model constraint, and the
+ * honest way to express it is for the start to stop, not for the length to
+ * rot.
+ */
+export function clampMove(startMin: number, durationMin: number): EntrySpan {
+  const rawDuration = Number.isFinite(durationMin) ? Math.round(durationMin) : MIN_ENTRY_MIN;
+  const duration = Math.min(Math.max(rawDuration, MIN_ENTRY_MIN), DAY_MIN);
+
+  const rawStart = Number.isFinite(startMin) ? Math.round(startMin) : 0;
+  const start = Math.min(Math.max(rawStart, 0), DAY_MIN - duration);
+
+  return { startMin: start, durationMin: duration };
+}
+
 /** Minutes from midnight → pixels from the top of a day column. */
 export function minToY(min: number, pxPerMin: number): number {
   if (!Number.isFinite(min) || !Number.isFinite(pxPerMin)) return 0;

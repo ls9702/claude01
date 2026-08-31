@@ -18,6 +18,7 @@ import CardLedger, { numberOrUndefined, type LocalMoney } from '../common/CardLe
 import CardPhotoStrip from '../common/CardPhotoStrip';
 import Icon from '../common/Icon';
 import Sheet from '../common/Sheet';
+import { useSubmitLock } from '../common/useSubmitLock';
 import {
   CHIP_BUTTON,
   CHIP_BUTTON_DANGER,
@@ -147,21 +148,27 @@ export default function CardEditSheet({
   const canSubmit = title.trim().length > 0 && budgetOk;
   const presetActive = duration !== undefined && DURATION_PRESETS.includes(duration);
 
+  const once = useSubmitLock();
+
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit({
-      title: title.trim(),
-      memo: memo.trim() || undefined,
-      // `tabelog.com/tokyo` becomes an absolute link here, once, on the way in
-      // — never at render time, where every reader would have to repeat it.
-      url: normalizeUrl(url),
-      location,
-      budget: parsedBudget,
-      defaultDurationMin: duration,
-      // 맛집 칸이 아니면 화면에 픽커가 없었으므로 고칠 자격도 없다 — 원래 값을
-      // 그대로 되돌려 싣는다 (`CardFormValues.gourmetGenre`).
-      gourmetGenre: gourmet ? (genre ?? undefined) : card?.gourmetGenre,
-    });
+    // 더블클릭이 카드를 두 장 만들지 않게 (M50) — 부모가 닫아 줄 때까지 버튼은
+    // 아직 화면에 있다.
+    once(() =>
+      onSubmit({
+        title: title.trim(),
+        memo: memo.trim() || undefined,
+        // `tabelog.com/tokyo` becomes an absolute link here, once, on the way in
+        // — never at render time, where every reader would have to repeat it.
+        url: normalizeUrl(url),
+        location,
+        budget: parsedBudget,
+        defaultDurationMin: duration,
+        // 맛집 칸이 아니면 화면에 픽커가 없었으므로 고칠 자격도 없다 — 원래 값을
+        // 그대로 되돌려 싣는다 (`CardFormValues.gourmetGenre`).
+        gourmetGenre: gourmet ? (genre ?? undefined) : card?.gourmetGenre,
+      }),
+    );
   };
 
   return (
@@ -318,7 +325,17 @@ export default function CardEditSheet({
                 type="button"
                 data-testid="duration-custom-toggle"
                 aria-expanded={customOpen}
-                onClick={() => setCustomOpen((open) => !open)}
+                // 「직접 입력」을 켜면 프리셋 선택을 놓는다 (M50, 헌터A #7).
+                //
+                // 입력칸은 `customOpen && !presetActive`일 때만 서므로, 프리셋
+                // 칩이 눌린 상태에서 이 버튼을 누르면 버튼만 선택된 것처럼
+                // 보이고 **칸은 나타나지 않았다** — 「직접 입력」이라 적힌 것을
+                // 눌렀는데 입력할 곳이 없는 화면. 값을 비워 프리셋을 풀어 주면
+                // 칸이 곧바로 뜨고, 사람이 원한 것도 바로 그것이다.
+                onClick={() => {
+                  if (!customOpen && presetActive) setDuration(undefined);
+                  setCustomOpen(!customOpen);
+                }}
                 className={customOpen ? CHIP_SELECTED : CHIP_BUTTON}
               >
                 직접 입력

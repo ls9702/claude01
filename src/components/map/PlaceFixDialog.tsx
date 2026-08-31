@@ -75,12 +75,16 @@ export default function PlaceFixDialog({
     existing && Number.isFinite(existing.lat) && Number.isFinite(existing.lng),
   );
 
+  // ConfirmDialog·MapModal과 같은 이유로 캡처 단계에서 삼킨다 (M50): 이 물음이
+  // 시트 위에 떠 있을 때 Escape 한 번이 물음과 시트를 함께 닫으면 안 된다.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      onCancel();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onCancel]);
 
   useEffect(() => {

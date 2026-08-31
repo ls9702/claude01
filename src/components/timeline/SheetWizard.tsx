@@ -1,10 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useGoogleMapsKey } from '../../map/gmapsKey';
 import { useWorkspaceStore, type SheetEngineChoice } from '../../stores/workspaceStore';
+import { useUndoStore, UNDO_DESTRUCTIVE_MS } from '../../stores/undoStore';
 import type { FlightLeg, Id, Sheet as SheetModel } from '../../types/models';
-import { MAX_SHEET_DAYS, formatSheetPlan, planSheetDays, type SheetFlightOpts } from '../../utils/flights';
+import {
+  FLIGHT_CARD_PREFIX,
+  MAX_SHEET_DAYS,
+  formatSheetPlan,
+  planSheetDays,
+  type SheetFlightOpts,
+} from '../../utils/flights';
+import ConfirmDialog from '../common/ConfirmDialog';
 import Icon from '../common/Icon';
 import Sheet from '../common/Sheet';
+import { useSubmitLock } from '../common/useSubmitLock';
 import {
   INPUT_CLASS,
   LABEL_CLASS,
@@ -325,6 +334,7 @@ export default function SheetWizard({
   const createSheetFromFlights = useWorkspaceStore((s) => s.createSheetFromFlights);
   const updateSheet = useWorkspaceStore((s) => s.updateSheet);
   const updateSheetFlights = useWorkspaceStore((s) => s.updateSheetFlights);
+  const workspace = useWorkspaceStore((s) => s.workspace);
 
   const editing = Boolean(sheet);
 
@@ -359,31 +369,89 @@ export default function SheetWizard({
   const preview = formatSheetPlan(plan);
   const canSubmit = mode === 'days' ? dayCount >= 1 : Boolean(opts.outbound);
 
+  /**
+   * 이 저장이 **지울** 일자와 그 위의 배치를 미리 센다 (M50, 헌터A #4).
+   *
+   * `updateSheetFlights`는 새 기간 밖으로 밀려난 일자를 배치째 지운다. 3일짜리
+   * 시트를 2일로 줄이면 3일차에 올려 둔 일정이 말없이 사라졌고, 토스트도 확인도
+   * 없었다 — 되돌릴 방법도 없었다.
+   *
+   * ✈️ 카드는 세지 않는다: 그것들은 마법사가 만들고 마법사가 다시 만드는
+   * 소유물이라, 「없어진다」고 말하면 거짓말이 된다.
+   */
+  const losing = useMemo(() => {
+    const target = sheet ?? fillSheet;
+    if (!target || plan.count <= 0) return null;
+    const existing = target.dayOrder.filter((dayId) => workspace.days[dayId]);
+    const dropped = existing.slice(plan.count);
+    if (dropped.length === 0) return null;
+
+    const droppedIds = new Set(dropped);
+    const entries = Object.values(workspace.entries).filter((entry) => {
+      if (!droppedIds.has(entry.dayId)) return false;
+      const card = workspace.cards[entry.cardId];
+      return !card?.title.startsWith(FLIGHT_CARD_PREFIX);
+    }).length;
+
+    return entries > 0 ? { days: dropped.length, entries } : null;
+  }, [sheet, fillSheet, plan.count, workspace]);
+
+  const [confirming, setConfirming] = useState(false);
+
+  // 두 번 눌러 시트가 둘 만들어지지 않게 (M50).
+  const once = useSubmitLock();
+
+  const apply = () =>
+    once(() => {
+      // 수정 mode, or create-into-an-empty-shell (B17): both re-plan a sheet that
+      // already exists, and `updateSheetFlights` is exactly that operation.
+      // 고른 지도는 시트가 생긴 **뒤에** 한 줄로 적는다 (M41). 만들기 경로가 둘
+      // (빈 껍데기 채우기 · 새로 만들기)이라, 두 생성 함수에 각각 인자를 다는
+      // 것보다 결과 id 하나에 같은 패치를 얹는 편이 갈래가 하나 적다.
+      const stampEngine = (sheetId: Id) => {
+        if (showEngine && engine === 'google') updateSheet(sheetId, { mapEngine: 'google' });
+      };
+
+      // 지워지는 배치가 있으면 저장 **직전**의 워크스페이스를 붙잡아 둔다.
+      // `workspaceStore`는 제자리에서 고치지 않으므로 이 참조 하나가 곧 완전한
+      // 되돌리기다 — `deleteWithUndo`가 쓰는 바로 그 방법 (`undoDelete.ts`).
+      const snapshot = losing ? useWorkspaceStore.getState().workspace : null;
+
+      const target = sheet ?? fillSheet;
+      if (target) {
+        updateSheet(target.id, { name: name.trim() || target.name });
+        updateSheetFlights(target.id, opts);
+        stampEngine(target.id);
+        onDone?.(target.id);
+      } else {
+        const created = createSheetFromFlights(tripId, name, opts);
+        if (created) {
+          stampEngine(created.sheetId);
+          onDone?.(created.sheetId);
+        }
+      }
+
+      if (snapshot && losing) {
+        useUndoStore
+          .getState()
+          .offer(
+            `일자 ${losing.days}개 삭제됨 · 배치 ${losing.entries}개`,
+            () => useWorkspaceStore.getState().replaceWorkspace(snapshot),
+            UNDO_DESTRUCTIVE_MS,
+          );
+      }
+      onClose();
+    });
+
   const submit = () => {
     if (!canSubmit) return;
-    // 수정 mode, or create-into-an-empty-shell (B17): both re-plan a sheet that
-    // already exists, and `updateSheetFlights` is exactly that operation.
-    // 고른 지도는 시트가 생긴 **뒤에** 한 줄로 적는다 (M41). 만들기 경로가 둘
-    // (빈 껍데기 채우기 · 새로 만들기)이라, 두 생성 함수에 각각 인자를 다는
-    // 것보다 결과 id 하나에 같은 패치를 얹는 편이 갈래가 하나 적다.
-    const stampEngine = (sheetId: Id) => {
-      if (showEngine && engine === 'google') updateSheet(sheetId, { mapEngine: 'google' });
-    };
-
-    const target = sheet ?? fillSheet;
-    if (target) {
-      updateSheet(target.id, { name: name.trim() || target.name });
-      updateSheetFlights(target.id, opts);
-      stampEngine(target.id);
-      onDone?.(target.id);
-    } else {
-      const created = createSheetFromFlights(tripId, name, opts);
-      if (created) {
-        stampEngine(created.sheetId);
-        onDone?.(created.sheetId);
-      }
+    // 사라질 것이 있으면 먼저 묻는다. 「저장」이 곧 「지우기」이기도 하다는 사실은
+    // 눌러 보고 알 일이 아니다.
+    if (losing) {
+      setConfirming(true);
+      return;
     }
-    onClose();
+    apply();
   };
 
   return (
@@ -500,6 +568,21 @@ export default function SheetWizard({
           </p>
         ) : null}
       </div>
+
+      {/* 사라질 배치가 있을 때만 (M50) — 빈 일자를 줄이는 일은 물어볼 것이 없다. */}
+      {confirming && losing ? (
+        <ConfirmDialog
+          title="일정이 삭제돼요"
+          description={`배치 ${losing.entries}개가 있는 일자 ${losing.days}개가 삭제됩니다. 카드는 보드에 그대로 남아요.`}
+          confirmLabel="저장"
+          testId="wizard-shrink-confirm"
+          onConfirm={() => {
+            setConfirming(false);
+            apply();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
     </Sheet>
   );
 }

@@ -95,6 +95,18 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
   /** Only one's own live message has a menu to offer. */
   const deletable = own && !removed;
 
+  /**
+   * 이번 누름이 **길게 눌러 메뉴를 연** 누름인가 (M50, 헌터M2 #2).
+   *
+   * 손을 떼면 브라우저는 길게 눌렀든 짧게 눌렀든 `click`을 하나 낸다. 사진
+   * 타일 위에서 길게 누르면 타이머가 메뉴를 열고, 뒤이어 도착한 그 `click`이
+   * 라이트박스까지 열어 「삭제할까요」 메뉴와 전체화면 사진이 동시에 떴다.
+   *
+   * 그래서 메뉴를 연 누름은 자기 뒤에 오는 클릭 하나를 삼킨다. 다음 누름이
+   * 시작될 때 깃발이 내려가므로, 짧은 탭은 지금까지처럼 사진을 연다.
+   */
+  const longPressed = useRef(false);
+
   const cancelPress = (): void => {
     if (pressTimer.current === null) return;
     clearTimeout(pressTimer.current);
@@ -102,8 +114,10 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
   };
   const startPress = (): void => {
     cancelPress();
+    longPressed.current = false;
     pressTimer.current = setTimeout(() => {
       pressTimer.current = null;
+      longPressed.current = true;
       setMenuAnchor(bubbleRef.current);
     }, LONG_PRESS_MS);
   };
@@ -178,7 +192,14 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
                         key={photo.id}
                         photo={photo}
                         alone={photos.length === 1}
-                        onOpen={() => setLightbox(index)}
+                        // 메뉴를 연 롱프레스가 남긴 클릭은 여기서 멈춘다.
+                        onOpen={() => {
+                          if (longPressed.current) {
+                            longPressed.current = false;
+                            return;
+                          }
+                          setLightbox(index);
+                        }}
                       />
                     ))}
                   </div>

@@ -150,6 +150,29 @@ export default function MemoView() {
   const dividerId = visit.current?.dividerId ?? null;
 
   /**
+   * 읽는 사람이 **보는 중에** 바뀌면 읽음 표시를 미룬다 (M50, 헌터M2 #3).
+   *
+   * 「동기화 설정」은 시트라서 어느 화면에서나 열린다 — 메모 탭을 열어 둔 채
+   * 그 안에서 프로필을 바꾸면 `MemoView`는 마운트된 그대로 `readKey`만 갈리고,
+   * 아래 이펙트가 새 프로필 이름으로 곧바로 「다 읽었음」을 찍었다. hoyabom은
+   * 시트만 보고 있었을 뿐 song이 쓴 두 줄을 본 적이 없는데, 그 두 줄의 안읽음
+   * 배지와 구분선이 태어나기도 전에 지워졌다.
+   *
+   * 그래서 프로필이 갈린 순간부터는 이 방문이 끝날 때까지(탭을 옮기면 이
+   * 컴포넌트가 사라지고, 다시 열면 새 방문이다) 찍지 않는다. 새 독자가 정말로
+   * 스레드를 마주했다는 신호 — 스크롤하거나 눌렀다 — 가 오면 그때 푼다.
+   *
+   * 렌더 중에 판정하는 것은 `visit`과 같은 이유다: 이펙트로 미루면 프로필이
+   * 갈린 바로 그 렌더에서 읽음 이펙트가 먼저 돌아 버린다.
+   */
+  const reader = useRef(profileId);
+  const deferRead = useRef(false);
+  if (reader.current !== profileId) {
+    reader.current = profileId;
+    deferRead.current = true;
+  }
+
+  /**
    * 스레드가 눈앞에 있는 동안 읽은 지점을 워크스페이스에 남긴다 (M24).
    *
    * 마운트할 때, 여행을 바꿀 때, 보는 중에 새 줄이 올 때마다 돈다. 그래도
@@ -163,6 +186,9 @@ export default function MemoView() {
     const stamp = (): void => {
       // 백그라운드 탭에서 도착한 줄은 읽은 것이 아니다.
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      // 보는 중에 사람이 바뀌었다면, 새 독자가 스레드를 마주하기 전까지는 아직
+      // 아무도 읽지 않았다 (위 `deferRead`).
+      if (deferRead.current) return;
       const at = latestSeenStamp(messages);
       if (at > 0) markRead(readKey, at);
     };
@@ -183,9 +209,25 @@ export default function MemoView() {
   /** Set by the composer: my own send always wins the scroll. */
   const forceScroll = useRef(false);
 
+  /**
+   * 새 독자가 스레드를 정말로 마주했다는 신호 (M50) — 스크롤했거나 눌렀다.
+   *
+   * 그때 비로소 미뤄 둔 읽음 표시를 푼다. 시트가 닫혔다는 사실만으로는 풀지
+   * 않는다: 설정에서 사람을 바꾸고 곧장 다른 탭으로 가는 길이 바로 배지가
+   * 사라지던 그 길이었고, 그 사이 새 독자의 눈이 스레드에 닿은 적은 없다.
+   */
+  const engage = (): void => {
+    if (!deferRead.current) return;
+    deferRead.current = false;
+    if (!readKey) return;
+    const at = latestSeenStamp(messages);
+    if (at > 0) markRead(readKey, at);
+  };
+
   const onScroll = (): void => {
     const node = scrollerRef.current;
     if (!node) return;
+    engage();
     atBottom.current = node.scrollHeight - node.clientHeight - node.scrollTop < NEAR_BOTTOM_PX;
   };
 
@@ -271,6 +313,7 @@ export default function MemoView() {
       <div
         ref={scrollerRef}
         onScroll={onScroll}
+        onPointerDown={engage}
         data-testid="memo-thread"
         data-count={messages.length}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-3"

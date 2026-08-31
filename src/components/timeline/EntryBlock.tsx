@@ -145,6 +145,15 @@ interface EntryGhostProps {
   width: number;
 }
 
+/**
+ * 길이 조절 손잡이의 최대 두께, 그리고 손잡이가 설 수 있는 가장 짧은 블록 (M50).
+ *
+ * 24px는 15분짜리 블록(13.5px)을 확실히 밀어내고 30분짜리(27px)는 남기는 선이다
+ * — 30분이면 8px짜리 손잡이 아래로 19px의 본체가 남아 탭이 살아 있다.
+ */
+const RESIZE_HANDLE_PX = 12;
+const RESIZE_HANDLE_MIN_BLOCK_PX = 24;
+
 /** Drag ghost for an entry: the same surface at its real height. */
 export function EntryGhost({ card, color, entry, width }: EntryGhostProps) {
   return (
@@ -235,7 +244,22 @@ export default function EntryBlock({
    * move minutes the block is not showing. Length is edited in the detail
    * sheet for those two cases, and only those two.
    */
-  const resizable = editOn && placement.drawMin === entry.durationMin;
+  const resizable =
+    editOn && placement.drawMin === entry.durationMin && height >= RESIZE_HANDLE_MIN_BLOCK_PX;
+
+  /**
+   * 손잡이 높이 — 블록의 1/3을 넘지 않는다 (M50, 헌터A #6).
+   *
+   * 고정 12px짜리 띠는 한 시간짜리 블록(54px)에서는 잘 맞지만 30분짜리(27px)
+   * 에서는 절반을 먹고, 15분짜리(13.5px)에서는 **89%**를 덮었다. 수정을 켜면
+   * 짧은 블록은 본체를 누를 자리가 남지 않아 상세 시트를 열 길이 사라졌다 —
+   * 길이를 고치라고 켠 스위치가 그 길이를 고칠 유일한 화면을 막은 셈이다.
+   *
+   * 이제 손잡이는 언제나 블록의 1/3 이하이고, 그보다 더 짧은 블록에는 아예
+   * 서지 않는다({@link RESIZE_HANDLE_MIN_BLOCK_PX}). 어느 쪽이든 본체의 2/3은
+   * 늘 눌러서 열 수 있다.
+   */
+  const handlePx = Math.min(RESIZE_HANDLE_PX, Math.floor(height / 3));
 
   /** '' when this placement carries no memo — the one test both marks use. */
   const hint = noteHint(entry.note);
@@ -349,10 +373,10 @@ export default function EntryBlock({
         onTouchStart={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
         // This one *is* a drag handle, and a 12px strip is nobody's scroller.
-        style={{ touchAction: 'none' }}
+        style={{ touchAction: 'none', height: handlePx }}
         // The bar only appears on hover/focus: parked permanently it reads as a
         // scrollbar sitting inside the block (M9 §4.4-7).
-        className="absolute inset-x-1 bottom-0 grid h-3 cursor-ns-resize place-items-end justify-center rounded-b-md pb-px"
+        className="absolute inset-x-1 bottom-0 grid cursor-ns-resize place-items-end justify-center rounded-b-md pb-px"
       >
         <span
           aria-hidden="true"

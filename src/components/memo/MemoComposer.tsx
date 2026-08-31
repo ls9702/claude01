@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
+import { clearMemoDraft, loadMemoDraft, saveMemoDraft } from '../../stores/memoDraft';
 import { deletePhotoBlobs, putPhotoBlob, usePhotoUrl } from '../../stores/photoBlobs';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { flushPush } from '../../sync/syncEngine';
@@ -74,8 +75,14 @@ export default function MemoComposer({ tripId, onSent }: { tripId: Id; onSent: (
   const addMemoMessage = useWorkspaceStore((s) => s.addMemoMessage);
   const isDesktop = useIsDesktop();
 
-  const [text, setText] = useState('');
-  const [staged, setStaged] = useState<CardPhoto[]>([]);
+  /**
+   * 초안은 컴포넌트보다 오래 산다 (M50, `stores/memoDraft.ts`).
+   *
+   * 이 컴포넌트는 메모 탭에서만 마운트되므로, 상태로만 들고 있으면 탭을 한 번
+   * 다녀오는 것이 곧 「쓰던 것 버리기」였다 — 붙여 둔 사진까지 함께.
+   */
+  const [text, setText] = useState(() => loadMemoDraft(tripId).text);
+  const [staged, setStaged] = useState<CardPhoto[]>(() => loadMemoDraft(tripId).staged);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -88,6 +95,27 @@ export default function MemoComposer({ tripId, onSent }: { tripId: Id; onSent: (
       live.current = false;
     };
   }, []);
+
+  /**
+   * 바뀔 때마다 갈무리해 둔다 (M50).
+   *
+   * 언마운트 때 한 번만 쓰면 안 된다: 그 시점의 클로저가 낡아 있을 수 있고,
+   * 무엇보다 탭 전환은 언마운트를 **동기적으로** 부르지 않는 경로(라우팅
+   * 애니메이션)도 지난다. 매 변화를 적어 두면 어느 길로 사라져도 마지막
+   * 상태가 남아 있다.
+   */
+  useEffect(() => {
+    saveMemoDraft(tripId, { text, staged });
+  }, [tripId, text, staged]);
+
+  /** 여행을 바꾸면 그 여행의 초안으로 갈아탄다 — 남의 통을 이어 쓰지 않는다. */
+  const loadedTrip = useRef(tripId);
+  if (loadedTrip.current !== tripId) {
+    loadedTrip.current = tripId;
+    const next = loadMemoDraft(tripId);
+    setText(next.text);
+    setStaged(next.staged);
+  }
 
   /** One line by default, growing with the message, capped so the thread stays. */
   const grow = (): void => {
@@ -196,6 +224,9 @@ export default function MemoComposer({ tripId, onSent }: { tripId: Id; onSent: (
     setText('');
     setStaged([]);
     setError(null);
+    // 보냈으므로 초안도 없다 — 위 이펙트가 곧 같은 일을 하지만, 보내기와 비우기
+    // 사이에 다른 렌더가 끼어들 자리를 두지 않는다.
+    clearMemoDraft(tripId);
     // Past the store's door, the message is ordinary workspace data and would
     // ride the 4초 debounce like any edit. A chat cannot afford that: 보내기 is
     // a finished thought and the other person is waiting for it, so the push is

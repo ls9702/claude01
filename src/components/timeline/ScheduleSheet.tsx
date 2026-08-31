@@ -15,6 +15,7 @@ import {
 } from '../../utils/time';
 import Sheet from '../common/Sheet';
 import Icon from '../common/Icon';
+import { useSubmitLock } from '../common/useSubmitLock';
 import {
   CHIP_BUTTON,
   CHIP_SELECTED,
@@ -84,10 +85,21 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
   const selectedDayId = dayId && days.some((day) => day.id === dayId) ? dayId : days[0]?.id;
 
   const [startMin, setStartMin] = useState(DEFAULT_START_MIN);
-  const [durationMin, setDurationMin] = useState(card.defaultDurationMin ?? 60);
+  const [durationMin, setDurationMin] = useState(() =>
+    Math.min(Math.max(card.defaultDurationMin ?? 60, MIN_ENTRY_MIN), DAY_MIN - DEFAULT_START_MIN),
+  );
 
+  /**
+   * 시작을 밀어도 소요는 그대로다 (M50) — 상한이 `DAY_MIN - durationMin`인 것은
+   * 스토어의 `clampMove`와 `EntryDetailSheet`가 쓰는 바로 그 상한이다.
+   *
+   * 전에는 `DAY_MIN - MIN_ENTRY_MIN`까지 시작이 올라갔으므로, 아래의
+   * `schedule-preview`가 「23:45–02:45」 같은 **배치될 수 없는** 시간을 보여
+   * 주고는 `scheduleCard`의 `clampEntry`가 조용히 15분으로 잘라 넣었다.
+   * 두 상한을 맞추면 미리보기가 곧 결과다.
+   */
   const stepStart = (delta: number) =>
-    setStartMin((value) => Math.min(Math.max(value + delta, 0), DAY_MIN - MIN_ENTRY_MIN));
+    setStartMin((value) => Math.min(Math.max(value + delta, 0), DAY_MIN - durationMin));
   const stepDuration = (delta: number) =>
     setDurationMin((value) =>
       Math.min(Math.max(value + delta, MIN_ENTRY_MIN), DAY_MIN - startMin),
@@ -130,21 +142,25 @@ export default function ScheduleSheet({ card, onClose }: ScheduleSheetProps) {
    */
   const outOfRange = Boolean(selectedDayId) && placement() === null;
 
-  const submit = () => {
-    const target = placement();
-    if (!target) {
-      notify('다음 일자가 없어요');
+  // 「이 시간에 추가」 더블탭이 배치를 둘로 늘리지 않게 (M50, 헌터D2 #3).
+  const once = useSubmitLock();
+
+  const submit = () =>
+    once(() => {
+      const target = placement();
+      if (!target) {
+        notify('다음 일자가 없어요');
+        onClose();
+        return;
+      }
+      const entryId = scheduleCard(card.id, target.dayId, target.startMin, durationMin);
+      if (entryId) {
+        offer(`'${card.title}' 배치됨`, () => deleteEntry(entryId));
+        // 드래그 배치와 같은 뒷이야기 (M41) — 구글 시트라면 위치를 한 번 되묻는다.
+        requestPlaceFix(workspace, card.id, target.dayId);
+      }
       onClose();
-      return;
-    }
-    const entryId = scheduleCard(card.id, target.dayId, target.startMin, durationMin);
-    if (entryId) {
-      offer(`'${card.title}' 배치됨`, () => deleteEntry(entryId));
-      // 드래그 배치와 같은 뒷이야기 (M41) — 구글 시트라면 위치를 한 번 되묻는다.
-      requestPlaceFix(workspace, card.id, target.dayId);
-    }
-    onClose();
-  };
+    });
 
   return (
     <Sheet

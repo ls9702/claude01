@@ -3,6 +3,7 @@ import {
   DAY_MIN,
   MIN_ENTRY_MIN,
   clampEntry,
+  clampMove,
   formatDayDate,
   formatTimeRange,
   minToY,
@@ -53,6 +54,39 @@ describe('clampEntry', () => {
       startMin: 0,
       durationMin: MIN_ENTRY_MIN,
     });
+  });
+});
+
+describe('clampMove', () => {
+  it('leaves a well-formed span alone', () => {
+    expect(clampMove(570, 90)).toEqual({ startMin: 570, durationMin: 90 });
+  });
+
+  it('stops the start instead of shortening the entry (M50)', () => {
+    // 이것이 `clampEntry`와 갈라지는 지점이다: 같은 입력에 `clampEntry`는
+    // `{1380, 60}`을 주지만, 이동은 길이를 지키고 시작을 세운다.
+    expect(clampMove(1380, 120)).toEqual({ startMin: DAY_MIN - 120, durationMin: 120 });
+    expect(clampMove(1425, 180)).toEqual({ startMin: DAY_MIN - 180, durationMin: 180 });
+    expect(clampMove(9999, 90)).toEqual({ startMin: DAY_MIN - 90, durationMin: 90 });
+  });
+
+  it('is a fixed point once the start has come to rest', () => {
+    // 멈춘 뒤로 계속 밀어도 아무것도 갉히지 않는다 — 헌터A #1의 핵심.
+    const first = clampMove(1380, 180);
+    expect(clampMove(first.startMin + 15, first.durationMin)).toEqual(first);
+    expect(clampMove(first.startMin + 600, first.durationMin)).toEqual(first);
+  });
+
+  it('pins the start inside the day and keeps the 15-minute floor', () => {
+    expect(clampMove(-60, 60)).toEqual({ startMin: 0, durationMin: 60 });
+    expect(clampMove(600, 0)).toEqual({ startMin: 600, durationMin: MIN_ENTRY_MIN });
+    expect(clampMove(600, -30)).toEqual({ startMin: 600, durationMin: MIN_ENTRY_MIN });
+    expect(clampMove(Number.NaN, Number.NaN)).toEqual({ startMin: 0, durationMin: MIN_ENTRY_MIN });
+  });
+
+  it('lets a full-day entry exist only at midnight', () => {
+    expect(clampMove(600, DAY_MIN)).toEqual({ startMin: 0, durationMin: DAY_MIN });
+    expect(clampMove(600, 9999)).toEqual({ startMin: 0, durationMin: DAY_MIN });
   });
 });
 

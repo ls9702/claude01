@@ -30,6 +30,11 @@ import { dropTarget, type DropTarget } from '../timeline/dayWindow';
 import { snapDropMin } from '../timeline/dropSnap';
 import { DAY_COLUMN_PX, PX_PER_MIN } from '../timeline/layout';
 import { yToMin } from '../utils/time';
+import {
+  AUTO_SCROLL_ACCELERATION,
+  AUTO_SCROLL_INTERVAL_MS,
+  nearScrollEdge,
+} from './autoScroll';
 import { CardSurface } from '../components/board/CardItem';
 import { EntryGhost } from '../components/timeline/EntryBlock';
 import EntryTrash from '../components/timeline/EntryTrash';
@@ -152,6 +157,7 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
   const moveCard = useWorkspaceStore((s) => s.moveCard);
   const scheduleCard = useWorkspaceStore((s) => s.scheduleCard);
   const moveEntry = useWorkspaceStore((s) => s.moveEntry);
+  const resizeEntry = useWorkspaceStore((s) => s.resizeEntry);
   const deleteEntry = useWorkspaceStore((s) => s.deleteEntry);
   const offer = useUndoStore((s) => s.offer);
   const notify = useUndoStore((s) => s.notify);
@@ -160,6 +166,8 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
   const grids = useRef(new Map<Id, HTMLElement | null>());
   /** Latest pointer position, kept because dnd-kit's `delta` is not it. */
   const pointerY = useRef<number | null>(null);
+  /** Only the auto-scroll gate reads this one — drops are a vertical question. */
+  const pointerX = useRef<number | null>(null);
   const grabY = useRef<number | null>(null);
 
   const register = useCallback<Register>((dayId, element) => {
@@ -170,10 +178,14 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
   useEffect(() => {
     const onPointer = (event: PointerEvent) => {
       pointerY.current = event.clientY;
+      pointerX.current = event.clientX;
     };
     const onTouch = (event: TouchEvent) => {
       const touch = event.touches[0];
-      if (touch) pointerY.current = touch.clientY;
+      if (touch) {
+        pointerY.current = touch.clientY;
+        pointerX.current = touch.clientX;
+      }
     };
     window.addEventListener('pointermove', onPointer, true);
     window.addEventListener('touchmove', onTouch, true);
@@ -198,6 +210,35 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
 
   const snapshot = useMemo(() => snapshotBoard(columns), [columns]);
 
+  /**
+   * 자동 스크롤을 손가락 기준·절대 픽셀로 다시 묶는다 (M50).
+   *
+   * `canScroll`은 스크롤 후보가 된 조상마다 한 번씩 불린다. 손가락이 그 상자의
+   * 어느 가장자리에서도 {@link AUTO_SCROLL_EDGE_PX}보다 멀면 그 상자는 이번
+   * 프레임에 스크롤될 자격이 없다. 가로 레일(보드 칸)도 같은 규칙으로 좌우
+   * 가장자리에서만 흐른다.
+   *
+   * 포인터를 모르는 상황(측정 전, 키보드 센서)에서는 막지 않는다 — 판단할
+   * 근거가 없을 때 기능을 꺼 버리는 쪽이 더 나쁜 실패다.
+   */
+  const autoScroll = useMemo(
+    () => ({
+      acceleration: AUTO_SCROLL_ACCELERATION,
+      interval: AUTO_SCROLL_INTERVAL_MS,
+      canScroll: (element: Element) => {
+        const y = pointerY.current;
+        const x = pointerX.current;
+        if (y == null || x == null) return true;
+        const box =
+          element === document.scrollingElement
+            ? { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth }
+            : element.getBoundingClientRect();
+        return nearScrollEdge(x, y, box);
+      },
+    }),
+    [],
+  );
+
   const onDragStart = (event: DragStartEvent) => {
     setActiveId(String(event.active.id));
     const start = activatorClientY(event.activatorEvent);
@@ -216,6 +257,7 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
     const clientY = pointerY.current;
     const grabOffset = grabY.current;
     pointerY.current = null;
+    pointerX.current = null;
     grabY.current = null;
 
     const entryId = parseEntryDraggableId(active);
@@ -244,14 +286,37 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
       }
       // Where it was, before the drop — the drag itself is the only record of
       // it, and a finger that slipped deserves the same way back as a tap.
-      const from = { dayId: entry.dayId, startMin: entry.startMin };
+      //
+      // `durationMin`이 함께 실린다 (M50, 헌터A #2): 예전 `from`은 일자와
+      // 시작만 들고 있었으므로, 되돌리기가 블록을 제자리에 갖다 놓고도 길이는
+      // 드롭이 남긴 값 그대로 두었다. 「실행 취소」는 드래그 **전체**를 물리는
+      // 것이지 절반만 물리는 것이 아니다.
+      const from = {
+        dayId: entry.dayId,
+        startMin: entry.startMin,
+        durationMin: entry.durationMin,
+      };
       moveEntry(entryId, target.dayId, target.startMin);
 
       // `moveEntry` treats "dropped where it started" as nothing at all; only
       // an actual change is worth a toast.
       const moved = useWorkspaceStore.getState().workspace.entries[entryId];
-      if (moved && (moved.dayId !== from.dayId || moved.startMin !== from.startMin)) {
-        offer('일정 이동됨', () => moveEntry(entryId, from.dayId, from.startMin));
+      if (
+        moved &&
+        (moved.dayId !== from.dayId ||
+          moved.startMin !== from.startMin ||
+          moved.durationMin !== from.durationMin)
+      ) {
+        // 순서가 중요하다: **먼저 옮기고 그 다음 늘린다**. `moveEntry`는 이제
+        // 소요를 보존하므로 블록은 `from.startMin`에 그대로 서고, 이어지는
+        // `resizeEntry`의 `clampEntry(from.startMin, from.durationMin)`는
+        // 정확히 원래 길이를 돌려준다 — `from`은 방금 전까지 실제로 있던
+        // 배치이니 그 합이 자정을 넘을 수 없기 때문이다. 반대로 늘리고 옮기면
+        // 늦은 시각에서 길이를 되찾으려다 클램프에 잘린다.
+        offer('일정 이동됨', () => {
+          moveEntry(entryId, from.dayId, from.startMin);
+          resizeEntry(entryId, from.durationMin);
+        });
       }
       return;
     }
@@ -292,6 +357,7 @@ export default function PlanDndContext({ trip, columns, children }: PlanDndConte
     <DayGridContext.Provider value={register}>
       <DndContext
         sensors={sensors}
+        autoScroll={autoScroll}
         collisionDetection={planCollisionDetection}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}

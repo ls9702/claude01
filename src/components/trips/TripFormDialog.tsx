@@ -5,6 +5,7 @@ import { CURRENCIES } from '../../utils/money';
 import PlaceSearch from '../map/PlaceSearch';
 import Sheet from '../common/Sheet';
 import Icon from '../common/Icon';
+import { useSubmitLock } from '../common/useSubmitLock';
 import {
   CHIP_BUTTON,
   CHIP_BUTTON_DANGER,
@@ -48,8 +49,16 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
   const canSubmit = title.trim().length > 0;
   const parsedRate = Number(rate.trim().replace(/,/g, ''));
   const usableRate = Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : undefined;
-  /** Both halves or neither — half a conversion is worse than none. */
-  const pairIsSet = Boolean(localCurrency) && usableRate !== undefined;
+  /**
+   * Both halves or neither — half a conversion is worse than none.
+   *
+   * 「현지 통화 ≠ 기준 통화」도 그 조건에 든다 (M50, 헌터B #3). 현지 통화를
+   * JPY로 골라 둔 뒤 **기준** 통화를 JPY로 바꾸면 「1 JPY = 9.3 JPY」라는
+   * 환산이 남는다 — 아래 `onChange`가 그 순간 짝을 치우지만, 판정도 함께
+   * 막아 둔다. 저장된 여행이 그런 짝을 들고 오는 경우(옛 데이터·동기화)에도
+   * 요약 줄과 저장이 같은 답을 내야 하기 때문이다.
+   */
+  const pairIsSet = Boolean(localCurrency) && localCurrency !== currency && usableRate !== undefined;
   /**
    * `0`, `-5`, `abc`: typed, and unusable. The example line used to answer with
    * the placeholder `9.3` as though the input had been accepted, while 저장
@@ -57,15 +66,36 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
    */
   const rateProblem = rate.trim() !== '' && usableRate === undefined;
 
+  /**
+   * 기준 통화가 바뀌면 같아져 버린 현지 통화는 그 자리에서 치운다 (M50).
+   *
+   * 현지 통화 목록은 기준 통화를 빼고 그린다. 그래서 기준을 JPY로 바꾸는 순간
+   * 「JPY」는 고를 수 없는 값이 되는데, 상태에는 그대로 남아 셀렉트가 빈칸으로
+   * 보이면서 요약 줄만 「JPY · 9.3」이라고 우겼다. 값과 화면이 어긋나면 어느
+   * 쪽이 진짜인지 사람이 알 수 없으므로, 고를 수 없게 된 값은 남기지 않는다.
+   */
+  const changeCurrency = (next: string) => {
+    setCurrency(next);
+    if (localCurrency === next) {
+      setLocalCurrency('');
+      setRate('');
+    }
+  };
+
+  // 「만들기」 더블클릭이 여행을 둘 만들지 않게 (M50).
+  const once = useSubmitLock();
+
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit({
-      title: title.trim(),
-      currency,
-      localCurrency: pairIsSet ? localCurrency : undefined,
-      fxRate: pairIsSet ? usableRate : undefined,
-      destination,
-    });
+    once(() =>
+      onSubmit({
+        title: title.trim(),
+        currency,
+        localCurrency: pairIsSet ? localCurrency : undefined,
+        fxRate: pairIsSet ? usableRate : undefined,
+        destination,
+      }),
+    );
   };
 
   return (
@@ -163,7 +193,7 @@ export default function TripFormDialog({ trip, onSubmit, onClose }: TripFormDial
             id="trip-currency"
             data-testid="trip-currency-select"
             value={currency}
-            onChange={(event) => setCurrency(event.target.value)}
+            onChange={(event) => changeCurrency(event.target.value)}
             className={INPUT_CLASS}
           >
             {CURRENCIES.map((option) => (

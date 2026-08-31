@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DIRECTIONS_LABEL, directionsUrl } from '../../map/directions';
 import {
   NO_GENRE_EMOJI,
@@ -25,6 +25,13 @@ import {
   saveUserGourmetPanelCollapsed,
 } from '../../stores/userGourmetPref';
 import type { Id, Workspace } from '../../types/models';
+import {
+  claimMapPanel,
+  claimMapPopup,
+  mapPopupZ,
+  registerMapPanel,
+  registerMapPopup,
+} from './mapLayerSlots';
 import Icon from '../common/Icon';
 import {
   CHIP_BUTTON,
@@ -122,9 +129,28 @@ export function useUserGourmetLayer(
     setFilterState(saveUserGourmetFilter(next));
   }, []);
 
+  /**
+   * 펼칠 때는 🍜 층의 패널을 먼저 접는다 (M50, `mapLayerSlots.ts`).
+   *
+   * 폰 지도 상자는 두 패널을 세로로 세울 만큼 높지 않다 — 「위/아래로 나눠
+   * 놓았으니 안 겹친다」는 규약이 360×640에서 121px 겹침으로 무너졌다
+   * (헌터B #1). 크게 펼쳐진 패널이 언제나 하나뿐이면 남은 자리는 계산 가능한
+   * 상수가 되고, 아래 `max-h`가 그 계산이다.
+   */
   const setCollapsed = useCallback((next: boolean) => {
+    if (!next) claimMapPanel('usergourmet');
     setCollapsedState(saveUserGourmetPanelCollapsed(next));
   }, []);
+
+  // 🍜 층이 이 패널을 접고 이 팝업을 닫을 수 있게 등록한다.
+  useEffect(
+    () =>
+      registerMapPanel('usergourmet', () =>
+        setCollapsedState(saveUserGourmetPanelCollapsed(true)),
+      ),
+    [],
+  );
+  useEffect(() => registerMapPopup('usergourmet', () => setOpenCardId(null)), []);
 
   /**
    * 이 셋의 **신원이 고정**이어야 한다.
@@ -132,9 +158,25 @@ export function useUserGourmetLayer(
    * `open`은 구글 갈래의 마커 효과가 의존성으로 든다(`GoogleMapView`). 렌더마다
    * 새 함수를 주면 그 효과가 매번 다시 돌아 맛집 마커를 지웠다 다시 붙이고,
    * 화면에서는 그것이 깜빡임으로 보인다.
+   *
+   * M50 — `toggle`은 켜는 순간 🍜 층의 패널을 접어야 하므로 최신 `active`·
+   * `collapsed`를 알아야 하는데, 그 둘을 의존성에 넣으면 위의 규칙이 깨진다.
+   * 그래서 값은 ref로 읽는다: 신원은 고정이고, 읽는 것은 늘 지금 값이다.
    */
-  const toggle = useCallback(() => setActive((current) => !current), []);
-  const open = useCallback((cardId: Id) => setOpenCardId(cardId), []);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
+
+  const toggle = useCallback(() => {
+    if (!activeRef.current && !collapsedRef.current) claimMapPanel('usergourmet');
+    setActive((current) => !current);
+  }, []);
+  const open = useCallback((cardId: Id) => {
+    // 한 층의 말풍선이 열리면 다른 층의 것은 닫힌다 (M50, 헌터B #2).
+    claimMapPopup('usergourmet');
+    setOpenCardId(cardId);
+  }, []);
   const close = useCallback(() => setOpenCardId(null), []);
 
   return {
@@ -180,7 +222,8 @@ export function UserGourmetToggle({ state, top }: ToggleProps) {
       aria-label="내 맛집"
       title="내 맛집"
       onClick={state.toggle}
-      style={{ top }}
+      // 전체화면에서는 노치 아래로 (M50) — `--map-safe-top`은 지도 상자가 심는다.
+      style={{ top: `calc(var(--map-safe-top, 0px) + ${top})` }}
       className={[
         'absolute left-2.5 z-[1100] grid h-11 w-11 place-items-center',
         'rounded-full border bg-surface/95 shadow-raise',
@@ -246,7 +289,12 @@ export function UserGourmetPanel({ state }: { state: UserGourmetState }) {
       data-testid="usergourmet-panel"
       data-collapsed="false"
       data-spot-count={state.spots.length}
-      className="absolute inset-x-2 bottom-2 z-[1050] max-h-[45%] space-y-2 overflow-y-auto rounded-lg bg-surface/97 p-3 shadow-float"
+      // 🍜 패널과 같은 계산 (M50): 이 패널이 위로 자랄 수 있는 끝은 🍜 층이
+      // 접혀 서 있는 알약의 아래다 — 상자 위 12.25rem에서 시작하는 그 알약
+      // 높이(2.25rem)와 사이 여백을 뺀 만큼. 예전의 `45%`는 상자의 절반 가까이를
+      // 무조건 차지해 위쪽 패널과 포개졌다.
+      style={{ maxHeight: 'calc(100% - var(--map-safe-top, 0px) - 15rem)' }}
+      className="absolute inset-x-2 bottom-2 z-[1050] space-y-2 overflow-y-auto rounded-lg bg-surface/97 p-3 shadow-float"
     >
       <div className="flex items-center gap-2">
         <p className="min-w-0 flex-1 truncate text-label text-ink">
@@ -359,7 +407,11 @@ export function UserGourmetPopup({ state, onEdit }: PopupProps) {
       data-testid="usergourmet-popup"
       data-card-id={spot.cardId}
       data-genre={spot.genre ?? 'none'}
-      className="absolute inset-x-2 bottom-2 z-[1200] space-y-3 rounded-lg bg-surface/97 p-4 shadow-float"
+      // M50 — 고정 1200을 버리고 두 층이 같은 눈금을 쓴다 (`mapPopupZ`).
+      // 1200은 「내가 늘 위」라는 선언이라, 🍜 팝업을 눌러 연 사람에게도 이
+      // 말풍선이 위에 얹혔다 (헌터B #2). 이제 방금 연 쪽이 위에 선다.
+      style={{ zIndex: mapPopupZ('usergourmet') }}
+      className="absolute inset-x-2 bottom-2 space-y-3 rounded-lg bg-surface/97 p-4 shadow-float"
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">

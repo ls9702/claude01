@@ -4,7 +4,6 @@ import type { Card, TimelineEntry } from '../../types/models';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import {
   DAY_MIN,
-  MIN_ENTRY_MIN,
   SNAP_MIN,
   formatDuration,
   formatTimeRange,
@@ -137,8 +136,17 @@ export default function EntryDetailSheet({
   // 만나는 것은 세 줄짜리 메모에게 부당하다.
   useEffect(growNote, []);
 
+  /**
+   * 시작만 움직인다 — 소요는 건드리지 않는다 (M50).
+   *
+   * 상한이 `DAY_MIN - entry.durationMin`인 것은 `clampMove`가 스토어에서 쓰는
+   * 바로 그 상한이다. 전에는 여기서 `DAY_MIN - MIN_ENTRY_MIN`까지 올려 보내고
+   * 스토어가 그 차이를 **소요에서** 깎았으므로, 3시간짜리 일정을 자정 쪽으로
+   * 밀면 한 번 누를 때마다 15분씩 사라졌다(헌터A #1). 두 상한을 같게 두면
+   * 걸린 뒤로는 아무 일도 일어나지 않고, 화면의 미리보기는 항상 참말이 된다.
+   */
   const stepStart = (delta: number) => {
-    const next = Math.min(Math.max(entry.startMin + delta, 0), DAY_MIN - MIN_ENTRY_MIN);
+    const next = Math.min(Math.max(entry.startMin + delta, 0), DAY_MIN - entry.durationMin);
     moveEntry(entry.id, entry.dayId, next);
   };
 

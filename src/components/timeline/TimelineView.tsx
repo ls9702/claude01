@@ -4,6 +4,7 @@ import { useIsDesktop, useMediaQuery } from '../../hooks/useMediaQuery';
 import { useNowTick } from '../../hooks/useNowTick';
 import { deleteEntryWithUndo } from '../../stores/entryDelete';
 import { deleteWithUndo } from '../../stores/undoDelete';
+import { useUndoStore } from '../../stores/undoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useTimelineChromeStore } from '../../stores/timelineChrome';
 import { useTimelineEditStore } from '../../stores/timelineEdit';
@@ -204,6 +205,8 @@ export default function TimelineView() {
 
   const [dialog, setDialog] = useState<Dialog>(null);
   const [pageIndex, setPageIndex] = useState(0);
+  /** 한 줄 알림 — 「1일차로 이동했어요」 (M50). */
+  const notify = useUndoStore((s) => s.notify);
   /** The pager's own ⋯ menu — mobile only; desktop keeps it on the day header. */
   const [dayMenuOpen, setDayMenuOpen] = useState(false);
   const dayMenuRef = useRef<HTMLDivElement | null>(null);
@@ -590,6 +593,40 @@ export default function TimelineView() {
     : currentDay;
   const nothingPlaced = Object.values(entriesByDay).every((list) => list.length === 0);
   const dialogEntry = dialog?.kind === 'entry' ? workspace.entries[dialog.entry.id] : undefined;
+
+  /**
+   * 상세 시트를 **열 때** 이 배치가 보이던 일자 (M50, 헌터A #8).
+   *
+   * 시트 안에서 시작 시각을 05시 아래로 내리면 그 배치는 05시 창 규칙에 따라
+   * **앞 일자**의 것이 된다 — 시트의 부제는 그 사실을 바로 보여 주지만
+   * (「1일차 · 04:00–05:00」), 저장하고 닫으면 폰의 페이저는 여전히 2일차에
+   * 서 있고 방금까지 고치던 블록은 화면에서 사라진다. 지운 것도, 잘못 만든
+   * 것도 아닌데 없어진 것처럼 보이는 상태다.
+   *
+   * 그래서 열릴 때의 일자를 붙잡아 두었다가 닫을 때 견준다. 달라졌으면
+   * 페이저가 따라가고 한 줄로 말한다.
+   */
+  const sheetOpenedOnDay = useRef<string | null>(null);
+  if (!dialogEntry) sheetOpenedOnDay.current = null;
+  else if (sheetOpenedOnDay.current === null) {
+    sheetOpenedOnDay.current = effectiveDayId(dialogEntry, dayOrder);
+  }
+
+  /** 시트를 닫는 유일한 문 — 창(일자)이 바뀌었으면 화면을 그리로 옮긴다. */
+  const closeEntrySheet = (): void => {
+    const openedOn = sheetOpenedOnDay.current;
+    const entry = dialogEntry;
+    setDialog(null);
+    if (!entry || !openedOn) return;
+
+    const shownId = effectiveDayId(entry, dayOrder);
+    if (shownId === openedOn) return;
+
+    const index = days.findIndex((day) => day.id === shownId);
+    if (index < 0) return;
+    setPageIndex(index);
+    notify(`${dayTitle(days[index], index)}로 이동했어요`);
+  };
   const quickSpendCard =
     dialog?.kind === 'quick-spend' ? workspace.cards[dialog.entry.cardId] : undefined;
 
@@ -1222,7 +1259,7 @@ export default function TimelineView() {
             if (index <= 0) return null;
             return { lat: stops[index - 1].lat, lng: stops[index - 1].lng };
           })()}
-          onClose={() => setDialog(null)}
+          onClose={closeEntrySheet}
           onDelete={removeEntry}
           onOpenBoard={() => {
             setDialog(null);

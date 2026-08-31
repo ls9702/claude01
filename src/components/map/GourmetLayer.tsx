@@ -75,6 +75,13 @@ import {
   withBtnSize,
 } from '../common/formStyles';
 import { createGourmetPinElement } from './googlePin';
+import {
+  claimMapPanel,
+  claimMapPopup,
+  mapPopupZ,
+  registerMapPanel,
+  registerMapPopup,
+} from './mapLayerSlots';
 
 /**
  * 「주변 맛집」 레이어 — 구글 지도 위에만 서는 참고 층 (M43).
@@ -156,6 +163,31 @@ export default function GourmetLayer({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [searching, setSearching] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
+
+  /* --- 자리 합의 (M50, `mapLayerSlots.ts`) ---------------------------- */
+
+  /**
+   * 이 층의 패널·팝업을 ⭐ 층이 접고 닫을 수 있게 등록한다.
+   *
+   * 접기는 기기 설정으로 남는다(`saveGourmetPanelCollapsed`) — 남이 접어 준
+   * 것도 내가 접은 것과 같은 상태여야, 다음에 지도를 열었을 때 화면이 방금
+   * 보던 모양 그대로다.
+   */
+  useEffect(
+    () => registerMapPanel('gourmet', () => setPanelCollapsed(saveGourmetPanelCollapsed(true))),
+    [],
+  );
+  useEffect(() => registerMapPopup('gourmet', () => setOpenKey(null)), []);
+
+  /** 펼치기·열기의 유일한 문 — 남의 것을 먼저 치우고 내 것을 연다. */
+  const expandPanel = useCallback(() => {
+    claimMapPanel('gourmet');
+    setPanelCollapsed(saveGourmetPanelCollapsed(false));
+  }, []);
+  const openSpotKey = useCallback((key: string) => {
+    claimMapPopup('gourmet');
+    setOpenKey(key);
+  }, []);
 
   const markersRef = useRef<{ marker: GoogleMarker; element: HTMLElement }[]>([]);
   /**
@@ -374,7 +406,7 @@ export default function GourmetLayer({
       });
       element.addEventListener('click', () => {
         onOpenSpot();
-        setOpenKey(spot.key);
+        openSpotKey(spot.key);
       });
       const marker = new markerLib.AdvancedMarkerElement({
         map,
@@ -386,7 +418,7 @@ export default function GourmetLayer({
     }
 
     return clear;
-  }, [active, spots, map, markerLib, onOpenSpot]);
+  }, [active, spots, map, markerLib, onOpenSpot, openSpotKey]);
 
   /** 사라진 곳의 팝업이 남아 있으면 안 된다. */
   useEffect(() => {
@@ -453,9 +485,17 @@ export default function GourmetLayer({
         aria-pressed={active}
         aria-label="주변 맛집"
         title="주변 맛집"
-        onClick={() => setActive((current) => !current)}
+        // 층을 **켜는 것**도 패널을 펼치는 일이다 (M50): 이 층이 펼친 채로
+        // 나타나면 ⭐ 층은 알약으로 물러난다. 접힌 채로 켜지는 경우에는 자리를
+        // 다투지 않으므로 남의 패널을 건드리지 않는다.
+        onClick={() => {
+          if (!active && !panelCollapsed) claimMapPanel('gourmet');
+          setActive((current) => !current);
+        }}
+        // 전체화면에서는 노치 아래로 (M50) — `--map-safe-top`은 지도 상자가 심는다.
+        style={{ top: 'calc(var(--map-safe-top, 0px) + 5.5rem)' }}
         className={[
-          'absolute left-2.5 top-[5.5rem] z-[1100] grid h-11 w-11 place-items-center',
+          'absolute left-2.5 z-[1100] grid h-11 w-11 place-items-center',
           'rounded-full border bg-surface/95 shadow-raise',
           'transition-colors duration-[140ms] ease-quick',
           active ? 'border-ink text-ink' : 'border-line text-ink-muted hover:text-ink',
@@ -478,7 +518,8 @@ export default function GourmetLayer({
           data-testid="gourmet-panel"
           data-collapsed="true"
           data-spot-count={spots.length}
-          className="absolute left-2 right-2 top-[12.25rem] z-[1050] flex flex-col items-start gap-1"
+          style={{ top: 'calc(var(--map-safe-top, 0px) + 12.25rem)' }}
+          className="absolute left-2 right-2 z-[1050] flex flex-col items-start gap-1"
         >
           <button
             type="button"
@@ -486,7 +527,7 @@ export default function GourmetLayer({
             data-collapsed="true"
             aria-expanded={false}
             aria-label={`주변 맛집 ${spots.length}곳 — 필터 펼치기`}
-            onClick={() => setPanelCollapsed(saveGourmetPanelCollapsed(false))}
+            onClick={expandPanel}
             className="inline-flex h-9 max-w-full items-center gap-1 rounded-full bg-surface/97 px-3 text-label text-ink shadow-float transition-colors duration-[140ms] ease-quick hover:bg-surface"
           >
             <span aria-hidden="true">🍜</span>
@@ -510,7 +551,18 @@ export default function GourmetLayer({
           data-testid="gourmet-panel"
           data-collapsed="false"
           data-spot-count={spots.length}
-          className="absolute inset-x-2 top-[12.25rem] z-[1050] max-h-[55%] space-y-2 overflow-y-auto rounded-lg bg-surface/97 p-3 shadow-float"
+          // 높이는 **지도 상자의 실높이**에서 계산한다 (M50, 헌터B #1).
+          //
+          // 예전의 `max-h-[55%]`는 상자의 55%였을 뿐, 이 패널이 상자 위쪽
+          // 12.25rem을 이미 비우고 시작한다는 사실을 몰랐다. 그래서 325px짜리
+          // 폰 지도에서 패널의 아래끝이 상자 밖으로 49px 튀어나가 아래쪽 ⭐
+          // 패널을 121px 덮었다. 이제 남은 자리(100% − 시작점 − 아래쪽 알약
+          // 자리)만 쓰고, 넘치는 내용은 안에서 스크롤한다.
+          style={{
+            top: 'calc(var(--map-safe-top, 0px) + 12.25rem)',
+            maxHeight: 'calc(100% - var(--map-safe-top, 0px) - 15.5rem)',
+          }}
+          className="absolute inset-x-2 z-[1050] space-y-2 overflow-y-auto rounded-lg bg-surface/97 p-3 shadow-float"
         >
           <div className="flex items-center gap-2">
             <p className="min-w-0 flex-1 truncate text-label text-ink">
@@ -633,7 +685,12 @@ export default function GourmetLayer({
           // z가 1160인 이유 (M49): 지도 아래쪽에 ⭐ 층의 패널(z-1050)이 설 수
           // 있게 되면서, 팝업이 패널 뒤로 숨는 일이 없도록 카드 팝업(1150) 바로
           // 위로 올렸다. 서는 자리는 그대로 화면 아래 두 칸이다.
-          className="absolute inset-x-2 bottom-2 z-[1160] space-y-3 rounded-lg bg-surface/97 p-4 shadow-float"
+          //
+          // M50 — 두 층의 팝업은 이제 서로를 닫으므로 겹칠 일이 없지만, 그래도
+          // **방금 연 쪽**이 한 칸 위에 선다 (`mapPopupZ`): 닫기가 한 프레임
+          // 늦어도 사람이 누른 것이 밑에 깔리지는 않는다 (헌터B #2).
+          style={{ zIndex: mapPopupZ('gourmet') }}
+          className="absolute inset-x-2 bottom-2 space-y-3 rounded-lg bg-surface/97 p-4 shadow-float"
         >
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">

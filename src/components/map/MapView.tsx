@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { latLngBounds } from 'leaflet';
 import { Circle, MapContainer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -405,9 +405,17 @@ export default function MapView() {
    * 한 번 실패하면 이 여행을 보는 동안은 OSM으로 그린다 — 실패한 로더를 매
    * 렌더마다 다시 부르면 화면이 깜빡이기만 한다. 키가 바뀌면(부트스트랩이 새
    * 키를 물어 왔다) 다시 시도한다.
+   *
+   * M50 — **시트(엔진)를 옮겨도** 다시 시도한다 (헌터B 의심1).
+   *
+   * 전에는 키가 바뀔 때만 풀렸다. 지하철에서 구글 시트를 한 번 열었다가
+   * 스크립트를 못 받으면, 그 뒤로는 지상에 올라와 다른 시트를 들렀다 돌아와도
+   * 이 화면이 살아 있는 한 영원히 OSM이었다 — 사람이 할 수 있는 일은 앱을
+   * 껐다 켜는 것뿐이었고, 그게 필요하다는 안내도 없었다. 시트를 옮기는 것은
+   * 「다시 그려 봐라」라는 뜻으로 읽어도 좋을 만큼 분명한 동작이고, 재시도의
+   * 대가는 실패 한 번(그리고 곧바로 OSM으로 되돌아오기)뿐이다.
    */
   const [googleFailed, setGoogleFailed] = useState(false);
-  useEffect(() => setGoogleFailed(false), [googleKey]);
 
   /** Leaflet's measured viewport; `0 × 0` until the container is laid out. */
   const [size, setSize] = useState({ x: 0, y: 0 });
@@ -428,6 +436,10 @@ export default function MapView() {
   /** 경로 controls: which sheet is being read, and what is drawn from it. */
   const [routeSheetId, setRouteSheetId] = useState<Id | undefined>(undefined);
   const [selection, setSelection] = useState<RouteSelection>({ kind: 'off' });
+
+  // 구글 재시도의 두 계기 (M50) — 키가 바뀌었거나, 보는 시트가 바뀌었거나.
+  // 자세한 이유는 위 `googleFailed` 선언에 적어 두었다.
+  useEffect(() => setGoogleFailed(false), [googleKey, routeSheetId]);
 
   const scopeStrip = useStripFade();
   const routeStrip = useStripFade();
@@ -1182,6 +1194,20 @@ export default function MapView() {
 
            `isolate`는 두 자세 모두에 남는다 — Leaflet의 내부 z-index가 700까지
            올라오므로, 그것이 이 상자 밖으로 새면 위의 계층 규칙이 무너진다. */
+        /* 노치를 아는 단 한 곳 (M50, 헌터B #5).
+         *
+         * 전체화면은 `fixed inset-0`이라 상자가 안전영역까지 먹는다. 복귀 버튼만
+         * `env(safe-area-inset-top)`을 더하고 있었고, 왼쪽 줄의 🍜·⭐ 토글과 그
+         * 아래 패널들은 고정 rem 값이라 노치 밑에 깔렸다.
+         *
+         * 값을 상자에 한 번 심고 아래에서 `calc(var(--map-safe-top) + …)`로 읽는
+         * 이유: 두 층은 서로 다른 파일에 있고 `fullscreen`을 알지 못한다. 프롭을
+         * 네 군데로 꿰는 대신 자세를 아는 이 자리에서 한 줄로 말한다. 전체화면이
+         * 아닐 때 `0px`인 것이 중요하다 — 그때 상자는 화면 위쪽에 있지 않으므로
+         * 안전영역을 더하면 버튼이 이유 없이 내려간다. */
+        style={
+          { '--map-safe-top': fullscreen ? 'env(safe-area-inset-top, 0px)' : '0px' } as CSSProperties
+        }
         className={
           fullscreen
             ? 'fixed inset-0 z-[45] isolate overflow-hidden bg-sunken'
@@ -1424,8 +1450,10 @@ export default function MapView() {
           aria-label="내 위치"
           title="내 위치"
           onClick={myLocation.toggle}
+          // 왼쪽 줄과 같은 노치 보정 (M50) — 오른쪽 줄도 같은 상자 안에 산다.
+          style={{ top: 'calc(var(--map-safe-top, 0px) + 5.5rem)' }}
           className={[
-            'absolute right-2.5 top-[5.5rem] z-[1100] grid h-11 w-11 place-items-center',
+            'absolute right-2.5 z-[1100] grid h-11 w-11 place-items-center',
             'rounded-full border bg-surface/95 shadow-raise',
             'transition-colors duration-[140ms] ease-quick',
             locating ? 'border-ink text-ink' : 'border-line text-ink-muted hover:text-ink',
@@ -1457,7 +1485,8 @@ export default function MapView() {
         {myLocation.state.message ? (
           <p
             data-testid="map-locate-error"
-            className="absolute right-2.5 top-[9.25rem] z-[1100] max-w-[11rem] rounded-md bg-surface/95 px-2 py-1 text-right text-micro font-normal text-ink-muted shadow-raise"
+            style={{ top: 'calc(var(--map-safe-top, 0px) + 9.25rem)' }}
+            className="absolute right-2.5 z-[1100] max-w-[11rem] rounded-md bg-surface/95 px-2 py-1 text-right text-micro font-normal text-ink-muted shadow-raise"
           >
             {myLocation.state.message}
           </p>

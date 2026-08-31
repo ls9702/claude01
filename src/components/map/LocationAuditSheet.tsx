@@ -246,8 +246,21 @@ export default function LocationAuditSheet({ tripId, onClose }: LocationAuditShe
             </p>
           ) : (
             <>
-              <p data-testid="location-audit-intro" data-total={total} className="text-label text-ink">
-                이 여행의 위치 있는 카드 {total}장을 AI와 OpenStreetMap으로 다시 확인해요.
+              {/* 본문도 키 유무로 갈린다 (M50, 헌터B #6).
+                  「동기화 설정」의 안내 줄은 M44부터 구글 키가 있는 기기에서
+                  「구글 지도 기준」이라 말하는데, 그 줄을 눌러 열린 이 시트는
+                  여전히 「AI와 OpenStreetMap으로」라고 했다. 같은 동작을 두
+                  화면이 다르게 설명하면 둘 중 하나는 거짓말이다 — 실제로 도는
+                  길은 위 `googleOn` 분기가 정하므로, 문구도 같은 값을 읽는다. */}
+              <p
+                data-testid="location-audit-intro"
+                data-total={total}
+                data-engine={googleOn ? 'google' : 'ai-osm'}
+                className="text-label text-ink"
+              >
+                {googleOn
+                  ? `이 여행의 위치 있는 카드 ${total}장을 구글 지도 기준으로 다시 확인해요.`
+                  : `이 여행의 위치 있는 카드 ${total}장을 AI와 OpenStreetMap으로 다시 확인해요.`}
               </p>
               <p className="text-micro font-normal text-ink-faint">
                 카드 한 장씩 순서대로 물어봐서 조금 걸려요. 확인만 하고, 옮길지는 목록에서

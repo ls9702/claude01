@@ -258,3 +258,77 @@ textarea {
     transition-duration: 1ms !important;
   }
 }
+
+
+/* ------------------------------------------------------------------ *
+ * 가로 스크롤바 — 마우스를 쓰는 화면에서는 늘 보이게 (M50, 사용자 요청)
+ * ------------------------------------------------------------------ *
+ *
+ * 보드(`board-scroller`)와 일정 그리드(`timeline-scroller`)는 내용이 창보다
+ * 넓어질 수 있다. 폰에서는 손가락이 곧 스크롤이라 막대가 없어도 되지만, 마우스
+ * 화면에서는 「오른쪽에 더 있다」는 사실도, 그리로 가는 손잡이도 없었다 —
+ * macOS와 요즘 크롬은 스크롤바를 **움직일 때만** 띄우므로, 가만히 있는 화면은
+ * 거기서 끝난 것처럼 보인다.
+ *
+ * 가르는 기준이 폭이 아니라 `pointer: fine`인 이유는 `HoverNote`가 호버를 그렇게
+ * 가르는 이유와 같다: 마우스를 붙인 태블릿에는 막대가 필요하고, 큰 폰에는 필요
+ * 없다. 터치 화면은 지금까지 그대로 — 브라우저의 겹침 막대가 산다.
+ *
+ * ## 두 엔진에 따로 말해야 한다
+ *
+ * 크롬 121부터 `scrollbar-width`가 **켜져 있으면 `::-webkit-scrollbar` 규칙을
+ * 통째로 무시한다**. 그래서 둘을 같은 블록에 나란히 쓰면 크롬에서는 우리 스타일이
+ * 하나도 걸리지 않고(그리고 겹침 막대가 그대로 남고), 파이어폭스에서만 얇아진다.
+ *
+ * `@supports selector(::-webkit-scrollbar)`로 갈라, 블링크·웹킷에서는 표준 속성을
+ * `auto`로 되돌리고 가상요소로 그린다(가상요소를 그리는 것 자체가 겹침 막대를
+ * **자리를 차지하는 고전 막대**로 바꾼다 — 「늘 보이게」의 실제 구현이다).
+ * 파이어폭스는 가상요소를 모르므로 표준 속성 두 줄을 그대로 받는다.
+ */
+@media (pointer: fine) {
+  [data-testid='board-scroller'],
+  [data-testid='timeline-scroller'] {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) var(--color-sunken);
+  }
+
+  @supports selector(::-webkit-scrollbar) {
+    [data-testid='board-scroller'],
+    [data-testid='timeline-scroller'] {
+      /* 표준 속성을 비켜 주지 않으면 아래 가상요소가 무시된다 (크롬 121+). */
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+
+    [data-testid='board-scroller']::-webkit-scrollbar,
+    [data-testid='timeline-scroller']::-webkit-scrollbar {
+      height: 10px;
+      width: 10px;
+    }
+
+    [data-testid='board-scroller']::-webkit-scrollbar-track,
+    [data-testid='timeline-scroller']::-webkit-scrollbar-track {
+      background: var(--color-sunken);
+      border-radius: var(--radius-md);
+    }
+
+    [data-testid='board-scroller']::-webkit-scrollbar-thumb,
+    [data-testid='timeline-scroller']::-webkit-scrollbar-thumb {
+      background: var(--color-line-strong);
+      border-radius: var(--radius-md);
+      /* 트랙 안에서 한 겹 물러서 있게 — 막대가 벽에 붙어 보이지 않는다. */
+      border: 2px solid var(--color-sunken);
+    }
+
+    [data-testid='board-scroller']::-webkit-scrollbar-thumb:hover,
+    [data-testid='timeline-scroller']::-webkit-scrollbar-thumb:hover {
+      background: var(--color-ink-faint);
+    }
+
+    /* 가로·세로가 만나는 모서리 — 기본값은 트랙과 다른 흰 네모다. */
+    [data-testid='board-scroller']::-webkit-scrollbar-corner,
+    [data-testid='timeline-scroller']::-webkit-scrollbar-corner {
+      background: var(--color-sunken);
+    }
+  }
+}

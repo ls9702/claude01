@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyWorkspace, type Id } from '../types/models';
 import { useProfileStore } from '../profile/profile';
 import { MAX_PHOTOS_PER_CARD, SEED_COLUMNS, useWorkspaceStore } from './workspaceStore';
+import { DAY_MIN } from '../utils/time';
 
 // The store persists through IndexedDB, which does not exist under vitest's
 // node environment. Swap in an in-memory `StateStorage` so `persist` is
@@ -1127,11 +1128,54 @@ describe('moveEntry', () => {
     });
   });
 
-  it('shortens rather than overflows at the end of the day', () => {
+  // M50 — 이동은 길이를 깎지 않는다 (헌터A #1·#2·#5).
+  //
+  // M2a부터 이 자리에는 「끝에서는 짧아진다」가 있었다(`{1395, 45}`). 그것이
+  // 3시간짜리 일정을 자정 쪽으로 미는 동안 15분씩 갉아먹고, 다시 내려도
+  // 돌려주지 않는 버그의 계약상 뿌리였다. 이제 이동은 **시작을 세우고** 길이는
+  // 그대로 둔다 — 자정을 넘길 수 없다는 모델의 제약은 시작이 멈추는 것으로
+  // 말한다. 줄이는 일은 `resizeEntry`만 한다.
+  it('stops the start rather than shortening at the end of the day', () => {
     const { cardId, dayA } = timelineSetup();
     const entryId = store().scheduleCard(cardId, dayA, 540, 120)!;
     store().moveEntry(entryId, dayA, 1400);
-    expect(ws().entries[entryId]).toMatchObject({ startMin: 1395, durationMin: 45 });
+    expect(ws().entries[entryId]).toMatchObject({ startMin: DAY_MIN - 120, durationMin: 120 });
+  });
+
+  it('keeps the duration across a nudge that would overflow, and back again', () => {
+    const { cardId, dayA } = timelineSetup();
+    const entryId = store().scheduleCard(cardId, dayA, 1200, 180)!; // 20:00–23:00
+
+    // 자정 너머로 아무리 밀어도 3시간은 3시간이고, 시작은 21:00에서 선다.
+    for (let i = 0; i < 8; i += 1) {
+      const at = ws().entries[entryId];
+      store().moveEntry(entryId, dayA, at.startMin + 15);
+    }
+    expect(ws().entries[entryId]).toMatchObject({ startMin: DAY_MIN - 180, durationMin: 180 });
+
+    // 그리고 되돌아오는 길에도 길이는 그대로다 — 예전에는 15분만 남았다.
+    store().moveEntry(entryId, dayA, 960);
+    expect(ws().entries[entryId]).toMatchObject({ startMin: 960, durationMin: 180 });
+  });
+
+  it('restores day, start and duration when a drag is undone (M50 #9)', () => {
+    const { cardId, dayA, dayB } = timelineSetup();
+    const entryId = store().scheduleCard(cardId, dayA, 1200, 180)!; // 20:00–23:00
+    const from = { ...ws().entries[entryId] };
+
+    // 드롭: 다른 일자의 자정 근처로. 시작만 서고 길이는 살아 있다.
+    store().moveEntry(entryId, dayB, 1425);
+    expect(ws().entries[entryId]).toMatchObject({ dayId: dayB, durationMin: 180 });
+
+    // 실행 취소가 하는 일과 같은 순서 — 먼저 옮기고, 그 다음 늘린다.
+    store().moveEntry(entryId, from.dayId, from.startMin);
+    store().resizeEntry(entryId, from.durationMin);
+
+    expect(ws().entries[entryId]).toMatchObject({
+      dayId: dayA,
+      startMin: 1200,
+      durationMin: 180,
+    });
   });
 
   it('ignores a no-op move and unknown / cross-trip targets', () => {

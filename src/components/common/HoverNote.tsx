@@ -224,12 +224,28 @@ export function useHoverNote(note: string | undefined, testId: string): HoverNot
   useEffect(() => {
     if (anchor === null) return;
     const close = (): void => cancelRef.current();
-    window.addEventListener('pointerdown', close);
+    /**
+     * 팝오버 **자신을 누른 것**은 바깥 누르기가 아니다 (M50, 헌터A #3).
+     *
+     * 고정된 팝오버는 자기를 낳은 카드 위에 겹쳐 있고 `pointerEvents: auto`다.
+     * 예전에는 그 위를 눌러도 이 리스너가 곧바로 닫아 버렸는데, 팝오버가
+     * 사라진 뒤에 도착하는 `click`은 갈 곳을 잃고 **밑에 있던 카드**로
+     * 다시 겨냥된다 — 메모를 닫으려던 탭이 카드 편집 시트를 열었다.
+     *
+     * 그래서 누르기는 여기서 무시하고, 닫는 일은 팝오버의 `onClick`이 맡는다:
+     * 그때는 클릭이 이미 팝오버에게 배달된 뒤라 재겨냥될 것이 없다.
+     */
+    const onPointerDown = (event: Event): void => {
+      const node = popoverRef.current;
+      if (node && event.target instanceof Node && node.contains(event.target)) return;
+      cancelRef.current();
+    };
+    window.addEventListener('pointerdown', onPointerDown);
     // 스크롤은 버블하지 않는다 — 그리드 안쪽에서 일어나므로 캡처로 듣는다.
     window.addEventListener('scroll', close, true);
     window.addEventListener('resize', close);
     return () => {
-      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('resize', close);
     };
@@ -268,6 +284,18 @@ export function useHoverNote(note: string | undefined, testId: string): HoverNot
             data-side={placement?.side ?? 'right'}
             data-pinned={pinned ? 'true' : 'false'}
             role="tooltip"
+            // 고정된 팝오버 위의 탭이 그것을 닫는 유일한 길 (M50). `click`이
+            // 이 요소에 배달된 뒤에 닫으므로 밑의 카드로 새지 않고,
+            // `stopPropagation`이 혹시 남은 버블 경로까지 막는다. 호버로 뜬
+            // 것은 `pointerEvents: none`이라 여기 닿지 않는다.
+            onClick={
+              pinned
+                ? (event) => {
+                    event.stopPropagation();
+                    cancel();
+                  }
+                : undefined
+            }
             style={{
               left: placement?.left ?? anchor.left,
               top: placement?.top ?? anchor.top,

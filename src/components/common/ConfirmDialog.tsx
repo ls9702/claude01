@@ -33,12 +33,24 @@ export default function ConfirmDialog({
   onCancel,
   testId = 'confirm-dialog',
 }: ConfirmDialogProps) {
+  /**
+   * Escape는 **이 층에서 멈춘다** (M50, 헌터D2 #1).
+   *
+   * 전에는 버블 단계에서 듣고 흘려보냈으므로, 시트 위에 뜬 확인 대화상자에서
+   * Escape를 한 번 누르면 대화상자와 **그 아래 시트가 함께** 닫혔다. 「정말
+   * 지울까요?」에 「아니오」라고 답했을 뿐인데 하던 작업까지 사라진 셈이다.
+   *
+   * 캡처 단계에서 먼저 받고 `stopPropagation`으로 삼키면, 가장 위에 있는 것
+   * 하나만 닫힌다 — `MapModal`이 같은 이유로 쓰는 바로 그 방법이다.
+   */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      onCancel();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onCancel]);
 
   return createPortal(

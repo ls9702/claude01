@@ -31,7 +31,7 @@ import {
 import { getActiveProfileId } from '../profile/profile';
 import { newId } from '../utils/ids';
 import { copySheetName } from '../utils/sheetName';
-import { clampEntry, snapMin } from '../utils/time';
+import { clampEntry, clampMove, snapMin } from '../utils/time';
 import { idbStorage } from './persistMiddleware';
 import { loadServerSession, workspaceStorageKey } from '../sync/session';
 
@@ -1535,7 +1535,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             const day = draft.days[dayId];
             if (!entry || !day || day.tripId !== entry.tripId) return null;
 
-            const span = clampEntry(snapMin(startMin), entry.durationMin);
+            // 이동은 길이를 깎지 않는다 (M50) — `clampMove`가 시작을 멈추고
+            // 소요는 그대로 둔다. 창을 넘길 수 없다는 사실은 시작이 서는 것으로
+            // 말해야지, 일정이 짧아지는 것으로 말하면 안 된다.
+            const span = clampMove(snapMin(startMin), entry.durationMin);
             // Dropping an entry back where it started is not a change.
             if (
               entry.dayId === dayId &&
