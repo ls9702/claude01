@@ -284,3 +284,30 @@ test('프리셋이 눌린 상태에서 「직접 입력」을 켜면 입력칸�
   await expect(page.getByTestId('card-duration-custom')).toBeVisible();
   await expect(page.getByTestId('duration-chip-60')).toHaveAttribute('aria-pressed', 'false');
 });
+
+/* ------------------------------------------------------------------ *
+ * #21 — 하단 대리 가로 스크롤바 (M50-fix)
+ * ------------------------------------------------------------------ */
+
+test('보드가 창보다 넓으면 하단에 대리 스크롤 막대가 서고, 양쪽이 서로 따라온다', async ({ page }) => {
+  await page.goto('/');
+  await createTrip(page, '가로 스크롤');
+
+  // 씨앗 칸 6개는 1280px 창보다 넓다 — 대리 막대가 설 조건.
+  const proxy = page.getByTestId('board-hscrollbar');
+  await expect(proxy).toBeVisible();
+
+  // 대리를 끌면 진짜 스크롤러가 따라온다.
+  await proxy.evaluate((el) => {
+    el.scrollLeft = 240;
+  });
+  await expect
+    .poll(() => page.getByTestId('board-scroller').evaluate((el) => el.scrollLeft))
+    .toBeGreaterThan(200);
+
+  // 진짜를 되돌리면 대리도 되돌아온다.
+  await page.getByTestId('board-scroller').evaluate((el) => {
+    el.scrollLeft = 0;
+  });
+  await expect.poll(() => proxy.evaluate((el) => el.scrollLeft)).toBeLessThan(10);
+});

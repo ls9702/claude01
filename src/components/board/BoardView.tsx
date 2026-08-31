@@ -32,6 +32,7 @@ import {
   withBtnSize,
 } from '../common/formStyles';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
+import StickyHScrollbar from '../common/StickyHScrollbar';
 import ScheduleSheet from '../timeline/ScheduleSheet';
 import AddColumnPanel from './AddColumnPanel';
 import BoardColumnView from './BoardColumnView';
@@ -371,6 +372,11 @@ export default function BoardView() {
               onAdd={(name, color, icon) => addColumn(trip.id, name, color, icon)}
             />
           </div>
+
+          {/* 보드는 페이지가 세로로 스크롤되는 화면이라 스크롤러의 진짜 가로
+              막대는 내용 맨 아래(화면 밖)에 붙는다 — 대리 막대가 뷰포트
+              하단에 늘 떠 있는다 (M50-fix). */}
+          <StickyHScrollbar targetRef={scrollerRef} testid="board-hscrollbar" />
 
           {/* The fade is the honest half of the pair: it says "there is more"
               on touch, where there are no arrows to press. Same condition as
