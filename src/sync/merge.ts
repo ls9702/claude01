@@ -28,6 +28,8 @@ import type {
   BoardColumn,
   Card,
   Day,
+  DrawElement,
+  DrawPage,
   Id,
   MemoMessage,
   Millis,
@@ -129,7 +131,11 @@ function mergeTombstones(local: Tombstone[], remote: Tombstone[]): Map<string, T
  * Returns the *original* array when nothing changed so callers can skip
  * pointlessly cloning their parent entity.
  */
-function reconcileOrder<T extends Timestamped>(order: Id[], members: T[]): Id[] {
+function reconcileList<T extends { id: Id }>(
+  order: Id[],
+  members: T[],
+  compare: (a: T, b: T) => number,
+): Id[] {
   const alive = new Map(members.map((member) => [member.id, member]));
   const seen = new Set<Id>();
   const kept: Id[] = [];
@@ -140,9 +146,107 @@ function reconcileOrder<T extends Timestamped>(order: Id[], members: T[]): Id[] 
     kept.push(id);
   }
 
-  const missing = members.filter((member) => !seen.has(member.id)).sort(byCreation);
+  const missing = members.filter((member) => !seen.has(member.id)).sort(compare);
   if (missing.length === 0 && kept.length === order.length) return order;
   return [...kept, ...missing.map((member) => member.id)];
+}
+
+/** {@link reconcileList} with the entity ordering (`createdAt`, then id). */
+const reconcileOrder = <T extends Timestamped>(order: Id[], members: T[]): Id[] =>
+  reconcileList(order, members, byCreation);
+
+/**
+ * Same total order as {@link byCreation}, for the one thing that has no
+ * `createdAt`: a {@link DrawElement} (see the model's note on why it carries
+ * only `updatedAt`).
+ */
+function byUpdate(a: DrawElement, b: DrawElement): number {
+  if (a.updatedAt !== b.updatedAt) return a.updatedAt - b.updatedAt;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
+ * 두 드로우 페이지 맵을 겹친다 (M52a) — **두 겹의 병합**.
+ *
+ * 페이지의 껍데기(제목·배경·`elementOrder`)는 평범한 엔티티 LWW로 갈리고,
+ * `elements`는 **요소 하나하나가 따로** 갈린다. 페이지를 통째로 LWW하면 두 사람이
+ * 같은 페이지에 동시에 그렸을 때 늦게 저장한 쪽이 상대의 획을 통째로 지운다 —
+ * 그건 병합이 아니라 덮어쓰기다.
+ *
+ * 삭제는 톰스톤이 아니라 `deletedAt` 도장이다(모델의 설명 참조). 그래서 지운
+ * 요소는 여전히 맵 안에 남아 「지웠다」를 상대에게 말하고, 30일이 지나면
+ * {@link TOMBSTONE_TTL_MS}가 그것마저 걷어 간다 — 톰스톤 GC와 같은 시계다.
+ *
+ * `elementOrder`에는 **지운 요소도 그대로 남는다**. 그래야 실행취소로 되살린
+ * 획이 맨 위가 아니라 원래 있던 층으로 돌아온다. 사라지는 것은 TTL이 걷어 간
+ * 뒤다.
+ */
+function mergeDrawPage(local: DrawPage, remote: DrawPage, now: Millis): DrawPage {
+  // 껍데기는 엔티티 LWW — 동점은 `mergeMap`과 같은 이유로 remote가 이긴다.
+  const shell = remote.updatedAt >= local.updatedAt ? remote : local;
+
+  const elements: Record<Id, DrawElement> = {};
+  for (const source of [local.elements, remote.elements]) {
+    for (const element of Object.values(source ?? {})) {
+      const current = elements[element.id];
+      if (!current || element.updatedAt >= current.updatedAt) elements[element.id] = element;
+    }
+  }
+  // 지운 지 오래된 요소는 걷어 낸다 — 이 맵이 영원히 자라면 그것이 곧 파일 크기다.
+  for (const element of Object.values(elements)) {
+    if (element.deletedAt !== undefined && now - element.deletedAt > TOMBSTONE_TTL_MS) {
+      delete elements[element.id];
+    }
+  }
+
+  const elementOrder = reconcileList(shell.elementOrder ?? [], Object.values(elements), byUpdate);
+
+  return {
+    ...shell,
+    // 삭제 도장은 **양쪽 중 무엇이든 찍힌 쪽**이 아니라 껍데기 LWW를 따른다:
+    // 지운 뒤 되살린 페이지가 다시 지워지면 안 되고, 그 판정은 시각이 한다.
+    elements,
+    elementOrder,
+  };
+}
+
+/** 두 워크스페이스의 `drawPages`를 겹친다. 양쪽 다 없으면 `undefined`. */
+function mergeDrawPages(
+  local: Record<Id, DrawPage> | undefined,
+  remote: Record<Id, DrawPage> | undefined,
+  now: Millis,
+): Record<Id, DrawPage> {
+  const out: Record<Id, DrawPage> = {};
+  for (const [id, page] of Object.entries(local ?? {})) out[id] = page;
+  for (const [id, page] of Object.entries(remote ?? {})) {
+    const current = out[id];
+    out[id] = current ? mergeDrawPage(current, page, now) : page;
+  }
+  // 한쪽에만 있던 페이지도 같은 TTL을 지난다.
+  for (const [id, page] of Object.entries(out)) {
+    if (page.deletedAt !== undefined && now - page.deletedAt > TOMBSTONE_TTL_MS) {
+      delete out[id];
+      continue;
+    }
+    if (local?.[id] && remote?.[id]) continue;
+    const elements: Record<Id, DrawElement> = {};
+    let pruned = false;
+    for (const element of Object.values(page.elements ?? {})) {
+      if (element.deletedAt !== undefined && now - element.deletedAt > TOMBSTONE_TTL_MS) {
+        pruned = true;
+        continue;
+      }
+      elements[element.id] = element;
+    }
+    if (pruned) {
+      out[id] = {
+        ...page,
+        elements,
+        elementOrder: reconcileList(page.elementOrder ?? [], Object.values(elements), byUpdate),
+      };
+    }
+  }
+  return out;
 }
 
 /** Mutable working copy of the merged workspace, plus the live tombstone map. */
@@ -158,6 +262,11 @@ interface Draft {
    * just a message whose newest edit stripped it, so LWW carries the delete.
    */
   memos: Record<Id, MemoMessage>;
+  /**
+   * 드로우 페이지 (M52a). 메모와 같은 자리에 있고 같은 이유로 `MAP_OF`에서
+   * 닿을 수 없다 — 삭제가 `deletedAt` 도장이라 톰스톤이 필요 없다.
+   */
+  drawPages: Record<Id, DrawPage>;
   tombs: Map<string, Tombstone>;
 }
 
@@ -170,7 +279,7 @@ interface Draft {
  * throw on the very next line. Memo deletions are soft (see
  * {@link MemoMessage.removedAt}) precisely so nothing has to be added here.
  */
-const MAP_OF: Record<EntityKind, keyof Omit<Draft, 'tombs' | 'memos'>> = {
+const MAP_OF: Record<EntityKind, keyof Omit<Draft, 'tombs' | 'memos' | 'drawPages'>> = {
   trip: 'trips',
   sheet: 'sheets',
   column: 'columns',
@@ -257,6 +366,12 @@ function repairReferences(draft: Draft, now: Millis): void {
   for (const memo of Object.values(draft.memos)) {
     if (!draft.trips[memo.tripId]) delete draft.memos[memo.id];
   }
+
+  // 드로우 페이지도 같은 규칙이다 (M52a): 여행이 사라지면 그 스케치북도
+  // 사라지고, 톰스톤은 쓰지 않는다 — 양쪽이 각자 같은 판정에 이른다.
+  for (const page of Object.values(draft.drawPages)) {
+    if (!draft.trips[page.tripId]) delete draft.drawPages[page.id];
+  }
 }
 
 /** Rebuilds `columnOrder` / `sheetOrder` / `dayOrder` / `cardOrder`. */
@@ -277,11 +392,34 @@ function reconcileOrders(draft: Draft): void {
   for (const day of Object.values(draft.days)) push(daysBySheet, day.sheetId, day);
   for (const card of Object.values(draft.cards)) push(cardsByColumn, card.columnId, card);
 
+  // 드로우 페이지 순서 (M52a). 지운 페이지도 배열에 남는다 — 실행취소가 자리를
+  // 되찾을 수 있어야 하고, TTL이 페이지를 걷어 갈 때 이 줄도 함께 사라진다.
+  const pagesByTrip = new Map<Id, DrawPage[]>();
+  for (const page of Object.values(draft.drawPages)) push(pagesByTrip, page.tripId, page);
+
   for (const trip of Object.values(draft.trips)) {
     const columnOrder = reconcileOrder(trip.columnOrder, columnsByTrip.get(trip.id) ?? []);
     const sheetOrder = reconcileOrder(trip.sheetOrder, sheetsByTrip.get(trip.id) ?? []);
-    if (columnOrder !== trip.columnOrder || sheetOrder !== trip.sheetOrder) {
-      draft.trips[trip.id] = { ...trip, columnOrder, sheetOrder };
+    // 페이지가 하나도 없고 배열도 없던 여행은 **그대로 없는 채**로 둔다: 빈
+    // 배열을 만들어 붙이면 M52a 이전 워크스페이스가 자기 자신과 달라져서 모든
+    // 기기가 한 번씩 의미 없는 푸시를 한다 (`mergeSeenBy`와 같은 조심).
+    const pages = pagesByTrip.get(trip.id) ?? [];
+    const drawPageOrder =
+      trip.drawPageOrder === undefined && pages.length === 0
+        ? undefined
+        : reconcileOrder(trip.drawPageOrder ?? [], pages);
+
+    if (
+      columnOrder !== trip.columnOrder ||
+      sheetOrder !== trip.sheetOrder ||
+      drawPageOrder !== trip.drawPageOrder
+    ) {
+      draft.trips[trip.id] = {
+        ...trip,
+        columnOrder,
+        sheetOrder,
+        ...(drawPageOrder === undefined ? {} : { drawPageOrder }),
+      };
     }
   }
   for (const sheet of Object.values(draft.sheets)) {
@@ -347,7 +485,8 @@ export function workspaceEquals(a: Workspace, b: Workspace): boolean {
     // a missing key and an `undefined` one alike — which is what makes a
     // pre-M13 workspace compare equal to itself after a round trip.
     deepEqual(a.seenBy, b.seenBy) &&
-    deepEqual(a.memos, b.memos)
+    deepEqual(a.memos, b.memos) &&
+    deepEqual(a.drawPages, b.drawPages)
   );
 }
 
@@ -369,6 +508,8 @@ export function merge(local: Workspace, remote: Workspace, now: Millis = Date.no
     entries: mergeMap(local.entries, remote.entries),
     // Absent-safe on both sides: a pre-M21 workspace has no field at all.
     memos: mergeMap(local.memos ?? {}, remote.memos ?? {}),
+    // 드로우만 `mergeMap`이 아니다 (M52a) — 페이지 안의 요소가 따로 갈린다.
+    drawPages: mergeDrawPages(local.drawPages, remote.drawPages, now),
     tombs: mergeTombstones(local.tombstones, remote.tombstones),
   };
 
@@ -405,5 +546,8 @@ export function merge(local: Workspace, remote: Workspace, now: Millis = Date.no
     // `mergeSeenBy` does it: a pre-M21 workspace has to stay byte-identical to
     // itself through a merge, or every pull would schedule a pointless push.
     memos: Object.keys(draft.memos).length > 0 ? draft.memos : undefined,
+    // 같은 조심 (M52a): 드로우를 한 번도 쓰지 않은 워크스페이스는 병합을 지나도
+    // 자기 자신과 바이트가 같아야 한다.
+    drawPages: Object.keys(draft.drawPages).length > 0 ? draft.drawPages : undefined,
   };
 }

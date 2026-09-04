@@ -28,9 +28,18 @@ const FALLBACK = '새 일정';
  * 앞뒤 공백은 양쪽 모두 손질해서 비교하므로 「본 일정 」과 「본 일정」은 같은
  * 이름으로 친다.
  */
-export function copySheetName(name: string, existing: readonly string[]): string {
-  const trimmed = name.trim() || FALLBACK;
-  const base = trimmed.replace(COPY_SUFFIX, '').trim() || FALLBACK;
+export function copySheetName(
+  name: string,
+  existing: readonly string[],
+  /**
+   * 이름이 비었을 때 쓸 말. 기본값은 시트의 것이고, 드로우 페이지 복제(M52a)가
+   * 자기 말(「새 페이지」)을 넣어 같은 규칙을 그대로 쓴다 — 사본 이름 규칙을
+   * 두 벌 갖는 것보다 인자 하나가 싸다.
+   */
+  fallback: string = FALLBACK,
+): string {
+  const trimmed = name.trim() || fallback;
+  const base = trimmed.replace(COPY_SUFFIX, '').trim() || fallback;
   const taken = new Set(existing.map((sheetName) => sheetName.trim()));
 
   const first = `${base} (복사)`;

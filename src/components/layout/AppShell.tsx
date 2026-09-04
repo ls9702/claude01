@@ -9,6 +9,7 @@ import BoardView from '../board/BoardView';
 import TimelineView from '../timeline/TimelineView';
 import MapView from '../map/MapView';
 import MemoView from '../memo/MemoView';
+import DrawView from '../draw/DrawView';
 import Icon from '../common/Icon';
 import NoticeBanner from '../common/NoticeBanner';
 import PersistBanner from '../common/PersistBanner';
@@ -22,6 +23,8 @@ const VIEWS: Record<TabId, () => React.JSX.Element> = {
   timeline: TimelineView,
   map: MapView,
   memo: MemoView,
+  // 드로우 (M52a) — 여섯 번째 탭.
+  draw: DrawView,
 };
 
 /** Minimal splash shown until IndexedDB rehydration completes. */

@@ -51,6 +51,22 @@ export interface Trip {
   columnOrder: Id[];
   /** Ordered {@link Sheet} ids for the 일정 tab. */
   sheetOrder: Id[];
+  /**
+   * 이 여행의 드로우 페이지 순서 (M52a) — {@link DrawPage} ids.
+   *
+   * `columnOrder`·`sheetOrder`와 같은 자리에 있으면서 optional인 이유는 하나다:
+   * M52a 이전에 저장된 여행에는 이 키가 없어야 하고, 드로우를 한 번도 열지
+   * 않은 여행에는 앞으로도 없어야 한다(`sync/merge`가 빈 배열을 만들어 내지
+   * 않는다 — 만들면 모든 기기가 한 번씩 쓸데없는 푸시를 한다).
+   *
+   * 페이지 자신은 {@link Workspace.drawPages}에 여행과 무관하게 평평히 눕고,
+   * 이 배열은 **순서만** 말한다 — {@link Workspace.memos}가 순서 배열을 갖지
+   * 않는 것과 정반대인데, 이유도 정반대다: 대화는 말한 시각이 곧 순서이지만
+   * 스케치북의 페이지 순서는 사람이 정한다.
+   *
+   * Optional and additive — `schemaVersion`은 그대로 1이다.
+   */
+  drawPageOrder?: Id[];
   createdAt: Millis;
   updatedAt: Millis;
 }
@@ -389,6 +405,143 @@ export interface MemoMessage {
   updatedAt: Millis;
 }
 
+/* ------------------------------------------------------------------ *
+ * 드로우 (M52a)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 한 요소가 공통으로 드는 것 — id와 시각, 그리고 지운 시각.
+ *
+ * `deletedAt`이 {@link Tombstone}이 아닌 이유는 {@link MemoMessage.removedAt}이
+ * 그런 이유와 **정확히 같다**: `Tombstone['entity']`는 모든 빌드가 표에서 찾는
+ * 닫힌 집합이라, M52a를 모르는 기기에 `'drawElement'` 톰스톤이 닿으면 그 표를
+ * `undefined`로 색인하고 다음 줄에서 죽는다. 요소의 삭제는 그냥 「지운 시각이
+ * 찍힌 편집」이고, 그래서 평범한 요소 단위 LWW가 삭제까지 실어 나른다.
+ *
+ * 요소에 `createdAt`이 없는 것도 의도다. 요소의 나이가 궁금한 자리는 하나뿐인데
+ * ({@link DrawPage.elementOrder}에 빠진 요소를 어디에 붙이나) 그 자리에서는
+ * `updatedAt`이 같은 답을 주고, 획 하나마다 필드를 하나 더 얹으면 그것이 곧
+ * 워크스페이스 크기다 — 이 모델에서 개수가 천 단위로 늘 수 있는 유일한 것이
+ * 요소다.
+ */
+export interface DrawElementBase {
+  id: Id;
+  updatedAt: Millis;
+  /** 지운 시각. 있으면 화면에도 병합에도 없는 것으로 친다. */
+  deletedAt?: Millis;
+}
+
+/**
+ * 손그림 한 획 (M52a).
+ *
+ * `points`가 `{x,y}[]`가 아니라 **평탄한 정수 배열**(`[x0,y0,x1,y1,…]`)인 이유는
+ * 저장 크기다: 같은 200점이 객체 배열로는 3KB가 넘고 이 모양으로는 1KB 아래다.
+ * 그 위에 `draw/simplify.ts`가 RDP 단순화와 정수 양자화를 한 번 걸어 점 수
+ * 자체를 줄인다 — 손가락은 1px 떨림을 그리지만 사람은 그것을 보지 않는다.
+ */
+export interface DrawStroke extends DrawElementBase {
+  type: 'stroke';
+  /** `[x0, y0, x1, y1, …]` — 페이지 로컬 CSS px, 정수. */
+  points: number[];
+  color: string;
+  width: number;
+  /** 형광펜은 반투명하고 굵다 — 색이 아니라 성질이라 필드로 둔다. */
+  kind: 'pen' | 'highlight';
+}
+
+/** 사각형·타원 — 왼쪽 위 모서리와 크기. `w`/`h`는 항상 양수로 정규화된다. */
+export interface DrawBox extends DrawElementBase {
+  type: 'rect' | 'ellipse';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  width: number;
+  /** 채움 색. 없으면 테두리만 그린다. */
+  fill?: string;
+}
+
+/** 직선·화살표 — 두 끝점. 화살표는 끝점에 머리가 붙는다. */
+export interface DrawSegment extends DrawElementBase {
+  type: 'line' | 'arrow';
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  width: number;
+}
+
+/** 탭한 자리에 앉는 글자 한 줄. */
+export interface DrawText extends DrawElementBase {
+  type: 'text';
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  size: number;
+}
+
+/** 이모지 스티커 — 관광지 사진 위에 「여기!」를 붙이는 물건. */
+export interface DrawSticker extends DrawElementBase {
+  type: 'sticker';
+  x: number;
+  y: number;
+  emoji: string;
+  size: number;
+}
+
+/**
+ * 드로우 페이지 위의 한 요소 (M52a) — `type`으로 갈리는 판별 유니온.
+ *
+ * 판별자가 획의 `kind`가 아니라 `type`인 이유는 둘이 서로 다른 질문에 답하기
+ * 때문이다: `type`은 「무엇으로 그렸나」이고 `kind`는 획 하나 안에서 「펜인가
+ * 형광펜인가」다.
+ */
+export type DrawElement = DrawStroke | DrawBox | DrawSegment | DrawText | DrawSticker;
+
+/** {@link DrawElement}의 판별자 — 도구 하나가 곧 하나씩이다. */
+export type DrawElementType = DrawElement['type'];
+
+/**
+ * 한 장의 드로우 페이지 (M52a).
+ *
+ * 카드·시트와 달리 **요소를 자기 안에 담는다**. 요소를 워크스페이스 최상위 맵에
+ * 올리지 않은 이유는 하나뿐이다: 요소는 개수가 천 단위로 자라는 유일한 것이고,
+ * 페이지를 지우면 그 전부가 함께 사라져야 하는데 최상위에 있으면 그 「전부」를
+ * 톰스톤으로 일일이 말해야 한다. 페이지 안에 있으면 페이지 하나의
+ * {@link DrawPage.deletedAt} 한 줄이 그 말을 다 한다.
+ *
+ * 그 대신 병합은 두 겹이다(`sync/merge.ts`): 페이지의 **껍데기**(제목·배경·
+ * 순서)는 평범한 엔티티 LWW로 갈리고, `elements`는 **요소 단위 LWW**로 합쳐진다.
+ * 두 사람이 같은 페이지에 동시에 그리면 두 그림이 다 남아야 하기 때문이다 —
+ * 페이지를 통째로 LWW하면 늦게 저장한 쪽이 상대의 획을 지운다.
+ */
+export interface DrawPage {
+  id: Id;
+  tripId: Id;
+  title: string;
+  createdAt: Millis;
+  updatedAt: Millis;
+  /** 지운 시각 — {@link DrawElementBase.deletedAt}과 같은 이유로 톰스톤이 아니다. */
+  deletedAt?: Millis;
+  /**
+   * 배경으로 깔린 사진 (M52b에서 UI가 붙는다).
+   *
+   * 바이트가 아니라 {@link CardPhoto.id}를 든다 — 사진은 이미 워크스페이스 밖
+   * (idb + `image.php`)에 살고, 그 규칙을 드로우가 다시 발명할 이유가 없다.
+   */
+  background?: {
+    photoId: Id;
+    /** 0~1. 없으면 렌더러의 기본값. */
+    opacity?: number;
+  };
+  elements: Record<Id, DrawElement>;
+  /** 그리는 순서 = 겹치는 순서. 뒤에 있는 것이 위에 그려진다. */
+  elementOrder: Id[];
+}
+
 /** Record of a deletion, kept so sync/merge does not resurrect the entity. */
 export interface Tombstone {
   id: Id;
@@ -432,6 +585,17 @@ export interface Workspace {
    * `schemaVersion` stays 1.
    */
   memos?: Record<Id, MemoMessage>;
+  /**
+   * 모든 여행의 드로우 페이지 (M52a), 페이지 id로 키를 잡는다.
+   *
+   * {@link Workspace.memos}와 같은 모양이고 같은 이유다: 여행마다 하나씩 두는
+   * 대신 평평한 맵 하나이고, 페이지가 자기 `tripId`를 든다. 순서는 여행 쪽
+   * ({@link Trip.drawPageOrder})이 든다.
+   *
+   * Optional and additive — M52a 이전에 저장된 워크스페이스에는 필드가 없고,
+   * {@link emptyWorkspace}도 만들지 않으며, `schemaVersion`은 그대로 1이다.
+   */
+  drawPages?: Record<Id, DrawPage>;
 }
 
 /** A fresh, empty workspace. */

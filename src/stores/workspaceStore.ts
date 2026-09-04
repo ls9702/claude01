@@ -8,6 +8,8 @@ import {
   type CardExpense,
   type CardPhoto,
   type Day,
+  type DrawElement,
+  type DrawPage,
   type FlightLeg,
   type GeoPoint,
   type Id,
@@ -28,6 +30,7 @@ import {
   type LegKind,
   type SheetFlightOpts,
 } from '../utils/flights';
+import { copyPageTitle, nextPageTitle } from '../draw/pages';
 import { getActiveProfileId } from '../profile/profile';
 import { newId } from '../utils/ids';
 import { copySheetName } from '../utils/sheetName';
@@ -101,6 +104,26 @@ export interface NewDayData {
 
 /** Fields of a {@link TimelineEntry} that callers may change directly. */
 export type EntryPatch = Partial<Pick<TimelineEntry, 'note'>>;
+
+/**
+ * 새 드로우 요소 (M52a) — 스토어가 채우는 셋(`id`·`updatedAt`·`deletedAt`)만 뺀
+ * 요소.
+ *
+ * 조건부 타입인 이유는 {@link DrawElement}가 유니온이기 때문이다: 그냥
+ * `Omit<DrawElement, …>`이면 유니온이 하나의 객체 타입으로 뭉개져서 `type:
+ * 'stroke'`인데 `x`를 요구하는 일이 생긴다.
+ */
+export type NewDrawElement = DrawElement extends infer T
+  ? T extends DrawElement
+    ? Omit<T, 'id' | 'updatedAt' | 'deletedAt'>
+    : never
+  : never;
+
+/**
+ * 요소에 얹는 패치. `Partial`은 유니온 위에서 분배되므로 각 갈래의 필드만
+ * 받는다 — `stroke`에 `emoji`를 실을 수 없다.
+ */
+export type DrawElementPatch = Partial<DrawElement>;
 
 /** Fallback length of a dropped card that carries no `defaultDurationMin`. */
 export const DEFAULT_ENTRY_MIN = 60;
@@ -192,7 +215,31 @@ function draftOf(ws: Workspace): Draft {
     // Cloned only when it exists, so a workspace that never had a 메모 keeps
     // no `memos` key at all — the shape every pre-M21 device already handles.
     memos: ws.memos ? { ...ws.memos } : undefined,
+    // 같은 조심 (M52a): 드로우를 쓴 적 없는 워크스페이스에는 키가 아예 없다.
+    drawPages: ws.drawPages ? { ...ws.drawPages } : undefined,
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * 드로우 helpers (M52a)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 살아 있는 페이지 하나를 꺼낸다 — 지운 페이지는 없는 것으로 친다.
+ *
+ * 지운 페이지를 계속 편집할 수 있으면 상대 기기에서는 이미 사라진 페이지에
+ * 획이 쌓이고, 그 획들은 페이지가 TTL로 걷힐 때 소리 없이 함께 사라진다.
+ */
+function livePage(draft: Draft, pageId: Id): DrawPage | null {
+  const page = draft.drawPages?.[pageId];
+  return page && !page.deletedAt ? page : null;
+}
+
+/** 페이지 하나를 새 객체로 갈아 끼우고 `updatedAt`을 찍는다. */
+function putPage(draft: Draft, page: DrawPage, now: Millis): DrawPage {
+  const next: DrawPage = { ...page, updatedAt: now };
+  draft.drawPages = { ...(draft.drawPages ?? {}), [page.id]: next };
+  return next;
 }
 
 /**
@@ -623,6 +670,56 @@ export interface WorkspaceState {
    */
   removeMemoMessage: (id: Id) => void;
 
+  /* --- 드로우 — M52a --------------------------------------------------- */
+
+  /**
+   * 여행에 빈 페이지를 하나 더한다. 제목을 주지 않으면 「페이지 N」.
+   *
+   * 여행의 {@link Trip.drawPageOrder} 끝에 붙는다 — 그 배열이 없던 여행에서는
+   * 이때 처음 생긴다(그 전까지는 키가 아예 없다는 것이 M52a 이전 데이터와
+   * 같은 모양이라는 뜻이다).
+   */
+  addDrawPage: (tripId: Id, title?: string) => Id | null;
+  /** 제목만 바꾼다. 빈 이름은 받지 않는다(기존 이름을 지킨다). */
+  renameDrawPage: (id: Id, title: string) => void;
+  /**
+   * 페이지 하나를 통째로 베낀다 — 요소마다 **새 id**를 받고 순서는 그대로다.
+   *
+   * 사본이 원본의 요소 id를 그대로 쓰면 두 페이지가 같은 요소를 가리키게 되고,
+   * 한쪽에서 지운 획이 다른 쪽에서도 사라진다(요소 id는 워크스페이스 전체에서
+   * 유일해야 한다는 규칙이 아니라, 병합이 id로 요소를 겹치기 때문이다).
+   *
+   * 지운 요소는 베끼지 않는다 — 사본은 화면에 보이는 것의 사본이다.
+   */
+  duplicateDrawPage: (id: Id) => Id | null;
+  /**
+   * 페이지를 지운다 — 톰스톤이 아니라 `deletedAt` 도장이다
+   * ({@link DrawPage.deletedAt}). 실행취소는 `deleteWithUndo`의 스냅샷이 맡는다.
+   */
+  deleteDrawPage: (id: Id) => void;
+  /** 여행 안에서 페이지를 `delta`칸 옮긴다(-1 = 앞으로). 범위를 넘으면 no-op. */
+  moveDrawPage: (id: Id, delta: number) => void;
+
+  /**
+   * 페이지에 요소 하나를 더한다. 반환값은 새 요소의 id.
+   *
+   * 획은 **pointerup에서 딱 한 번** 이 함수를 부른다 — 그리는 동안 스토어를
+   * 건드리면 워크스페이스가 초당 수십 번 직렬화되고, 폴링으로 들어온 상대의
+   * 획과 내 진행 중인 획이 서로를 밀어낸다.
+   */
+  addDrawElement: (pageId: Id, element: NewDrawElement) => Id | null;
+  /**
+   * 요소를 **있는 그대로** 되돌려 놓는다 — 실행취소/다시실행 전용.
+   *
+   * `addDrawElement`와 다른 점은 id를 이미 알고 있다는 것뿐이다. 되살린 요소는
+   * 원래 있던 층(`elementOrder`의 자기 자리)으로 돌아간다.
+   */
+  putDrawElement: (pageId: Id, element: DrawElement) => void;
+  /** 요소 하나를 고친다(이동·글자 수정 등). 없는 요소면 no-op. */
+  updateDrawElement: (pageId: Id, elementId: Id, patch: DrawElementPatch) => void;
+  /** 요소 하나를 지운다 — 페이지와 같은 `deletedAt` 도장. */
+  deleteDrawElement: (pageId: Id, elementId: Id) => void;
+
   /* --- 일정 (timeline) — M2a ------------------------------------------ */
 
   /** Appends a sheet to the trip's `sheetOrder`. Returns its id, or `null`. */
@@ -890,6 +987,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 Object.entries(draft.memos).filter(([, memo]) => memo.tripId !== id),
               );
               draft.memos = Object.keys(kept).length > 0 ? kept : undefined;
+            }
+
+            // 드로우 페이지도 여행과 함께 간다 (M52a) — 메모와 같은 이유로
+            // 톰스톤 없이, 병합의 「여행 없는 페이지는 버린다」 규칙이 양쪽에서
+            // 같은 답을 낸다.
+            if (draft.drawPages) {
+              const kept = Object.fromEntries(
+                Object.entries(draft.drawPages).filter(([, page]) => page.tripId !== id),
+              );
+              draft.drawPages = Object.keys(kept).length > 0 ? kept : undefined;
             }
             return true;
           });
@@ -1243,6 +1350,209 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 updatedAt: now,
               },
             };
+            return true;
+          });
+        },
+
+        /* --- 드로우 (M52a) --------------------------------------------- */
+
+        addDrawPage: (tripId, title) =>
+          run((draft, now) => {
+            const trip = draft.trips[tripId];
+            if (!trip) return null;
+
+            const pageId = newId();
+            const existing = Object.values(draft.drawPages ?? {})
+              .filter((page) => page.tripId === tripId && !page.deletedAt)
+              .map((page) => page.title);
+
+            draft.drawPages = {
+              ...(draft.drawPages ?? {}),
+              [pageId]: {
+                id: pageId,
+                tripId,
+                title: title?.trim() || nextPageTitle(existing),
+                elements: {},
+                elementOrder: [],
+                createdAt: now,
+                updatedAt: now,
+              },
+            };
+            draft.trips[tripId] = {
+              ...trip,
+              drawPageOrder: [...(trip.drawPageOrder ?? []), pageId],
+              updatedAt: now,
+            };
+            return pageId;
+          }),
+
+        renameDrawPage: (id, title) => {
+          run((draft, now) => {
+            const page = livePage(draft, id);
+            const next = title.trim();
+            // 빈 이름과 같은 이름은 저장이 아니라 잡음이다 (`setColumnTodo` 참조).
+            if (!page || next === '' || next === page.title) return null;
+            return putPage(draft, { ...page, title: next }, now);
+          });
+        },
+
+        duplicateDrawPage: (id) =>
+          run((draft, now) => {
+            const source = livePage(draft, id);
+            if (!source) return null;
+            const trip = draft.trips[source.tripId];
+            if (!trip) return null;
+
+            const copyId = newId();
+            const elements: Record<Id, DrawElement> = {};
+            const elementOrder: Id[] = [];
+            for (const elementId of source.elementOrder) {
+              const element = source.elements[elementId];
+              if (!element || element.deletedAt) continue;
+              const nextId = newId();
+              elements[nextId] = { ...element, id: nextId, updatedAt: now };
+              elementOrder.push(nextId);
+            }
+
+            const existing = Object.values(draft.drawPages ?? {})
+              .filter((page) => page.tripId === trip.id && !page.deletedAt)
+              .map((page) => page.title);
+
+            draft.drawPages = {
+              ...(draft.drawPages ?? {}),
+              [copyId]: {
+                id: copyId,
+                tripId: trip.id,
+                title: copyPageTitle(source.title, existing),
+                ...(source.background ? { background: { ...source.background } } : {}),
+                elements,
+                elementOrder,
+                createdAt: now,
+                updatedAt: now,
+              },
+            };
+
+            // 사본은 원본 **바로 뒤**에 선다 — 맨 끝에 붙이면 페이지가 열 장일 때
+            // 방금 만든 것을 찾으러 목록을 끝까지 내려가야 한다.
+            const order = [...(trip.drawPageOrder ?? [])];
+            const at = order.indexOf(source.id);
+            if (at < 0) order.push(copyId);
+            else order.splice(at + 1, 0, copyId);
+            draft.trips[trip.id] = { ...trip, drawPageOrder: order, updatedAt: now };
+
+            return copyId;
+          }),
+
+        deleteDrawPage: (id) => {
+          run((draft, now) => {
+            const page = livePage(draft, id);
+            if (!page) return null;
+            // 도장만 찍는다: 순서 배열에서 빼지 않는 이유는 실행취소가 자리를
+            // 되찾아야 하기 때문이고, 병합의 TTL이 언젠가 둘 다 걷어 간다.
+            putPage(draft, { ...page, deletedAt: now }, now);
+            return true;
+          });
+        },
+
+        moveDrawPage: (id, delta) => {
+          run((draft, now) => {
+            const page = livePage(draft, id);
+            if (!page || delta === 0) return null;
+            const trip = draft.trips[page.tripId];
+            if (!trip) return null;
+
+            // 지운 페이지는 화면에 없으므로 **보이는 목록** 위에서 옮긴다 —
+            // 그러지 않으면 화살표 한 번이 아무 일도 하지 않는 것처럼 보인다.
+            const visible = (trip.drawPageOrder ?? []).filter((pageId) => {
+              const candidate = draft.drawPages?.[pageId];
+              return Boolean(candidate) && !candidate?.deletedAt;
+            });
+            const from = visible.indexOf(id);
+            const to = from + delta;
+            if (from < 0 || to < 0 || to >= visible.length) return null;
+
+            visible.splice(to, 0, ...visible.splice(from, 1));
+            // 지운 페이지들은 뒤에 조용히 붙는다(순서는 살아 있는 것들의 것이다).
+            const hidden = (trip.drawPageOrder ?? []).filter((pageId) => !visible.includes(pageId));
+            draft.trips[trip.id] = {
+              ...trip,
+              drawPageOrder: [...visible, ...hidden],
+              updatedAt: now,
+            };
+            return true;
+          });
+        },
+
+        addDrawElement: (pageId, element) =>
+          run((draft, now) => {
+            const page = livePage(draft, pageId);
+            if (!page) return null;
+
+            const elementId = newId();
+            const next = { ...element, id: elementId, updatedAt: now } as DrawElement;
+            putPage(
+              draft,
+              {
+                ...page,
+                elements: { ...page.elements, [elementId]: next },
+                elementOrder: [...page.elementOrder, elementId],
+              },
+              now,
+            );
+            return elementId;
+          }),
+
+        putDrawElement: (pageId, element) => {
+          run((draft, now) => {
+            const page = livePage(draft, pageId);
+            if (!page) return null;
+
+            // 되살린 요소는 `deletedAt`을 벗는다 — 그 도장이 남아 있으면 화면에는
+            // 보이는데 상대에게는 「지운 것」으로 건너간다.
+            const { deletedAt: _removed, ...rest } = element;
+            const next = { ...rest, updatedAt: now } as DrawElement;
+            putPage(
+              draft,
+              {
+                ...page,
+                elements: { ...page.elements, [element.id]: next },
+                elementOrder: page.elementOrder.includes(element.id)
+                  ? page.elementOrder
+                  : [...page.elementOrder, element.id],
+              },
+              now,
+            );
+            return true;
+          });
+        },
+
+        updateDrawElement: (pageId, elementId, patch) => {
+          run((draft, now) => {
+            const page = livePage(draft, pageId);
+            const current = page?.elements[elementId];
+            if (!page || !current || current.deletedAt) return null;
+            const next = { ...current, ...patch, updatedAt: now } as DrawElement;
+            putPage(draft, { ...page, elements: { ...page.elements, [elementId]: next } }, now);
+            return true;
+          });
+        },
+
+        deleteDrawElement: (pageId, elementId) => {
+          run((draft, now) => {
+            const page = livePage(draft, pageId);
+            const current = page?.elements[elementId];
+            if (!page || !current || current.deletedAt) return null;
+            putPage(
+              draft,
+              {
+                ...page,
+                elements: {
+                  ...page.elements,
+                  [elementId]: { ...current, deletedAt: now, updatedAt: now },
+                },
+              },
+              now,
+            );
             return true;
           });
         },

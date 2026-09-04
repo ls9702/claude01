@@ -164,7 +164,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 for (const size of SIZES) {
-  test(`${size.name} — 다섯 탭 어디서도 화면을 넘지 않는다 (AI 켬)`, async ({ page }) => {
+  test(`${size.name} — 여섯 탭 어디서도 화면을 넘지 않는다 (AI 켬)`, async ({ page }) => {
     await pretendAiIsOn(page);
     await page.setViewportSize({ width: size.width, height: size.height });
     await page.goto('/');
@@ -173,7 +173,9 @@ for (const size of SIZES) {
     await createTrip(page, '오사카 뷰포트');
     await seedPlacedCard(page, '오사카성 천수각');
 
-    for (const tab of ['trips', 'board', 'timeline', 'map', 'memo'] as const) {
+    // M52a — 드로우 탭이 붙어 여섯 칸이 됐다. 320/360/384에서 탭 줄이
+    // 넘치지 않는지는 `draw.spec`의 전용 시험이 폭 셋에서 따로 지킨다.
+    for (const tab of ['trips', 'board', 'timeline', 'map', 'memo', 'draw'] as const) {
       await page.getByTestId(`tab-${tab}`).click();
       await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
       await expectFits(page, `${size.name} / ${tab} 탭`);

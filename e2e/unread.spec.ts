@@ -183,7 +183,8 @@ test('상대가 쓴 메모는 탭 배지가 되고, 스레드를 열면 「여�
   await expect(badge).toHaveAttribute('data-count', '2');
   await expect(badge).toHaveText('2');
   // 여행 하나뿐이어도 어느 여행인지는 고르는 화면이 말해준다.
-  await expect(page.getByTestId('tab-bar').getByRole('tab')).toHaveCount(5);
+  // M52a — 드로우가 여섯 번째 탭으로 붙었다.
+  await expect(page.getByTestId('tab-bar').getByRole('tab')).toHaveCount(6);
 
   await openMemo(page);
 

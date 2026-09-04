@@ -121,7 +121,8 @@ test('오프라인으로 새로고침해도 앱 껍데기가 뜬다', async ({ p
   try {
     await page.reload();
     await expect(page.getByTestId('tab-bar')).toBeVisible();
-    await expect(page.getByRole('tab')).toHaveCount(5);
+    // M52a — 드로우가 여섯 번째 탭으로 붙었다.
+    await expect(page.getByRole('tab')).toHaveCount(6);
     // Sync is unconfigured here, so the chip must not panic about the network.
     await expect(page.getByTestId('sync-chip')).toHaveAttribute('data-status', 'off');
   } finally {

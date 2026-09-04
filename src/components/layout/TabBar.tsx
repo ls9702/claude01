@@ -17,21 +17,35 @@ const TAB_ICONS: Record<TabId, IconName> = {
   timeline: 'calendar',
   map: 'map',
   memo: 'chat',
+  draw: 'palette',
 };
+
+/**
+ * 여섯 칸이 320px에 들어가려면 한 칸이 53px이다 (M52a).
+ *
+ * 앞의 다섯 라벨은 두 글자라 11px 활자로 22px면 되는데 「드로우」만 세 글자라
+ * 33px이고, 좌우 여백까지 세면 그 칸이 먼저 터진다. 그래서 **그 칸에만** 한
+ * 단계 작은 활자를 준다 — 탭 줄을 가로 스크롤로 만드는 것보다 훨씬 조용하고,
+ * 여섯 개를 다 줄이면 앞의 다섯이 이유 없이 작아진다.
+ *
+ * `lg`(위쪽 바)에서는 자리가 남으므로 원래 활자로 돌아온다.
+ */
+const NARROW_TAB_LABEL = 'text-[0.625rem] lg:text-label';
 
 /**
  * Bottom tab bar on mobile; a top bar from `lg` (≥1024px) up.
  *
- * **The tab row holds tabs and nothing else** (M9 §3.3): exactly five cells
- * (four until 메모 arrived in M21), five `role="tab"`s. The sync indicator is
+ * **The tab row holds tabs and nothing else** (M9 §3.3): exactly six cells
+ * (four until 메모 arrived in M21, five until 드로우 in M52a), six
+ * `role="tab"`s. The sync indicator is
  * not a tab, so on desktop it lives in a utility zone pushed to the right, and
  * on mobile each view renders it above its own content instead. (백업 경고는
  * M26부터 동기화 설정 시트 안에만 있다.)
  *
  * The one thing a tab is allowed to carry is news about itself: 메모 wears the
  * count of lines the other person wrote and this person has not read (M24).
- * It rides *inside* the tab's own button, so the row is still five cells and
- * five `role="tab"`s.
+ * It rides *inside* the tab's own button, so the row is still six cells and
+ * six `role="tab"`s.
  */
 export default function TabBar() {
   const activeTab = useUiStore((s) => s.activeTab);
@@ -69,7 +83,9 @@ export default function TabBar() {
         'lg:pt-[env(safe-area-inset-top)]',
       ].join(' ')}
     >
-      <div className="mx-auto grid max-w-3xl grid-cols-5 lg:flex lg:h-14 lg:max-w-5xl lg:items-center lg:gap-1 lg:px-6">
+      {/* 여섯 칸 (M52a). `lg` 아래에서는 균등 격자라 한 칸이 화면 폭의 1/6이고,
+          라벨이 그 안에서 넘치지 않는 것은 위 `NARROW_TAB_LABEL`이 지킨다. */}
+      <div className="mx-auto grid max-w-3xl grid-cols-6 lg:flex lg:h-14 lg:max-w-5xl lg:items-center lg:gap-1 lg:px-6">
         <span className="hidden select-none pr-4 text-title text-ink lg:block">Trip Board</span>
 
         {TAB_IDS.map((tab) => {
@@ -83,7 +99,8 @@ export default function TabBar() {
               data-testid={`tab-${tab}`}
               onClick={() => setTab(tab)}
               className={[
-                'relative flex h-14 flex-col items-center justify-center gap-1 text-micro',
+                'relative flex h-14 min-w-0 flex-col items-center justify-center gap-1 text-micro',
+                TAB_LABELS[tab].length > 2 ? NARROW_TAB_LABEL : '',
                 'transition-colors duration-[140ms] ease-quick',
                 'lg:h-9 lg:flex-row lg:gap-2 lg:rounded-full lg:px-4 lg:text-label',
                 active
@@ -99,7 +116,7 @@ export default function TabBar() {
               ) : null}
               <Icon name={TAB_ICONS[tab]} size={24} className="lg:hidden" />
               <Icon name={TAB_ICONS[tab]} size={16} className="hidden lg:block" />
-              <span>{TAB_LABELS[tab]}</span>
+              <span className="max-w-full truncate">{TAB_LABELS[tab]}</span>
               {/* 아래쪽 바에서는 아이콘 어깨 위에(절대), 위쪽 바에서는 라벨
                   뒤에(정적) 붙는다 — 같은 배지 하나가 두 배치를 다 산다. */}
               {tab === 'memo' && unread > 0 ? (

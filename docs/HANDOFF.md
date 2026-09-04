@@ -5,7 +5,7 @@
 
 ## 1. 프로젝트 한 줄 요약
 
-2인(songlee=S, hoyabom=HB) 전용 여행 계획 PWA. 브레인스토밍 칸반 보드 → 일자별 타임시트(05시 경계) 드래그 배치 → 지도 동선 → 지출/결산 → Gemini AI 도우미. 시놀로지 NAS 자가호스팅 + 자동 동기화.
+2인(songlee=S, hoyabom=HB) 전용 여행 계획 PWA. 브레인스토밍 칸반 보드 → 일자별 타임시트(05시 경계) 드래그 배치 → 지도 동선 → 지출/결산 → Gemini AI 도우미 → 드로우 보드(손그림·스티커, M52a). 시놀로지 NAS 자가호스팅 + 자동 동기화.
 
 ## 2. 운영 현황 (2026-08-24 기준, 실사용 중)
 
@@ -36,7 +36,8 @@ src/
   timeline/              ← dayWindow(05시 경계 핵심!)·layout·route·gap·today·dayLabel — 전부 순수함수+테스트
   ai/                    ← aiClient(프록시 fetch)·prompts·aiSettings — SDK 없음, 키는 서버에만
   profile/               ← 2인 프로필 (song/hoyabom)
-  components/            ← layout/trips/board/timeline/map/ai/common — 디자인 시스템은 index.css @theme + common/formStyles.ts
+  draw/                  ← simplify(RDP+양자화)·geometry(도형·맞힘)·pages(이름·목록)·limits(용량 경고)·tools(색·굵기·스티커) — 전부 순수함수+테스트 (M52a)
+  components/            ← layout/trips/board/timeline/map/ai/**draw**/common — 디자인 시스템은 index.css @theme + common/formStyles.ts
   utils/                 ← time·money·spend·colors·photos·flights·geo·url…
 server/                  ← data.php·ai.php·image.php·**admin.php·archive.php**·config.sample.php·bootstrap-config.sample.json
 e2e/                     ← Playwright 스펙 + mock-api.ts(전 서버 계약의 인메모리 목)
@@ -49,7 +50,7 @@ docs/                    ← deploy-synology.md(NAS 가이드)·HANDOFF.md(이 �
 2. **Playwright 1.56.1 고정** — 컨테이너의 chromium 빌드(1194)와 맞물림. 업그레이드·`playwright install` 금지.
 3. **하루 경계는 05시** (`timeline/dayWindow.ts`): 새벽(00~05시) 엔트리는 전날 창에 표시·집계. 일자 단위 UI는 반드시 windowed 트윈(daySpendWindowed 등) 사용, 달력 트윈은 결산/여행 범위용.
 4. 병합은 엔티티 LWW + 톰스톤(30일 TTL) + 정렬배열 재조정 (`sync/merge.ts`). 사진 바이트는 워크스페이스 JSON 밖(별도 idb + image.php).
-5. 완료 기준: `npm run typecheck && npm run build && npm run test && npm run e2e` **전부 그린** 후에만 커밋. 현재 기준선: **단위 1390 / e2e 259** (M51 — `viewportfit.spec` 6건 추가). (e2e는 `npm run preview`가 `dist/`를 그대로 내주므로 **돌리기 전에 반드시 `npm run build`** — 안 하면 옛 화면을 검사한다.)
+5. 완료 기준: `npm run typecheck && npm run build && npm run test && npm run e2e` **전부 그린** 후에만 커밋. 현재 기준선: **단위 1489 / e2e 274** (M52a — `draw.spec` 15건 추가, 단위 +99). (e2e는 `npm run preview`가 `dist/`를 그대로 내주므로 **돌리기 전에 반드시 `npm run build`** — 안 하면 옛 화면을 검사한다.)
 6. 테스트ID·문구는 추가만(기존 것 변경 시 해당 스펙 최소 수정 + 커밋 메시지에 기록). 드래그 e2e는 스텝 이동+`--repeat-each` 재확인.
 7. 커밋은 마일스톤 단위, 브랜치 `claude/mobile-macbook-session-sync-xs40tt`, PR 안 만듦. 모델명·세션 링크 외 AI 흔적을 저장소에 남기지 않음(커밋 트레일러는 기존 형식 유지).
 8. 사용자 워크플로우 선호: **블록 단위로 Opus 서브에이전트에 위임**, 메인 세션이 검증·커밋. 큰 변경엔 적대적 검수 패스 추가. 완료 시 NAS 덮어쓰기용 zip 패키지 제공(사용자가 File Station으로 올림).
@@ -152,6 +153,86 @@ visualViewport.width`를 2초마다 보고 `console.warn` 한 줄을 남긴다 �
 
 패치노트 v22.
 
+### M52a — 드로우 보드 코어 (2026-09-04)
+
+여섯 번째 탭 「드로우」. **관광지 사진 위에 낙서로 브레인스토밍하는 자리**이고, 이번
+회차는 그 코어(모델·병합·편집기)까지다. 배경 사진과 카드 연결은 M52b.
+
+**모델 (additive, schemaVersion 그대로 1).** `Workspace.drawPages?: Record<Id, DrawPage>`
++ `Trip.drawPageOrder?: Id[]`. `DrawPage`는 **요소를 자기 안에 담는다**
+(`elements: Record<Id, DrawElement>` + `elementOrder: Id[]`) — 요소는 개수가 천 단위로
+자라는 유일한 것이고, 페이지를 지우면 그 전부가 함께 사라져야 하는데 최상위 맵에 있으면
+그 「전부」를 톰스톤으로 일일이 말해야 한다. `DrawElement`는 `type`으로 갈리는 판별
+유니온 일곱(`stroke`·`rect`·`ellipse`·`line`·`arrow`·`text`·`sticker`)이고, 좌표는 전부
+**페이지 로컬 CSS px 정수**다. 획의 점은 `{x,y}[]`가 아니라 **평탄 배열**
+(`[x0,y0,x1,y1,…]`) — 같은 200점이 객체 배열로는 3KB, 이 모양으로는 1KB 아래다.
+
+**삭제는 톰스톤이 아니라 `deletedAt` 도장이다** (페이지·요소 모두). 이유는 M21의
+`MemoMessage.removedAt`과 **글자 그대로 같다**: `Tombstone['entity']`는 모든 빌드가
+`MAP_OF` 표에서 찾는 닫힌 집합이라, M52a를 모르는 기기에 `'drawElement'` 톰스톤이 닿으면
+그 표를 `undefined`로 색인하고 다음 줄에서 죽는다. 도장은 평범한 편집이므로 LWW가 삭제를
+그대로 실어 나르고, 30일(`TOMBSTONE_TTL_MS`)이 지나면 병합이 도장째 걷어 간다 — 톰스톤
+GC와 같은 시계다. 백업 내보내기/가져오기·세션 분리는 워크스페이스를 통째로 다루므로 한
+줄도 고치지 않았다.
+
+**병합은 두 겹이다** (`sync/merge.mergeDrawPage`). 페이지의 **껍데기**(제목·배경·
+`elementOrder`)는 평범한 엔티티 LWW로 갈리고, `elements`는 **요소 하나하나가 따로**
+갈린다. 페이지를 통째로 LWW하면 두 사람이 같은 페이지에 동시에 그렸을 때 늦게 저장한 쪽이
+상대의 획을 통째로 지우는데, 그건 병합이 아니라 덮어쓰기다. `elementOrder`에는 **지운
+요소도 남는다** — 실행취소로 되살린 획이 맨 위가 아니라 원래 층으로 돌아와야 하고, TTL이
+요소를 걷어 갈 때 그 줄도 함께 사라진다. `reconcileOrder`는 비교자를 받는
+`reconcileList`로 한 겹 벗겨져 재사용됐다(요소에는 `createdAt`이 없어 `updatedAt`으로
+정렬한다 — 획 하나마다 필드를 하나 더 얹으면 그것이 곧 파일 크기다). 여행이 사라지면
+스케치북도 톰스톤 없이 사라진다(메모와 같은 규칙). `drawPages`·`drawPageOrder` 둘 다
+**없으면 만들지 않는다**: 빈 `{}`/`[]`를 붙이면 M52a 이전 워크스페이스가 자기 자신과
+달라져 모든 기기가 한 번씩 의미 없는 푸시를 한다(`mergeSeenBy`와 같은 조심).
+
+**저장은 pointerup에서 한 번.** 그리는 동안에는 스토어를 건드리지 않는다 — 매 프레임
+저장하면 워크스페이스가 초당 수십 번 직렬화되고, 폴링으로 들어온 상대의 획이 내 손 밑에서
+리렌더를 일으킨다. 손을 떼면 `draw/simplify.finishStroke`가 **정수 양자화 → RDP 단순화 →
+다시 접기**를 지나 요소 하나를 만든다(`DRAW_SIMPLIFY_TOLERANCE = 1.2`px, 실측으로 점 수가
+1/4~1/6). 콕 찍은 점은 두 점으로 늘린다 — 폴리라인은 점 하나로 아무것도 그리지 않지만,
+둥근 캡을 가진 길이 0의 선은 정확히 「점」으로 보인다.
+
+**용량 가드는 막지 않는다.** `src/draw/limits.ts`의 `DRAW_WARN_BYTES = 1_500_000`
+(**바꾸려면 이 숫자 하나만**). 드로우 몫의 직렬화 크기가 그것을 넘으면 드로우 탭 맨 위에
+중립 톤 한 줄(`draw-size-warning`)이 뜬다 — 여기서 넘친 것은 「데이터가 사라진다」가 아니라
+「동기화가 무거워진다」이고, 브레인스토밍 도구가 「더 못 그립니다」라고 말하는 순간 그것은
+브레인스토밍 도구가 아니다.
+
+**도구 열하나** — 펜·형광펜·지우개·선택·직선·화살표·사각형·타원·글자·스티커(24종·2단)·손,
+색 6·굵기 3·실행취소/다시실행. 실행취소는 **한 가지 모양의 걸음 하나**로 전부를 표현한다:
+`{id, before, after}` — `before`가 없으면 추가, `after`가 없으면 삭제, 둘 다 있으면 이동.
+그래서 되돌리기는 `putDrawElement`(있는 그대로 복원, `deletedAt`을 벗긴다) 아니면
+`deleteDrawElement` 둘 중 하나이고, 스택은 **편집 세션의 것**이라 페이지를 바꾸면 비워진다.
+맞힘 판정은 SVG의 히트 테스트가 아니라 `draw/geometry.hitTest`(순수)다 — 굵기 2px짜리 선을
+손가락으로 정확히 짚으라는 것은 폰에서 불가능한 요구이고, 「가까이 지나가면 맞은 것」은
+브라우저가 답해 주지 않는다. 화살촉도 `marker`가 아니라 `arrowHead`가 계산하는 두 점이라
+방향이 순수 함수의 답이 된다.
+
+**입력.** Pointer Events 하나로 셋을 가른다: 손가락 하나 = 도구, **손가락 둘 = 언제나
+팬/줌**(두 번째 손가락이 닿는 순간 그리던 것은 없던 일이 된다 — 확대하려던 손이 줄을 하나
+긋고 끝나면 그건 확대가 아니다), 손 도구/Space = 드래그 팬. 확대는 `viewBox`가 좁아지는
+것이지 페이지가 커지는 것이 **아니다**(M50-fix2가 「페이지 확대 고착」으로 데인 자리라,
+`touch-action: none`은 캔버스에만 건다). 휠은 `ctrl/meta`면 줌, `deltaX`가 있거나
+`shift`면 팬(트랙패드 두 손가락 밀기), 그 밖(휠만 있는 마우스)은 줌이다. 페이지는 고정
+4000×4000이고 열면 한가운데에서 시작한다.
+
+**탭 여섯 칸.** `grid-cols-5` → `grid-cols-6`. 320px에서 한 칸이 53px인데 「드로우」만
+세 글자라, **그 칸에만** 한 단계 작은 활자를 준다(`NARROW_TAB_LABEL`, `lg`에서는 원래
+활자) — 탭 줄을 가로 스크롤로 만드는 것보다 조용하고, 여섯을 다 줄이면 앞의 다섯이 이유
+없이 작아진다. 320/360/384 실측으로 `scrollWidth <= innerWidth`와 여섯 칸 전부의 오른쪽
+끝을 `draw.spec`이 지킨다. 해시에 두 번째 칸이 생겼다: `#/draw/<pageId>`
+(`HashSync.parseDrawPageId`/`hashFor`) — 없는 페이지를 가리키면 조용히 목록으로 되돌아가고
+주소도 같이 고쳐진다. 드로우가 아닌 탭으로 갈 때 페이지를 **닫지 않는다**(지도에 다녀와도
+그리던 페이지로 돌아온다).
+
+**기존 스펙 변경 (전부 「탭 5개」 단정).** `smoke`(제목·개수·라벨 목록·id 목록),
+`unread:187`, `profile:75`, `pwa:125`는 6으로, `viewportfit`의 「다섯 탭」 순회에 `draw`
+추가. 그 밖의 스펙은 한 글자도 고치지 않았다.
+
+패치노트 v23.
+
 ## 6. 보류/백로그 (토론·검수에서 합의된 순서)
 
 1. 시트 복제 (M7 토론 합의, 다음 1순위)
@@ -174,7 +255,17 @@ visualViewport.width`를 2초마다 보고 `console.warn` 한 줄을 남긴다 �
     접는 세 번째 단계를 두면 되돌릴 수 있으나, 실기기가 드물어 미룬다.
 12. 데스크톱 상시 가로 스크롤바(M50-fix ⑪)는 컨테이너 헤드리스 크로미움이 스크롤바를
     렌더하지 않아 여전히 실기 확인이 필요하다.
-13. **`photos.spec.ts:200`(사진 포함 백업 왕복)은 전체 스위트 부하에서만 늦는 스펙이다.** 단독 실행은 매번 14s 안에 끝나는데 259건 병렬 실행에서는 「가져왔어요」 알림 대기 15s가 세 번 모자랐다(M50~M51 게이트 4회 중 3회). M51에서 그 대기만 30s로 늘렸다 — 건너뜀이 아니라 기다림. 다시 빨개지면 부하가 아니라 진짜 회귀로 보고 단독 재실행부터.
+13. **M52b — 드로우 다음 회차 (M52a에서 의도적으로 남긴 것).**
+    ① **배경 이미지**: `DrawPage.background?: { photoId, opacity? }`는 **이미 모델에 있고
+    병합·복제도 그것을 나른다** — 없는 것은 UI뿐이다(사진 고르기 → 캔버스 맨 아래 레이어,
+    바이트는 M10의 idb+`image.php` 그대로).
+    ② **카드 → 페이지 연결**: 보드 카드의 🎨 칩이 `#/draw/<pageId>`로 넘어간다. 딥링크는
+    M52a에서 이미 살아 있으므로 필요한 것은 카드 쪽 참조 하나(additive optional)와 칩이다.
+    ③ **PNG 내보내기**: SVG → canvas → blob. 페이지가 고정 4000×4000이라 크기는 정해져
+    있고, 배경 사진이 들어오면 그 위에 합성해야 한다.
+    ④ **용량 상수**는 `src/draw/limits.ts`의 `DRAW_WARN_BYTES` **한 줄**이다(1.5MB). 경고를
+    더 이르게/늦게 하고 싶으면 그 숫자만 고친다.
+14. **`photos.spec.ts:200`(사진 포함 백업 왕복)은 전체 스위트 부하에서만 늦는 스펙이다.** 단독 실행은 매번 14s 안에 끝나는데 259건 병렬 실행에서는 「가져왔어요」 알림 대기 15s가 세 번 모자랐다(M50~M51 게이트 4회 중 3회). M51에서 그 대기만 30s로 늘렸다 — 건너뜀이 아니라 기다림. 다시 빨개지면 부하가 아니라 진짜 회귀로 보고 단독 재실행부터.
 
 ## 7. 다음 세션 시작 방법 (사용자용 가이드)
 

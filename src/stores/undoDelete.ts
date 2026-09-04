@@ -34,7 +34,7 @@ import { useUndoStore, UNDO_DESTRUCTIVE_MS } from './undoStore';
 import { useWorkspaceStore } from './workspaceStore';
 
 /** Which entity a delete removed — picks the noun in the toast. */
-export type DeleteKind = 'trip' | 'column' | 'card' | 'sheet' | 'day';
+export type DeleteKind = 'trip' | 'column' | 'card' | 'sheet' | 'day' | 'drawPage';
 
 /** Korean noun shown in the toast for each {@link DeleteKind}. */
 export const DELETE_KIND_LABELS: Record<DeleteKind, string> = {
@@ -43,6 +43,12 @@ export const DELETE_KIND_LABELS: Record<DeleteKind, string> = {
   card: '카드',
   sheet: '일정표',
   day: '일자',
+  /**
+   * 드로우 페이지 (M52a). 스냅샷 되돌리기가 그대로 맞는다 — 페이지 삭제는
+   * `deletedAt` 도장 하나지만, 그 한 줄을 되돌리는 것도 결국 「지우기 직전의
+   * 워크스페이스로」이기 때문이다.
+   */
+  drawPage: '페이지',
 };
 
 /** `여행 「오사카」 삭제됨` — a nameless entity drops the quotes. */

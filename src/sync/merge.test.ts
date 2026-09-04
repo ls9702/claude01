@@ -3,6 +3,9 @@ import type {
   BoardColumn,
   Card,
   Day,
+  DrawElement,
+  DrawPage,
+  DrawSticker,
   Id,
   MemoMessage,
   Millis,
@@ -879,5 +882,176 @@ describe('merge — memos', () => {
     expect(workspaceEquals(a, a)).toBe(true);
     expect(workspaceEquals(a, b)).toBe(false);
     expect(workspaceEquals(a, ws({ trips: [trip('t1', T(1))] }))).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * drawPages — 드로우 (M52a)
+ *
+ * 여기서 지키는 것은 하나다: **두 사람이 같은 페이지에 동시에 그리면 두 그림이
+ * 다 남는다.** 페이지를 통째로 LWW하면 늦게 저장한 쪽이 상대의 획을 지우는데,
+ * 그건 병합이 아니라 덮어쓰기다.
+ * ------------------------------------------------------------------ */
+
+describe('merge — drawPages', () => {
+  const sticker = (id: Id, at: Millis, over: Partial<DrawSticker> = {}): DrawElement => ({
+    id,
+    updatedAt: at,
+    type: 'sticker',
+    x: 100,
+    y: 100,
+    emoji: '📍',
+    size: 48,
+    ...over,
+  });
+
+  const page = (id: Id, at: Millis, over: Partial<DrawPage> = {}): DrawPage => ({
+    id,
+    tripId: 't1',
+    title: `페이지 ${id}`,
+    elements: {},
+    elementOrder: [],
+    createdAt: at,
+    updatedAt: at,
+    ...over,
+  });
+
+  /** 요소 목록을 든 페이지 — 순서 배열은 준 순서 그대로. */
+  const withElements = (id: Id, at: Millis, elements: DrawElement[], over: Partial<DrawPage> = {}) =>
+    page(id, at, {
+      elements: byId(elements),
+      elementOrder: elements.map((element) => element.id),
+      ...over,
+    });
+
+  const wsPages = (pages: DrawPage[], order?: Id[]): Workspace => ({
+    ...ws({ trips: [trip('t1', T(1), order ? { drawPageOrder: order } : {})] }),
+    drawPages: byId(pages),
+  });
+
+  it('양쪽 다 없으면 필드를 만들지 않는다 — M52a 이전 워크스페이스는 그대로다', () => {
+    const before = ws({ trips: [trip('t1', T(1))] });
+    const merged = merge(before, before, NOW);
+    expect(merged.drawPages).toBeUndefined();
+    expect(merged.trips.t1.drawPageOrder).toBeUndefined();
+    expect(workspaceEquals(merged, before)).toBe(true);
+  });
+
+  it('동시에 그린 두 획이 **둘 다** 남는다', () => {
+    const local = wsPages([withElements('p1', T(5), [sticker('a', T(10))])], ['p1']);
+    const remote = wsPages([withElements('p1', T(6), [sticker('b', T(11))])], ['p1']);
+
+    const merged = merge(local, remote, NOW);
+    const page1 = merged.drawPages!.p1;
+    expect(Object.keys(page1.elements).sort()).toEqual(['a', 'b']);
+    // 그리고 순서 배열이 둘 다 안다 — 그리지 않는 요소가 남아 있으면 안 된다.
+    expect([...page1.elementOrder].sort()).toEqual(['a', 'b']);
+  });
+
+  it('같은 요소를 둘이 고치면 늦게 고친 쪽이 이긴다 (요소 단위 LWW)', () => {
+    const local = wsPages([withElements('p1', T(5), [sticker('a', T(20), { x: 10 })])], ['p1']);
+    const remote = wsPages([withElements('p1', T(5), [sticker('a', T(10), { x: 90 })])], ['p1']);
+
+    const merged = merge(local, remote, NOW);
+    expect((merged.drawPages!.p1.elements.a as DrawSticker).x).toBe(10);
+  });
+
+  it('한쪽이 지운 요소는 상대가 손대지 않았으면 지워진 채로 간다', () => {
+    const local = wsPages([withElements('p1', T(5), [sticker('a', T(9))])], ['p1']);
+    const remote = wsPages(
+      [withElements('p1', T(6), [sticker('a', T(20), { deletedAt: T(20) })])],
+      ['p1'],
+    );
+
+    const merged = merge(local, remote, NOW);
+    expect(merged.drawPages!.p1.elements.a.deletedAt).toBe(T(20));
+    // 도장은 남아 있다 — 그것이 상대에게 「지웠다」고 말하는 유일한 방법이다.
+    expect(merged.drawPages!.p1.elementOrder).toContain('a');
+  });
+
+  it('지운 뒤에 상대가 옮겼으면 살아난다 — 톰스톤과 같은 판정이다', () => {
+    const local = wsPages([withElements('p1', T(5), [sticker('a', T(30), { x: 55 })])], ['p1']);
+    const remote = wsPages(
+      [withElements('p1', T(6), [sticker('a', T(20), { deletedAt: T(20) })])],
+      ['p1'],
+    );
+
+    const merged = merge(local, remote, NOW);
+    expect(merged.drawPages!.p1.elements.a.deletedAt).toBeUndefined();
+    expect((merged.drawPages!.p1.elements.a as DrawSticker).x).toBe(55);
+  });
+
+  it('페이지 껍데기(제목)는 평범한 엔티티 LWW다', () => {
+    const local = wsPages([page('p1', T(5), { title: '로컬', updatedAt: T(30) })], ['p1']);
+    const remote = wsPages([page('p1', T(5), { title: '리모트', updatedAt: T(10) })], ['p1']);
+    expect(merge(local, remote, NOW).drawPages!.p1.title).toBe('로컬');
+  });
+
+  it('제목을 고친 쪽이 이겨도 상대의 획은 남는다 — 껍데기와 내용은 따로 간다', () => {
+    const local = wsPages(
+      [withElements('p1', T(30), [sticker('a', T(10))], { title: '새 이름' })],
+      ['p1'],
+    );
+    const remote = wsPages([withElements('p1', T(6), [sticker('b', T(11))])], ['p1']);
+
+    const merged = merge(local, remote, NOW);
+    expect(merged.drawPages!.p1.title).toBe('새 이름');
+    expect(Object.keys(merged.drawPages!.p1.elements).sort()).toEqual(['a', 'b']);
+  });
+
+  it('오래 지나간 삭제 도장은 걷힌다 (톰스톤 GC와 같은 시계)', () => {
+    const old = T(5) - TOMBSTONE_TTL_MS;
+    const local = wsPages(
+      [
+        withElements('p1', T(5), [
+          sticker('a', old, { deletedAt: old }),
+          sticker('b', T(5)),
+        ]),
+      ],
+      ['p1'],
+    );
+
+    const merged = merge(local, local, NOW);
+    expect(merged.drawPages!.p1.elements.a).toBeUndefined();
+    expect(merged.drawPages!.p1.elementOrder).toEqual(['b']);
+  });
+
+  it('오래 지나간 페이지 삭제도 걷힌다', () => {
+    const old = T(5) - TOMBSTONE_TTL_MS;
+    const local = wsPages([page('p1', old, { deletedAt: old })], ['p1']);
+    const merged = merge(local, local, NOW);
+    expect(merged.drawPages).toBeUndefined();
+    expect(merged.trips.t1.drawPageOrder).toEqual([]);
+  });
+
+  it('여행이 사라지면 그 스케치북도 사라진다 (톰스톤 없이)', () => {
+    const local = wsPages([withElements('p1', T(5), [sticker('a', T(10))])], ['p1']);
+    const remote: Workspace = { ...ws({ tombstones: [tomb('trip', 't1', T(50))] }) };
+
+    const merged = merge(local, remote, NOW);
+    expect(merged.trips.t1).toBeUndefined();
+    expect(merged.drawPages).toBeUndefined();
+  });
+
+  it('drawPageOrder는 살아남은 페이지에 맞춰 재조정된다', () => {
+    const local = wsPages([page('p1', T(5)), page('p2', T(6))], ['ghost', 'p2', 'p2']);
+    const merged = merge(local, local, NOW);
+    // 없는 id와 중복은 빠지고, 배열이 모르던 페이지는 오래된 것부터 뒤에 붙는다.
+    expect(merged.trips.t1.drawPageOrder).toEqual(['p2', 'p1']);
+  });
+
+  it('멱등이다', () => {
+    const local = wsPages([withElements('p1', T(5), [sticker('a', T(10))])], ['p1']);
+    const remote = wsPages([withElements('p1', T(6), [sticker('b', T(11))])], ['p1']);
+    const once = merge(local, remote, NOW);
+    expect(merge(local, once, NOW)).toEqual(once);
+    expect(merge(once, once, NOW)).toEqual(once);
+  });
+
+  it('workspaceEquals가 획 하나의 차이를 본다', () => {
+    const a = wsPages([withElements('p1', T(5), [sticker('a', T(10), { x: 10 })])], ['p1']);
+    const b = wsPages([withElements('p1', T(5), [sticker('a', T(10), { x: 11 })])], ['p1']);
+    expect(workspaceEquals(a, a)).toBe(true);
+    expect(workspaceEquals(a, b)).toBe(false);
   });
 });

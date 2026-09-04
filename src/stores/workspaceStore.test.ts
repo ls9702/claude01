@@ -1843,3 +1843,223 @@ describe('addMemoMessage / removeMemoMessage (M21)', () => {
     expect(ws().memos).toBeUndefined();
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * 드로우 (M52a)
+ * ------------------------------------------------------------------ */
+
+describe('드로우 페이지', () => {
+  const seedTrip = (): Id => store().addTrip('오사카');
+
+  it('첫 페이지는 「페이지 1」이고 여행의 순서 배열이 그때 생긴다', () => {
+    const tripId = seedTrip();
+    expect(ws().trips[tripId].drawPageOrder).toBeUndefined();
+    expect(ws().drawPages).toBeUndefined();
+
+    const pageId = store().addDrawPage(tripId)!;
+    expect(ws().drawPages![pageId].title).toBe('페이지 1');
+    expect(ws().drawPages![pageId].elementOrder).toEqual([]);
+    expect(ws().trips[tripId].drawPageOrder).toEqual([pageId]);
+  });
+
+  it('없는 여행에는 페이지를 만들지 않는다', () => {
+    expect(store().addDrawPage('없음')).toBeNull();
+    expect(ws().drawPages).toBeUndefined();
+  });
+
+  it('이름을 바꾼다 — 빈 이름과 같은 이름은 아무 일도 하지 않는다', () => {
+    const tripId = seedTrip();
+    const pageId = store().addDrawPage(tripId)!;
+
+    store().renameDrawPage(pageId, '  오사카 지도  ');
+    expect(ws().drawPages![pageId].title).toBe('오사카 지도');
+
+    useWorkspaceStore.setState({ dirty: false });
+    store().renameDrawPage(pageId, '   ');
+    store().renameDrawPage(pageId, '오사카 지도');
+    expect(ws().drawPages![pageId].title).toBe('오사카 지도');
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
+  it('복제는 요소마다 **새 id**를 주고 원본 바로 뒤에 선다', () => {
+    const tripId = seedTrip();
+    const first = store().addDrawPage(tripId)!;
+    const second = store().addDrawPage(tripId)!;
+    const elementId = store().addDrawElement(first, {
+      type: 'sticker',
+      x: 10,
+      y: 20,
+      emoji: '📍',
+      size: 48,
+    })!;
+
+    const copy = store().duplicateDrawPage(first)!;
+    const copied = ws().drawPages![copy];
+
+    expect(copied.title).toBe('페이지 1 (복사)');
+    expect(copied.elementOrder).toHaveLength(1);
+    expect(copied.elementOrder[0]).not.toBe(elementId);
+    expect(copied.elements[copied.elementOrder[0]]).toMatchObject({ x: 10, y: 20, emoji: '📍' });
+    expect(ws().trips[tripId].drawPageOrder).toEqual([first, copy, second]);
+  });
+
+  it('복제는 지운 요소를 베끼지 않는다', () => {
+    const tripId = seedTrip();
+    const pageId = store().addDrawPage(tripId)!;
+    const keep = store().addDrawElement(pageId, {
+      type: 'sticker',
+      x: 0,
+      y: 0,
+      emoji: '⭐',
+      size: 48,
+    })!;
+    const gone = store().addDrawElement(pageId, {
+      type: 'sticker',
+      x: 1,
+      y: 1,
+      emoji: '❌',
+      size: 48,
+    })!;
+    store().deleteDrawElement(pageId, gone);
+
+    const copy = store().duplicateDrawPage(pageId)!;
+    expect(ws().drawPages![copy].elementOrder).toHaveLength(1);
+    expect(ws().drawPages![pageId].elements[keep]).toBeDefined();
+  });
+
+  it('삭제는 톰스톤이 아니라 도장이다 — 순서 배열에는 그대로 남는다', () => {
+    const tripId = seedTrip();
+    const pageId = store().addDrawPage(tripId)!;
+
+    store().deleteDrawPage(pageId);
+    expect(ws().drawPages![pageId].deletedAt).toBeGreaterThan(0);
+    expect(ws().trips[tripId].drawPageOrder).toEqual([pageId]);
+    expect(ws().tombstones).toHaveLength(0);
+
+    // 지운 페이지는 더 이상 편집할 수 없다.
+    expect(store().addDrawElement(pageId, { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 })).toBeNull();
+  });
+
+  it('여행을 지우면 스케치북도 함께 사라진다', () => {
+    const tripId = seedTrip();
+    store().addDrawPage(tripId);
+    store().deleteTrip(tripId);
+    expect(ws().drawPages).toBeUndefined();
+  });
+
+  it('순서를 옮긴다 — 범위를 넘으면 아무 일도 없다', () => {
+    const tripId = seedTrip();
+    const a = store().addDrawPage(tripId)!;
+    const b = store().addDrawPage(tripId)!;
+    const c = store().addDrawPage(tripId)!;
+
+    store().moveDrawPage(c, -1);
+    expect(ws().trips[tripId].drawPageOrder).toEqual([a, c, b]);
+
+    useWorkspaceStore.setState({ dirty: false });
+    store().moveDrawPage(a, -1);
+    expect(ws().trips[tripId].drawPageOrder).toEqual([a, c, b]);
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
+  it('보이는 목록 위에서 옮긴다 — 지운 페이지가 화살표 한 번을 삼키지 않는다', () => {
+    const tripId = seedTrip();
+    const a = store().addDrawPage(tripId)!;
+    const hidden = store().addDrawPage(tripId)!;
+    const c = store().addDrawPage(tripId)!;
+    store().deleteDrawPage(hidden);
+
+    store().moveDrawPage(c, -1);
+    expect(ws().trips[tripId].drawPageOrder).toEqual([c, a, hidden]);
+  });
+});
+
+describe('드로우 요소', () => {
+  const seedPage = (): { tripId: Id; pageId: Id } => {
+    const tripId = store().addTrip('오사카');
+    return { tripId, pageId: store().addDrawPage(tripId)! };
+  };
+
+  it('요소를 더하면 순서 배열 끝에 붙는다', () => {
+    const { pageId } = seedPage();
+    const a = store().addDrawElement(pageId, {
+      type: 'stroke',
+      points: [0, 0, 10, 10],
+      color: '#000',
+      width: 4,
+      kind: 'pen',
+    })!;
+    const b = store().addDrawElement(pageId, {
+      type: 'sticker',
+      x: 5,
+      y: 5,
+      emoji: '📍',
+      size: 48,
+    })!;
+
+    expect(ws().drawPages![pageId].elementOrder).toEqual([a, b]);
+    expect(ws().drawPages![pageId].elements[a].type).toBe('stroke');
+  });
+
+  it('요소를 고치면 그 요소의 updatedAt만 앞으로 간다', () => {
+    const { pageId } = seedPage();
+    const id = store().addDrawElement(pageId, {
+      type: 'sticker',
+      x: 0,
+      y: 0,
+      emoji: '📍',
+      size: 48,
+    })!;
+
+    store().updateDrawElement(pageId, id, { x: 40, y: 60 });
+    const element = ws().drawPages![pageId].elements[id];
+    expect(element).toMatchObject({ x: 40, y: 60, emoji: '📍' });
+  });
+
+  it('요소 삭제는 도장이고, 순서 배열의 자리는 지킨다', () => {
+    const { pageId } = seedPage();
+    const a = store().addDrawElement(pageId, { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 })!;
+    const b = store().addDrawElement(pageId, { type: 'sticker', x: 1, y: 1, emoji: '⭐', size: 48 })!;
+
+    store().deleteDrawElement(pageId, a);
+    expect(ws().drawPages![pageId].elements[a].deletedAt).toBeGreaterThan(0);
+    expect(ws().drawPages![pageId].elementOrder).toEqual([a, b]);
+
+    // 두 번 지워도 한 번이다.
+    useWorkspaceStore.setState({ dirty: false });
+    store().deleteDrawElement(pageId, a);
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
+  it('되살린 요소는 도장을 벗고 원래 층으로 돌아온다 (실행취소)', () => {
+    const { pageId } = seedPage();
+    const a = store().addDrawElement(pageId, { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 })!;
+    store().addDrawElement(pageId, { type: 'sticker', x: 1, y: 1, emoji: '⭐', size: 48 });
+
+    const before = ws().drawPages![pageId].elements[a];
+    store().deleteDrawElement(pageId, a);
+    store().putDrawElement(pageId, before);
+
+    expect(ws().drawPages![pageId].elements[a].deletedAt).toBeUndefined();
+    expect(ws().drawPages![pageId].elementOrder[0]).toBe(a);
+  });
+
+  it('지운 요소는 고칠 수 없다', () => {
+    const { pageId } = seedPage();
+    const a = store().addDrawElement(pageId, { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 })!;
+    store().deleteDrawElement(pageId, a);
+
+    useWorkspaceStore.setState({ dirty: false });
+    store().updateDrawElement(pageId, a, { x: 999 });
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
+  it('없는 페이지·없는 요소는 no-op', () => {
+    const { pageId } = seedPage();
+    expect(store().addDrawElement('없음', { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 })).toBeNull();
+    useWorkspaceStore.setState({ dirty: false });
+    store().updateDrawElement(pageId, '없음', { x: 1 });
+    store().deleteDrawElement(pageId, '없음');
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+});
