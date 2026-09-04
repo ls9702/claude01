@@ -133,7 +133,12 @@ export default function Sheet({ title, onClose, children, footer, testId }: Shee
       aria-modal="true"
       aria-label={title}
       data-testid={testId}
-      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+      /* `tb-vp-fill` — 시트를 **가시 뷰포트**에 맞춘다 (M51). `inset-0`만으로는
+         레이아웃 뷰포트가 늘어난 안드로이드에서 오른쪽 39px이 화면 밖으로 나가고
+         (푸터의 저장 버튼이 안 보였다), 아래로도 밀려 나갔다. 규칙은
+         `index.css`에 있고 `lg` 미만·`dvw`/`dvh` 지원 브라우저에서만 켜진다 —
+         `inset-0`은 그대로 두어 나머지 환경의 동작을 산다. */
+      className="tb-vp-fill fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
     >
       <button
         type="button"

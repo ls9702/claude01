@@ -97,7 +97,9 @@ export default function AnchoredMenu({ anchor, onClose, testId, children }: Anch
       // Above the sheets (z-50) and the map modal (z-60) — a menu is the thing
       // being used while it is open. `ConfirmDialog` portals in later and so
       // still paints over it.
-      className="fixed z-70 min-w-44 overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-float"
+      // `tb-vp-cap` — 가시 뷰포트보다 넓어지지 않는다 (M51). 자리는 JS가 앵커
+      // 사각형으로 잡으므로 `dvh` 앵커는 필요 없고, 폭 상한만 둔다.
+      className="tb-vp-cap fixed z-70 min-w-44 overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-float"
       style={{
         top: pos?.top ?? 0,
         left: pos?.left ?? 0,

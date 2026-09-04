@@ -307,7 +307,8 @@ export function useHoverNote(note: string | undefined, testId: string): HoverNot
               // 겹치므로, 통과시키면 「닫으려는 탭」이 카드를 열어 버린다.
               pointerEvents: pinned ? 'auto' : 'none',
             }}
-            className="fixed z-[55] whitespace-pre-wrap break-words rounded-md border border-line bg-surface px-3 py-2 text-label font-normal text-ink-muted shadow-float"
+            // `tb-vp-cap` — 가시 뷰포트보다 넓어지지 않는다 (M51 — `AnchoredMenu`와 같다).
+            className="tb-vp-cap fixed z-[55] whitespace-pre-wrap break-words rounded-md border border-line bg-surface px-3 py-2 text-label font-normal text-ink-muted shadow-float"
           >
             {text}
           </div>,

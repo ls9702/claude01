@@ -2,10 +2,14 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
-    />
+    <!-- M51 — 확대 잠금(`maximum-scale=1.0, user-scalable=no`)을 걷어냈다.
+         M50-fix2가 그것을 넣은 이유는 「안드로이드에서 화면이 확대된 채 굳는다」
+         였는데, M51에서 진짜 원인이 밝혀졌다: 일정 헤더가 뷰포트보다 넓어지면
+         Blink가 「내용 폭 맞춤」 최소 배율로 **레이아웃 뷰포트를 늘려** 고정
+         요소(탭 바·시트)를 화면 밖으로 밀어낸다. 원인을 없앴으므로(가로 오버플로
+         차단 + 헤더 폭 예산) 잠금은 더 이상 필요 없고, 확대 금지는 저시력
+         사용자에게서 확대를 빼앗는 접근성 손실이라 되돌린다. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f5f4f1" />
     <meta name="description" content="여행 아이디어를 모으고 일정으로 만드는 보드" />
     <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />

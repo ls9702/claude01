@@ -187,22 +187,6 @@ export default function TimelineView() {
    */
   const editOn = useTimelineEditStore((s) => s.on);
   const toggleEdit = useTimelineEditStore((s) => s.toggle);
-  /**
-   * 「수정」 토글이 설 수 있는 최소 폭 — 실측이다 (M45).
-   *
-   * `REPORT_NEEDS_PX` 옆의 그 자와 같은 자로 쟀다. 리포트가 물러난 뒤 이 줄의
-   * 내용 폭은 335px이고, 320px 화면의 안쪽 폭은 288px(좌우 `px-4` 제외)이다.
-   * 그래서 320px에서는 이 버튼도 물러난다 — 그 폭에서 서면 페이지가 15px 가로로
-   * 밀리고, 그건 M18·M19가 없앤 사고이자 `daywindow.spec`이 320/360/390에서
-   * 지키고 있는 계약이다.
-   *
-   * 물러난 폭에서 무엇을 잃나: 그 화면에서는 길이 조절이 **잠긴 채로** 남는다.
-   * 잠금이 기본값이므로 잃는 것은 「푸는 방법」이지 「고치는 방법」이 아니다 —
-   * 배치의 길이는 엔트리 상세 시트의 ± 스테퍼로 어느 폭에서나 고칠 수 있다.
-   */
-  const EDIT_NEEDS_PX = 344;
-  const roomForEdit = useMediaQuery(`(min-width: ${EDIT_NEEDS_PX}px)`);
-
   const [dialog, setDialog] = useState<Dialog>(null);
   const [pageIndex, setPageIndex] = useState(0);
   /** 한 줄 알림 — 「1일차로 이동했어요」 (M50). */
@@ -434,6 +418,75 @@ export default function TimelineView() {
   const REPORT_NEEDS_PX = { plain: 408, crowded: 472 } as const;
   const roomForReport = useMediaQuery(
     `(min-width: ${aiOn ? REPORT_NEEDS_PX.crowded : REPORT_NEEDS_PX.plain}px)`,
+  );
+
+  /* ── 헤더 액션 줄의 폭 예산 (M51) ─────────────────────────────────────────
+   *
+   * M51이 고친 사고의 **근원**이 이 줄이다. AI를 켠 384px 폰에서 이 묶음은
+   * 356px가 되어 뷰포트를 39px 넘겼고, 그러면 Blink가 「내용 폭 맞춤」 최소
+   * 배율을 잡아 **레이아웃 뷰포트를 423px로 늘린다**. `h-dvh`인 셸은 가시
+   * 영역(384×747)에 남는데 `fixed`인 탭 바·시트는 늘어난 뷰포트를 쓰므로,
+   * 탭 바가 화면 63px 아래에 그려지고 시트가 오른쪽으로 잘렸다. 사용자가 본
+   * 것은 「하단 메뉴가 사라졌다」였다.
+   *
+   * 그래서 이 줄은 **어떤 폭에서도 뷰포트를 넘지 않아야 한다.** 실측(AI 켬,
+   * Pixel 5 컨텍스트, 묶음의 왼쪽 끝은 「일정」 제목 뒤 67px):
+   *
+   * | 서 있는 것                                   | 묶음 폭 | 오른쪽 끝 | 필요 폭 |
+   * |---|---|---|---|
+   * | 기본(✨·동기화 점·할 일·일자 추가·접기)      | 220px  | 287px | 320px  |
+   * | + AI 검토                                     | 268px  | 335px | 336px  |
+   * | + 수정                                        | 316px  | 383px | 384px  |
+   * | + AI 묻기(✨)                                 | 356px  | 423px | 424px  |
+   * | + 리포트                                      | 404px  | 471px | 472px  |
+   * | `sm`에서 이름이 다 붙은 줄                    | 696px  | 768px | 768px  |
+   *
+   * 이 표가 아래 세 상수의 전부다. 양보 순서는 M32·M45가 정한 그대로 — 읽는
+   * 자리가 먼저, 바꾸는 손잡이가 나중 — 이고, AI 두 개가 그 맨 앞에 붙는다:
+   * **AI 묻기(✨)는 보드 탭 헤더에 같은 버튼이 하나 더 있어** 이 줄에서
+   * 물러나도 기능이 사라지지 않는다. AI 검토는 두 번째 문이 없어서 가장 좁은
+   * 대역(320px)에서만 물러난다.
+   */
+
+  /**
+   * `sm`(640px) 위아래로 필요한 폭이 두 배 넘게 갈린다 — 그 위에서는 버튼마다
+   * 이름이 붙기 때문이다(`COMPACT_ACTION_BUTTON_CLASS`). 하나의 기준선으로
+   * 뭉뚱그리면 640~767px 대역에서 이 줄이 그대로 넘친다(실측 +128px). 그래서
+   * 두 대역을 한 쿼리에 적는다.
+   */
+  const SM_PX = 640;
+  const widthBudget = (icons: number, labels: number) =>
+    `(min-width: ${icons}px) and (max-width: ${SM_PX - 0.02}px), (min-width: ${labels}px)`;
+
+  /** 「AI 검토」가 설 수 있는 최소 폭 — 위 표의 336 / 768. */
+  const AI_REVIEW_NEEDS_PX = { icons: 336, labels: 768 } as const;
+  const roomForAiReview = useMediaQuery(
+    widthBudget(AI_REVIEW_NEEDS_PX.icons, AI_REVIEW_NEEDS_PX.labels),
+  );
+
+  /** 「AI 묻기」(✨)가 이 줄에 설 수 있는 최소 폭 — 위 표의 424 / 768. */
+  const AI_ASK_NEEDS_PX = { icons: 424, labels: 768 } as const;
+  const roomForAiAsk = useMediaQuery(widthBudget(AI_ASK_NEEDS_PX.icons, AI_ASK_NEEDS_PX.labels));
+
+  /**
+   * 「수정」 토글이 설 수 있는 최소 폭 — 실측이다 (M45, M51에서 두 단계로).
+   *
+   * 리포트가 물러난 뒤 이 줄의 내용 폭은 268px이고, 320px 화면에서는 이 버튼도
+   * 물러난다 — 그 폭에서 서면 페이지가 가로로 밀리고, 그건 M18·M19가 없앤
+   * 사고이자 `daywindow.spec`이 320/360/390에서 지키고 있는 계약이다.
+   *
+   * **M51 — 두 단계가 됐다.** AI를 켜면 같은 줄에 「AI 검토」가 하나 더 서므로
+   * (위 표의 316px 줄) 384px부터라야 넘치지 않는다. `REPORT_NEEDS_PX`가 두
+   * 단계인 것과 같은 이유다: 같은 줄이라도 무엇이 서 있느냐에 따라 필요한 폭이
+   * 다르고, 하나의 기준선으로 뭉뚱그리면 둘 중 한쪽이 틀린다.
+   *
+   * 물러난 폭에서 무엇을 잃나: 그 화면에서는 길이 조절이 **잠긴 채로** 남는다.
+   * 잠금이 기본값이므로 잃는 것은 「푸는 방법」이지 「고치는 방법」이 아니다 —
+   * 배치의 길이는 엔트리 상세 시트의 ± 스테퍼로 어느 폭에서나 고칠 수 있다.
+   */
+  const EDIT_NEEDS_PX = { plain: 344, crowded: 384 } as const;
+  const roomForEdit = useMediaQuery(
+    `(min-width: ${aiOn ? EDIT_NEEDS_PX.crowded : EDIT_NEEDS_PX.plain}px)`,
   );
 
   /**
@@ -676,7 +729,10 @@ export default function TimelineView() {
    */
   const headerActions = (
     <div className="ml-auto flex shrink-0 items-center gap-1 lg:gap-2">
-      {isDesktop ? null : <AiAskButton />}
+      {/* 좁은 줄에서 가장 먼저 물러나는 것 — 보드 탭 헤더에 **같은 버튼이 하나
+          더** 있어서, 이 줄에서 빠져도 AI에게 묻는 길이 사라지지 않는다
+          (`AI_ASK_NEEDS_PX` 옆의 표). */}
+      {isDesktop || !roomForAiAsk ? null : <AiAskButton />}
       {isDesktop ? null : <SyncStatusChip variant="dot" />}
       {/* 접힘 줄과 펼침 줄이 **같은** 묶음을 쓰므로 (위 주석), 이 버튼은 상단
           메뉴를 접어도 사라지지 않는다 — 접기는 숨기기가 아니다. */}
@@ -750,7 +806,9 @@ export default function TimelineView() {
           <span className="hidden sm:inline">리포트</span>
         </button>
       ) : null}
-      {aiOn && sheet && sheetHasEntries ? (
+      {/* 가장 좁은 대역(320px)에서만 물러난다 — 두 번째 문이 없는 버튼이라
+          마지막까지 버틴다 (`AI_REVIEW_NEEDS_PX` 옆의 표). */}
+      {aiOn && sheet && sheetHasEntries && roomForAiReview ? (
         <button
           type="button"
           data-testid="ai-review-open"

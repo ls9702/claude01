@@ -152,6 +152,62 @@ textarea {
   }
 }
 
+/* ── 가시 뷰포트에 못 박는 고정 요소들 (M51) ─────────────────────────────
+   삼성 인터넷(안드로이드)에서 탭 바가 화면 밖으로 사라지고 시트가 오른쪽으로
+   잘리던 사고의 **두 번째 방어선**이다. 첫 번째는 오버플로 자체를 없애는 것이고
+   (일정 헤더 폭 예산 + `AppShell`의 `overflow-x: clip`), 이 규칙은 그럼에도
+   레이아웃 뷰포트가 늘어났을 때를 견딘다.
+
+   무슨 일이 일어났나: 페이지가 가로로 조금이라도 넘치면 Blink는 「내용 폭 맞춤」
+   최소 배율을 잡고 **레이아웃 뷰포트**를 그만큼 늘린다(실측: 384×747 화면에서
+   416~423×823). `h-dvh`인 `main`은 가시 영역(747)을 쓰는데 `fixed` 요소는 늘어난
+   레이아웃 뷰포트(823)를 쓰므로, `bottom: 0`인 탭 바가 화면 63px 아래에 그려지고
+   `inset-0`인 시트가 오른쪽으로 39px 잘렸다.
+
+   `dvw`/`dvh`는 그 상황에서도 **초기 포함 블록**(=가시 영역)을 가리킨다 —
+   실측으로 확인했다. 그래서 fixed 요소를 `inset` 대신 `dvw`/`dvh`로 못 박으면
+   레이아웃 뷰포트가 무엇이든 요소는 화면 안에 남는다.
+
+   - `lg` 미만에서만 켠다: 데스크톱의 클래식 스크롤바 환경에서 `100dvw`는
+     스크롤바 폭까지 세어 가로 스크롤을 **만들어 낸다**.
+   - `@supports`로 감싼다: `dvw`/`dvh`를 모르는 브라우저에서는 규칙이 통째로
+     사라지고 기존 `inset` 선언이 그대로 산다(선언 하나만 버려져 요소가
+     찌그러지는 일이 없다).
+   - 키보드: `dvh`는 소프트 키보드에 반응하지 않으므로(그 일은 `visualViewport`가
+     한다) 입력 포커스 때 셸이 쪼그라드는 새 버그가 생기지 않는다. JS로
+     `visualViewport`를 좇는 방식을 일부러 쓰지 않은 이유다. */
+@media (max-width: 63.99rem) {
+  @supports (width: 100dvw) and (height: 100dvh) {
+    /* 전면 오버레이 — `fixed inset-0`을 대신한다. */
+    .tb-vp-fill {
+      top: 0;
+      left: 0;
+      right: auto;
+      bottom: auto;
+      width: 100dvw;
+      height: 100dvh;
+    }
+
+    /* 화면 아래에 붙는 바(탭 바·휴지통·토스트). 높이를 몰라도 되도록 자기
+       높이(`100%`)만큼 되올린다. 탭 바 위에 서는 것들은
+       `--tb-vp-bottom-offset`으로 그만큼 더 올라간다. */
+    .tb-vp-bottom {
+      top: 0;
+      bottom: auto;
+      left: 0;
+      right: auto;
+      width: 100dvw;
+      transform: translateY(calc(100dvh - 100% - var(--tb-vp-bottom-offset, 0px)));
+    }
+  }
+
+  /* 앵커를 따라다니는 포털(팝오버·호버 노트)은 자리를 JS로 잡으므로 폭 상한만
+     둔다. 선언이 버려져도 상한이 없어질 뿐이라 `@supports`가 필요 없다. */
+  .tb-vp-cap {
+    max-width: 100dvw;
+  }
+}
+
 /* Bottom sheet / dialog entrance. Panels mount on open, so this plays once. */
 @keyframes tb-sheet-up {
   from {

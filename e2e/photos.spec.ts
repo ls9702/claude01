@@ -246,8 +246,11 @@ test('사진 포함 백업으로 내보내고, 지운 여행을 사진까지 되
   // Decoding a photo-bearing backup and writing its blobs takes longer than
   // the 5s default under a loaded full-suite run — the same 15s the thumbnail
   // assertions in this file already allow for the same reason.
+  // M51: 15s도 전체 스위트 부하에서 세 번 모자랐다(단독 실행은 매번 14s 안에
+  // 끝난다). 사진 blob upsert까지 포함한 가져오기라 30s를 준다 — 기다림이지
+  // 건너뜀이 아니다.
   await expect(page.getByTestId('sync-notice')).toContainText('가져왔어요 — 여행 1개', {
-    timeout: 15_000,
+    timeout: 30_000,
   });
   await page.getByTestId('sheet-close').click();
 

@@ -1210,7 +1210,8 @@ export default function MapView() {
         }
         className={
           fullscreen
-            ? 'fixed inset-0 z-[45] isolate overflow-hidden bg-sunken'
+            ? // `tb-vp-fill`: 전체화면 지도도 가시 뷰포트에 맞춘다 (M51).
+              'tb-vp-fill fixed inset-0 z-[45] isolate overflow-hidden bg-sunken'
             : 'relative isolate mx-4 mb-4 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-sunken'
         }
       >

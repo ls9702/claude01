@@ -65,7 +65,8 @@ export default function MapModal({
       aria-label={title}
       data-testid={testId}
       className={[
-        'fixed inset-0 z-60 flex justify-center',
+        // `tb-vp-fill`: 가시 뷰포트에 맞춘다 (M51 — `Sheet`와 같은 이유).
+        'tb-vp-fill fixed inset-0 z-60 flex justify-center',
         full ? 'items-stretch' : 'items-end sm:items-center sm:p-4',
       ].join(' ')}
     >

@@ -306,7 +306,17 @@ export default function BoardView() {
         >
           보드
         </h1>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        {/* M51 — `shrink-0` 한 줄에서 **줄바꿈되는** 묶음으로 바뀌었다.
+            AI를 켠 320px 화면에서 이 네 개가 252px를 차지해 페이지가 7px 가로로
+            밀렸고, 그 7px이면 안드로이드 Blink는 레이아웃 뷰포트를 늘려 탭 바를
+            화면 밖으로 내보내기에 충분하다(M51의 그 사고 — `AppShell` 참조).
+
+            일정 헤더처럼 버튼을 물러나게 하지 않는 이유: 여기 서 있는 것은
+            ✨ 두 개(AI 추천·AI 묻기)라 하나를 아이콘만 남기면 같은 모양 두 개가
+            나란히 서서 어느 쪽이 무엇인지 읽히지 않고, 아예 빼면 그 기능의
+            **유일한** 문이 닫힌다. 줄이 모자라면 한 줄 더 쓰는 쪽이 정직하다 —
+            320px에서만, 36px만. */}
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           {aiOn ? (
             <button
               type="button"

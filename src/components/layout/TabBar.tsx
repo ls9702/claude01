@@ -54,6 +54,13 @@ export default function TabBar() {
         // 장식 때문에 사라질 수는 없다. `lg`의 위쪽 바는 데스크톱 전용이라
         // 반투명·블러를 그대로 둔다.
         'fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface',
+        // 탭 바를 **가시 뷰포트** 아래에 못 박는다 (M51). `bottom-0`은 늘어난
+        // 레이아웃 뷰포트를 따라가서 화면 63px 아래에 그려질 수 있다 — 안드로이드
+        // 실기기에서 「하단 메뉴가 사라졌다」의 정체가 그것이었다. 규칙은
+        // `index.css`의 `.tb-vp-bottom`에 있고 `lg` 미만에서만 켜진다(위쪽 바가
+        // 되는 데스크톱에는 해당 없음). 앞의 `bottom-0`은 `dvh` 미지원 브라우저의
+        // 몫으로 그대로 남겨 둔다.
+        'tb-vp-bottom',
         'lg:bg-surface/92 lg:backdrop-blur',
         'pb-[env(safe-area-inset-bottom)]',
         // From `lg` the bar is at the *top*, so that is where the inset goes —

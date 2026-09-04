@@ -47,7 +47,8 @@ export default function ProfilePicker({ onCancel, onChosen }: ProfilePickerProps
       aria-modal="true"
       aria-label="프로필 선택"
       data-testid="profile-picker"
-      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-8 bg-surface px-6"
+      // `tb-vp-fill`: 가시 뷰포트에 맞춘다 (M51 — `Sheet`와 같은 이유).
+      className="tb-vp-fill fixed inset-0 z-[60] flex flex-col items-center justify-center gap-8 bg-surface px-6"
     >
       <div className="text-center">
         <h1 className="shrink-0 whitespace-nowrap text-display text-ink">누구세요?</h1>

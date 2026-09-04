@@ -153,7 +153,8 @@ export default function PhotoLightbox({
       data-testid="photo-lightbox"
       data-index={safeIndex}
       // z-60: above the sheet it was opened from, level with the map modal.
-      className="fixed inset-0 z-60 flex flex-col bg-[#0b0b0c]/98"
+      // `tb-vp-fill`: 가시 뷰포트에 맞춘다 (M51 — `Sheet`와 같은 이유).
+      className="tb-vp-fill fixed inset-0 z-60 flex flex-col bg-[#0b0b0c]/98"
       onPointerDown={(event) => {
         swipeStart.current = event.clientX;
       }}

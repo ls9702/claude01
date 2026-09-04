@@ -34,28 +34,56 @@ export default function EntryTrash() {
   });
 
   return (
+    /* 앵커와 드롭 타깃이 **두 상자로 나뉘어 있는 이유** (M51).
+     *
+     * 가시 뷰포트에 못 박는 `.tb-vp-bottom`은 `transform: translateY(…)`로
+     * 되올리는데, dnd-kit은 droppable의 사각형을 재면서 **그 요소 자신의
+     * transform을 일부러 벗겨 낸다**(`getTransformAgnosticClientRect` — 끌리는
+     * 쪽이 transform으로 움직이기 때문에 그게 옳다). 그래서 못을 드롭 타깃에
+     * 직접 박으면 dnd-kit이 보는 휴지통은 화면 맨 위에 있고, 손가락이 바 위에
+     * 있어도 `isOver`가 켜지지 않는다(실측: `entrytrash.spec` 두 건이 이걸로
+     * 빨개졌다).
+     *
+     * 그래서 transform은 **바깥 상자**가 지고, `setNodeRef`는 안쪽 상자에 있다.
+     * 안쪽 상자의 computed transform은 `none`이므로 벗겨 낼 것이 없고,
+     * `getBoundingClientRect`는 조상의 transform을 포함해서 잰다 — dnd-kit이
+     * 보는 자리와 눈에 보이는 자리가 같아진다. */
     <div
-      ref={setNodeRef}
-      data-testid="entry-trash"
-      data-over={isOver ? 'true' : 'false'}
       aria-hidden="true"
+      style={
+        {
+          '--tb-vp-bottom-offset': 'calc(3.5rem + env(safe-area-inset-bottom))',
+        } as React.CSSProperties
+      }
       className={[
-        'fixed inset-x-0 z-40 flex min-h-14 flex-col items-center justify-center gap-0.5',
-        'border-t px-4 py-2 text-center transition-colors duration-[140ms] ease-quick',
+        // `tb-vp-bottom` — 탭 바와 같은 못 (M51): 늘어난 레이아웃 뷰포트에서도
+        // 이 바는 가시 화면의 탭 바 바로 위에 남는다. 올라갈 높이는 아래
+        // `bottom-…`과 같은 값을 `--tb-vp-bottom-offset`으로 한 번 더 말한 것이다.
+        'tb-vp-bottom fixed inset-x-0 z-40',
         // The tab bar's own height, spelled the way AppShell spells it.
         'bottom-[calc(3.5rem+env(safe-area-inset-bottom))] lg:bottom-0',
-        isOver
-          ? 'border-danger bg-danger text-surface shadow-float'
-          : 'border-danger/40 bg-danger-wash text-danger',
       ].join(' ')}
     >
-      <p className="flex items-center gap-1.5 text-label font-semibold">
-        <Icon name="trash" size={20} />
-        {isOver ? '놓으면 일정에서 빠져요' : '여기에 놓으면 일정에서 빼요'}
-      </p>
-      <p className={`text-micro font-normal ${isOver ? 'text-surface/85' : 'text-danger/80'}`}>
-        카드는 보드에 그대로 남아요
-      </p>
+      <div
+        ref={setNodeRef}
+        data-testid="entry-trash"
+        data-over={isOver ? 'true' : 'false'}
+        className={[
+          'flex min-h-14 flex-col items-center justify-center gap-0.5',
+          'border-t px-4 py-2 text-center transition-colors duration-[140ms] ease-quick',
+          isOver
+            ? 'border-danger bg-danger text-surface shadow-float'
+            : 'border-danger/40 bg-danger-wash text-danger',
+        ].join(' ')}
+      >
+        <p className="flex items-center gap-1.5 text-label font-semibold">
+          <Icon name="trash" size={20} />
+          {isOver ? '놓으면 일정에서 빠져요' : '여기에 놓으면 일정에서 빼요'}
+        </p>
+        <p className={`text-micro font-normal ${isOver ? 'text-surface/85' : 'text-danger/80'}`}>
+          카드는 보드에 그대로 남아요
+        </p>
+      </div>
     </div>
   );
 }

@@ -175,7 +175,8 @@ export default function PlaceFixDialog({
       data-distance-m={Math.round(decision.distanceKm * 1000)}
       data-reason={decision.reason}
       // 확인 대화상자와 같은 층 (z-70): 지금 화면에서 가장 위에 있는 질문이다.
-      className="fixed inset-0 z-70 flex items-center justify-center p-4"
+      // `tb-vp-fill`: 가시 뷰포트에 맞춘다 (M51 — `Sheet`와 같은 이유).
+      className="tb-vp-fill fixed inset-0 z-70 flex items-center justify-center p-4"
     >
       <button
         type="button"
