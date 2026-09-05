@@ -323,6 +323,16 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
     };
   });
   const [size, setSize] = useState({ w: 0, h: 0 });
+  /**
+   * 도구 바가 실제로 차지하는 높이 (M54) — 아래의 자리채움이 이 값을 쓴다.
+   *
+   * 지금까지는 `7.5rem`이라는 숫자가 박혀 있었고, 그 숫자는 「44px 두 줄」이라는
+   * 그때의 사정을 적어 둔 것이었다. 둘째 줄이 접히기 시작하면(M54에서 태블릿
+   * 대역이 그렇게 됐다) 그 숫자는 곧 틀린 숫자가 되고, 틀리는 방향이 나쁘다 —
+   * 도구 바가 캔버스의 아랫동을 덮는다. 재서 쓰면 다음에 버튼이 하나 더 붙어도
+   * 아무도 이 숫자를 고칠 필요가 없다.
+   */
+  const [toolbarHeight, setToolbarHeight] = useState(0);
   const [draft, setDraft] = useState<Draft>(null);
   /**
    * 고른 것들 (M53-1) — 하나가 아니라 **집합**이다.
@@ -365,6 +375,7 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
   const [spaceHeld, setSpaceHeld] = useState(false);
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const menuRef = useRef<HTMLButtonElement | null>(null);
   const linksRef = useRef<HTMLDivElement | null>(null);
@@ -450,6 +461,18 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
     const node = wrapRef.current;
     if (!node) return;
     const measure = () => setSize({ w: node.clientWidth, h: node.clientHeight });
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  /** 도구 바의 키 — 접히면(태블릿 대역) 자리채움도 같이 자란다 (M54). */
+  useEffect(() => {
+    const node = toolbarRef.current;
+    if (!node) return;
+    const measure = () => setToolbarHeight(node.offsetHeight);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
@@ -553,6 +576,22 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
     },
     [setView],
   );
+
+  /**
+   * 「가운데」 — 어디로 갔든 **페이지 한가운데·배율 1**로 (M54).
+   *
+   * 4000×4000은 손가락 몇 번이면 아무것도 없는 벌판으로 나갈 수 있는 넓이고,
+   * 거기서는 「내 그림이 어디 있지」를 축소로 되짚는 수밖에 없었다. 새 페이지가
+   * 열리는 그 자리(`centeredView`)로 한 번에 돌아오는 문이 하나 있어야 한다 —
+   * 계산이 같은 함수여야 「처음 열었을 때와 같은 자리」라는 약속이 지켜진다.
+   *
+   * 서랍(`rememberView`)을 여기서 직접 건드리지 않는 이유는 확대·팬과 같다:
+   * 뷰가 바뀌면 그것을 적는 것은 저 아래의 effect 하나뿐이고, 길이 둘이 되는
+   * 순간 어느 쪽이 마지막인지 아무도 모른다.
+   */
+  const recenter = useCallback(() => {
+    setView(centeredView(size.w, size.h));
+  }, [setView, size.w, size.h]);
 
   /* ---------------------------------------------------------------- *
    * 실행취소 — 한 가지 모양의 걸음 하나로 전부를 표현한다
@@ -974,7 +1013,14 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
         moveSelection(movable, dx, dy);
         return;
       }
-      // 숫자 하나가 도구 하나 — 도구 바의 순서 그대로다.
+      // 「0」은 도구가 아니라 **자리**다 (M54) — 도구 번호는 1부터라 0은 비어
+      // 있었고, 「가운데로」는 손이 어디에 있든 눌리는 키여야 한다.
+      if (event.key === '0') {
+        event.preventDefault();
+        recenter();
+        return;
+      }
+      // 숫자 하나가 도구 하나 — 도구 바의 순서 그대로다(1=손, 2=펜 …).
       if (/^[1-9]$/.test(event.key)) {
         const spec = DRAW_TOOLS[Number(event.key) - 1];
         if (!spec) return;
@@ -999,6 +1045,7 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
     movable,
     moveSelection,
     pasteClipboard,
+    recenter,
     redo,
     removeSelection,
     selectedIds,
@@ -2151,6 +2198,7 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
           (M51의 그 규칙 그대로). 두 줄 다 가로 스크롤이라 320px에서도 페이지가
           가로로 밀리지 않는다. */}
       <div
+        ref={toolbarRef}
         data-testid="draw-toolbar"
         style={
           {
@@ -2162,9 +2210,12 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
         {/* 둘째 줄이 이 상자보다 넓어 「확대(+)」가 잘려 있었다 (M53-fix ④):
             내용 864px(폰·태블릿 크기)·792px(데스크톱 크기) 대 상자 752px.
             768px부터는 상자가 창을 다 쓰고(그 대역의 도구 바는 화면 아래에
-            붙은 띠라 넓어도 어색하지 않다), 데스크톱에서는 다시 좁힌 대신
-            둘째 줄이 **접힌다**. 폰(<768)은 예전 그대로 가로 스크롤이다 —
-            390px에서 접으면 도구 바가 화면의 절반을 먹는다. */}
+            붙은 띠라 넓어도 어색하지 않다), 데스크톱에서는 다시 좁힌다.
+            M54에서 「가운데」 버튼 하나가 늘어 내용이 912px이 되면서 그 대역도
+            더는 한 줄에 담기지 않으므로, **768px부터 둘째 줄이 접힌다**
+            (접히면 아래의 자리채움이 잰 높이만큼 함께 자란다). 폰(<768)은
+            예전 그대로 가로 스크롤이다 — 390px에서 접으면 도구 바가 화면의
+            절반을 먹는다. */}
         <div className="mx-auto flex max-w-3xl flex-col gap-1 px-2 py-2 md:max-w-none lg:max-w-3xl">
           <div className="flex items-center gap-1 overflow-x-auto">
             {DRAW_TOOLS.map((spec, index) => (
@@ -2195,7 +2246,7 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
 
           <div
             data-testid="draw-toolbar-styles"
-            className="flex items-center gap-1 overflow-x-auto lg:flex-wrap"
+            className="flex items-center gap-1 overflow-x-auto md:flex-wrap"
           >
             {DRAW_COLORS.map((swatch) => (
               <button
@@ -2335,13 +2386,31 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
               >
                 <Icon name="plus" size={16} />
               </button>
+              {/* 「가운데」도 이 덩어리 안이다 (M54) — 셋은 같은 질문(「지금 어디를
+                  보고 있나」)에 답하는 버튼이라, 줄이 바뀌며 갈라지면 사람은
+                  나머지 하나를 도구 바의 다른 끝에서 찾게 된다. */}
+              <button
+                type="button"
+                data-testid="draw-recenter"
+                aria-label="가운데로 (배율 1)"
+                title="가운데로 (배율 1) — 키보드 0"
+                onClick={recenter}
+                className={TOUCH_ICON_BUTTON_CLASS}
+              >
+                <Icon name="locate" size={16} />
+              </button>
             </span>
           </div>
         </div>
       </div>
-      {/* 폰에서 도구 바가 캔버스를 가리지 않도록 그 높이만큼 자리를 비운다
-          (44px 두 줄 + 패딩 — M52b에서 터치 타깃이 커진 만큼 함께 자랐다). */}
-      <div aria-hidden="true" className="h-[7.5rem] shrink-0 lg:hidden" />
+      {/* 폰에서 도구 바가 캔버스를 가리지 않도록 **잰 높이만큼** 자리를 비운다
+          (M54). 클래스의 7.5rem은 아직 재기 전 한 프레임의 값이다 — 두 줄이던
+          시절의 그 숫자라, 재고 나면 곧 제 높이로 바뀐다. */}
+      <div
+        aria-hidden="true"
+        style={toolbarHeight > 0 ? { height: toolbarHeight } : undefined}
+        className="h-[7.5rem] shrink-0 lg:hidden"
+      />
 
       {pickerOpen ? (
         <Sheet

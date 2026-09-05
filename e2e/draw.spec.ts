@@ -39,6 +39,9 @@ async function addPage(page: Page): Promise<string> {
   await page.getByTestId('draw-add-page').click();
   const editor = page.getByTestId('draw-editor');
   await expect(editor).toBeVisible();
+  // M54부터 **기본 도구는 손(이동)**이다. 이 스펙들은 페이지를 열자마자 그리므로
+  // 여기서 펜을 한 번 골라 준다 — 앱에서도 그리기는 이제 고르고 하는 일이다.
+  await pickTool(page, 'pen');
   return (await editor.getAttribute('data-page-id')) ?? '';
 }
 
@@ -491,6 +494,8 @@ test.describe('두 기기 병합', () => {
     await openDraw(page);
     await page.getByTestId('draw-page-open').first().click();
     await expect(page.getByTestId('draw-editor')).toBeVisible();
+    // 두 번째 기기도 그릴 참이다 — M54의 기본 도구는 손이라 펜을 골라 준다.
+    await pickTool(page, 'pen');
   }
 
   test('둘이 같은 페이지에 그리면 두 획이 다 남는다', async ({ browser }) => {

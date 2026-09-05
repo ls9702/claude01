@@ -55,7 +55,8 @@ describe('drawSession — 실행취소 스택', () => {
 
 describe('drawSession — 도구', () => {
   it('도구는 사람의 것이라 페이지가 아니라 세션에 붙는다', () => {
-    expect(rememberedTools().tool).toBe('pen');
+    // 기본은 **손**이다 (M54) — 폰의 첫 손가락이 획이 되지 않게.
+    expect(rememberedTools().tool).toBe('hand');
     rememberTools({ tool: 'highlight', color: '#d64545' });
     expect(rememberedTools()).toMatchObject({ tool: 'highlight', color: '#d64545' });
     // 나머지는 그대로다.
@@ -65,7 +66,7 @@ describe('drawSession — 도구', () => {
   it('초기화하면 처음으로 돌아간다 (새로고침과 같은 상태)', () => {
     rememberTools({ tool: 'eraser' });
     resetDrawSession();
-    expect(rememberedTools().tool).toBe('pen');
+    expect(rememberedTools().tool).toBe('hand');
   });
 });
 

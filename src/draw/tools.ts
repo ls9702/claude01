@@ -35,8 +35,19 @@ export interface DrawToolSpec {
   icon: IconName;
 }
 
-/** 도구 바에 서는 순서 — 자주 쓰는 것이 앞이다. */
+/**
+ * 도구 바에 서는 순서 — **손이 맨 앞**이다 (M54).
+ *
+ * M53까지는 펜이 첫 칸이자 기본값이었다. 그 순서가 폰에서 사고를 냈다: 화면을
+ * 옆으로 밀려고 손가락을 대면 그 손가락이 곧 획이었고, 사람은 「옮기려다 그었다」를
+ * 지울 방법을 먼저 배워야 했다. 그리기는 **고르고 하는 일**이고 옮기기는 그냥
+ * 하는 일이니, 바의 첫 칸도 기본값도 손이다(`stores/drawSession`의 `defaultTools`).
+ *
+ * 숫자 단축키(1~9)가 이 배열의 순서를 그대로 읽으므로 1=손, 2=펜으로 한 칸씩
+ * 밀린다 — 그것이 「도구 바의 순서 그대로」라는 규칙을 지키는 유일한 길이다.
+ */
 export const DRAW_TOOLS: readonly DrawToolSpec[] = [
+  { id: 'hand', label: '손', icon: 'hand' },
   { id: 'pen', label: '펜', icon: 'pencil' },
   { id: 'highlight', label: '형광펜', icon: 'highlighter' },
   { id: 'eraser', label: '지우개', icon: 'eraser' },
@@ -47,7 +58,6 @@ export const DRAW_TOOLS: readonly DrawToolSpec[] = [
   { id: 'ellipse', label: '타원', icon: 'circle' },
   { id: 'text', label: '글자', icon: 'text' },
   { id: 'sticker', label: '스티커', icon: 'sticker' },
-  { id: 'hand', label: '손', icon: 'hand' },
 ];
 
 /**

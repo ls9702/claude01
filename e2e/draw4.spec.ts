@@ -39,6 +39,9 @@ async function addPage(page: Page): Promise<string> {
   await page.getByTestId('draw-add-page').click();
   const editor = page.getByTestId('draw-editor');
   await expect(editor).toBeVisible();
+  // M54부터 **기본 도구는 손(이동)**이다. 이 스펙들은 페이지를 열자마자 그리므로
+  // 여기서 펜을 한 번 골라 준다 — 앱에서도 그리기는 이제 고르고 하는 일이다.
+  await pickTool(page, 'pen');
   return (await editor.getAttribute('data-page-id')) ?? '';
 }
 

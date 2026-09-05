@@ -40,6 +40,10 @@ async function addPage(page: Page): Promise<string> {
   await page.getByTestId('draw-add-page').click();
   const editor = page.getByTestId('draw-editor');
   await expect(editor).toBeVisible();
+  // M54부터 **기본 도구는 손(이동)**이다. 이 스펙은 페이지를 열자마자 그리므로
+  // 여기서 펜을 한 번 골라 준다 — 앱에서도 그리기는 이제 고르고 하는 일이다.
+  await page.getByTestId('draw-tool').and(page.locator('[data-tool="pen"]')).click();
+  await expect(page.getByTestId('draw-canvas')).toHaveAttribute('data-tool', 'pen');
   return (await editor.getAttribute('data-page-id')) ?? '';
 }
 
@@ -264,10 +268,13 @@ test('단축키 — 숫자로 도구, Ctrl+Z/Shift+Z, Delete, Esc', async ({ pag
 
   const canvas = page.getByTestId('draw-canvas');
 
-  // 숫자키가 도구 바의 순서 그대로다 (1=펜 … 3=지우개).
-  await page.keyboard.press('3');
+  // 숫자키가 도구 바의 순서 그대로다 — M54에서 손이 맨 앞으로 오면서 한 칸씩
+  // 밀렸다 (1=손, 2=펜 … 4=지우개).
+  await page.keyboard.press('4');
   await expect(canvas).toHaveAttribute('data-tool', 'eraser');
   await page.keyboard.press('1');
+  await expect(canvas).toHaveAttribute('data-tool', 'hand');
+  await page.keyboard.press('2');
   await expect(canvas).toHaveAttribute('data-tool', 'pen');
 
   await drawStroke(page, { x: 60, y: 60 }, { x: 160, y: 60 });
@@ -280,7 +287,7 @@ test('단축키 — 숫자로 도구, Ctrl+Z/Shift+Z, Delete, Esc', async ({ pag
   await expect(page.getByTestId('draw-element')).toHaveCount(2);
 
   // 선택 → Delete로 지우고, Esc로 선택을 푼다.
-  await page.keyboard.press('4');
+  await page.keyboard.press('5');
   await expect(canvas).toHaveAttribute('data-tool', 'select');
   await canvas.click({ position: { x: 110, y: 60 } });
   await expect(page.getByTestId('draw-selection')).toBeVisible();
@@ -317,10 +324,11 @@ test('다른 탭에 다녀와도 배율·도구·실행취소가 그대로다 (�
   await expect(page.getByTestId('draw-undo')).toBeEnabled();
 
   // 새로고침은 초기화다 — 그건 데이터가 아니라 손의 자리다(의도).
+  // 초기화된 도구는 **손**이다 (M54).
   await page.reload();
   await expect(page.getByTestId('draw-editor')).toBeVisible();
   await expect(canvas).toHaveAttribute('data-scale', '1.000');
-  await expect(canvas).toHaveAttribute('data-tool', 'pen');
+  await expect(canvas).toHaveAttribute('data-tool', 'hand');
   await expect(page.getByTestId('draw-undo')).toBeDisabled();
   // 그림 자체는 그대로다.
   await expect(page.getByTestId('draw-element')).toHaveCount(1);
@@ -393,6 +401,9 @@ test.describe('두 기기 병합 (M52a-fix)', () => {
       await openDraw(b);
       await b.getByTestId('draw-page-open').first().click();
       await expect(b.getByTestId('draw-editor')).toBeVisible();
+      // B도 그릴 참이다 — M54의 기본 도구는 손이라 펜을 골라 준다.
+      await b.getByTestId('draw-tool').and(b.locator('[data-tool="pen"]')).click();
+      await expect(b.getByTestId('draw-canvas')).toHaveAttribute('data-tool', 'pen');
 
       // A: 이름을 바꾼다(먼저). B: 획을 하나 긋는다(나중).
       await a.getByTestId('draw-page-rename').click();
