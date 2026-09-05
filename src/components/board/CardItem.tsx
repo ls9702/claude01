@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { useHoverNote, type NoteMarkProps } from '../common/HoverNote';
+import { useUiStore } from '../../stores/uiStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { DND_CARD } from '../../dnd/boardDnd';
 import { isProfileId } from '../../profile/profile';
 import type { SheetScheduleCount } from '../../timeline/scheduleSummary';
 import type { Card } from '../../types/models';
 import { colorClasses } from '../../utils/colors';
 import { shortPlace } from '../../utils/geo';
+import { isInAppHash } from '../../utils/url';
 import { formatBudget } from '../../utils/money';
 import { cardSpent } from '../../utils/spend';
 import { formatDuration } from '../../utils/time';
@@ -112,12 +115,26 @@ export function CardSurface({
     return () => window.removeEventListener('pointerdown', onDown);
   }, [popoverOpen]);
 
+  /**
+   * 이 카드가 가리키는 드로우 페이지 (M52b) — 없거나 지워졌으면 `undefined`.
+   *
+   * 지워진 페이지를 가리키는 카드는 **조용히** 칩을 잃는다(필드는 남는다 —
+   * {@link Card.drawPageId}). 「없는 페이지」라고 적힌 칩을 세워 두면 그것을
+   * 누르는 사람이 생기고, 눌러도 아무 일이 없는 것이 가장 나쁜 답이다.
+   */
+  const linkedPage = useWorkspaceStore((state) =>
+    card.drawPageId ? state.workspace.drawPages?.[card.drawPageId] : undefined,
+  );
+  const openDrawPage = useUiStore((state) => state.openDrawPage);
+
   const chips: {
     key: string;
     icon: IconName;
     text: string;
     title?: string;
     tone?: 'money';
+    /** 누를 수 있는 칩(M52b의 🎨 하나뿐) — 트레이의 유령 카드에서는 무시된다. */
+    onTap?: () => void;
   }[] = [];
 
   // Priority, most decision-worthy first: 지출 > 예산 > 소요시간 > 위치.
@@ -153,6 +170,18 @@ export function CardSurface({
   const photoCount = card.photos?.length ?? 0;
   if (photoCount > 0) {
     chips.push({ key: 'photos', icon: 'camera', text: `${photoCount}장` });
+  }
+  // 🎨 (M52b) — 사진 칩과 같은 이유로 **맨 끝**이다: 「갈까 말까」에 답하지 않는
+  // 칩이 먼저 접힌다. 누르면 그 페이지가 열린다(탭+페이지를 한 번에 — `uiStore`).
+  if (linkedPage && !linkedPage.deletedAt && card.drawPageId) {
+    const pageId = card.drawPageId;
+    chips.push({
+      key: 'draw',
+      icon: 'palette',
+      text: '스케치',
+      title: linkedPage.title,
+      onTap: () => openDrawPage(pageId),
+    });
   }
 
   const shown = terse ? chips.slice(0, 1) : chips.slice(0, MAX_CHIPS);
@@ -304,8 +333,11 @@ export function CardSurface({
         {card.url ? (
           <a
             href={card.url}
-            target="_blank"
-            rel="noreferrer noopener"
+            // 앱 안의 주소(`#/draw/…`)는 **새 탭이 아니다** (M52b): 같은 문서
+            // 안에서 해시만 갈리고 `HashSync`가 그 자리를 연다.
+            {...(isInAppHash(card.url)
+              ? {}
+              : { target: '_blank', rel: 'noreferrer noopener' })}
             aria-label="링크 열기"
             data-testid="card-link"
             onPointerDown={(event) => event.stopPropagation()}
@@ -357,17 +389,40 @@ export function CardSurface({
 
       {shown.length > 0 ? (
         <div className="mt-2 flex flex-wrap items-center gap-1">
-          {shown.map((chip) => (
-            <span
-              key={chip.key}
-              title={chip.title}
-              data-testid={`card-chip-${chip.key}`}
-              className={chip.tone === 'money' ? CHIP_MONEY : CHIP_NEUTRAL}
-            >
-              <Icon name={chip.icon} size={16} />
-              <span className="truncate">{chip.text}</span>
-            </span>
-          ))}
+          {shown.map((chip) =>
+            chip.onTap && !terse ? (
+              // 드래그와 싸우지 않는 법은 링크·체크박스가 쓰는 것과 같다:
+              // 센서가 듣는 세 이벤트를 여기서 멈춰 세운 뒤 click까지 삼킨다.
+              <button
+                key={chip.key}
+                type="button"
+                title={chip.title}
+                data-testid={`card-chip-${chip.key}`}
+                aria-label={`${chip.text} 열기`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onTouchStart={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  chip.onTap?.();
+                }}
+                className={`${CHIP_NEUTRAL} hover:bg-line`}
+              >
+                <Icon name={chip.icon} size={16} />
+                <span className="truncate">{chip.text}</span>
+              </button>
+            ) : (
+              <span
+                key={chip.key}
+                title={chip.title}
+                data-testid={`card-chip-${chip.key}`}
+                className={chip.tone === 'money' ? CHIP_MONEY : CHIP_NEUTRAL}
+              >
+                <Icon name={chip.icon} size={16} />
+                <span className="truncate">{chip.text}</span>
+              </span>
+            ),
+          )}
           {folded > 0 ? (
             <span title={foldedTitle} className={CHIP_NEUTRAL}>
               ＋{folded}

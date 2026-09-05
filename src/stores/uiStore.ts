@@ -56,6 +56,15 @@ export interface UiState {
   setActiveSheet: (sheetId?: string) => void;
   /** 페이지를 열거나(`id`) 목록으로 돌아간다(`undefined`). */
   setActiveDrawPage: (pageId?: string) => void;
+  /**
+   * 드로우 탭 + 페이지를 **한 번의 갱신으로** 연다 (M52a-fix ②).
+   *
+   * 두 번 나눠 쓰면 그 사이에 구독자가 한 번 깨어난다 — `HashSync`의 구독자는
+   * 그때 「드로우 탭인데 페이지는 없다」를 보고 주소를 `#/draw`로 고쳐 쓰고, 방금
+   * 밟은 딥링크의 id가 그 자리에서 사라졌다(D6). 그래서 이 한 줄이 필요하다:
+   * 카드의 🎨 칩(M52b)도 여기로 들어온다.
+   */
+  openDrawPage: (pageId: string) => void;
   focusCard: (cardId?: string) => void;
   requestAiSuggest: (prefill: string) => void;
   clearAiSuggestPrefill: () => void;
@@ -81,6 +90,7 @@ export const useUiStore = create<UiState>()((set) => ({
     }),
   setActiveSheet: (sheetId) => set({ activeSheetId: sheetId }),
   setActiveDrawPage: (pageId) => set({ activeDrawPageId: pageId }),
+  openDrawPage: (pageId) => set({ activeTab: 'draw', activeDrawPageId: pageId }),
   focusCard: (cardId) => set({ focusCardId: cardId }),
   requestAiSuggest: (prefill) => set({ aiSuggestPrefill: prefill, activeTab: 'board' }),
   clearAiSuggestPrefill: () => set({ aiSuggestPrefill: undefined }),

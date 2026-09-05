@@ -1,38 +1,65 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { moveElementPatch, normalizeBox, pickTopElement } from '../../draw/geometry';
 import { visibleElements } from '../../draw/pages';
+import {
+  backgroundRect,
+  bufferToDataUrl,
+  deliverPng,
+  exportBounds,
+  pngFileName,
+  svgToPngBlob,
+} from '../../draw/png';
 import { finishStroke } from '../../draw/simplify';
 import {
+  DRAW_BG_MIN_OPACITY,
   DRAW_COLORS,
   DRAW_MAX_SCALE,
   DRAW_MIN_SCALE,
   DRAW_PAGE_SIZE,
   DRAW_STICKERS,
   DRAW_STICKER_SIZES,
+  DRAW_TEXT_MAX,
   DRAW_TEXT_SIZES,
   DRAW_TOOLS,
   DRAW_WIDTHS,
   HIGHLIGHT_WIDTH_FACTOR,
+  clampOpacity,
   type DrawTool,
 } from '../../draw/tools';
+import {
+  redoStack,
+  rememberTools,
+  rememberView,
+  rememberedTools,
+  rememberedView,
+  undoStack,
+  type DrawOp,
+} from '../../stores/drawSession';
+import { getPhotoBlob, putPhotoBlob, usePhotoUrl } from '../../stores/photoBlobs';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore, type NewDrawElement } from '../../stores/workspaceStore';
 import type { DrawElement, DrawPage, Id } from '../../types/models';
+import { newId } from '../../utils/ids';
+import { preparePhoto } from '../../utils/photos';
+import AnchoredMenu from '../common/AnchoredMenu';
 import Icon from '../common/Icon';
 import DrawElementView from './DrawElementView';
 import Sheet from '../common/Sheet';
 import {
   CHIP_BUTTON,
   CHIP_SELECTED,
-  ICON_BUTTON_CLASS,
-  INPUT_CLASS,
+  POPOVER_CLASS,
+  POPOVER_ROW_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
+  TEXTAREA_CLASS,
+  TOUCH_ICON_BUTTON_CLASS,
 } from '../common/formStyles';
 
 /**
- * 드로우 편집기 (M52a) — 한 페이지를 그리는 자리.
+ * 드로우 편집기 (M52a, M52b) — 한 페이지를 그리는 자리.
  *
- * ## 세 가지 규칙
+ * ## 네 가지 규칙
  *
  * **1. 그리는 동안 스토어를 건드리지 않는다.** 획은 pointerup에서 딱 한 번
  * 저장된다(단순화·양자화를 거쳐 요소 하나로). 그리는 동안 매 프레임 저장하면
@@ -41,12 +68,17 @@ import {
  *
  * **2. 스토어 뮤테이션은 언제나 요소 하나다.** 그래서 두 사람이 같은 페이지에
  * 동시에 그려도 병합이 둘 다 남긴다(`sync/merge`). 페이지를 통째로 쓰는
- * 뮤테이션은 이 화면에 하나도 없다.
+ * 뮤테이션은 이 화면에 **배경 사진 하나뿐**이고, 그것은 제목과 같은 껍데기라
+ * 그렇게 갈리는 것이 맞다.
  *
  * **3. 확대·축소는 캔버스 안에서만 일어난다.** 페이지가 확대되는 것이 아니라
  * `viewBox`가 좁아지는 것이다 — M50-fix2가 「페이지 확대 고착」으로 데인 자리라,
  * 두 손가락이 브라우저의 확대에 닿지 않게 캔버스에만 `touch-action: none`을
  * 건다.
+ *
+ * **4. 방문의 상태는 모듈 메모리에 있다** (M52b). 뷰(중심·배율)·도구·실행취소
+ * 스택은 `stores/drawSession`이 들고 있어, 지도에 다녀와도 그리던 그대로다.
+ * 새로고침은 초기화다 — 그건 데이터가 아니라 손의 자리다.
  */
 
 /** 뷰: 화면 왼쪽 위가 가리키는 **로컬 좌표**와 배율. */
@@ -54,13 +86,6 @@ interface View {
   x: number;
   y: number;
   scale: number;
-}
-
-/** 실행취소 한 걸음 — 「이 id가 이랬다가 이렇게 됐다」. `null`은 없음이다. */
-interface DrawOp {
-  id: Id;
-  before: DrawElement | null;
-  after: DrawElement | null;
 }
 
 /** 그리는 중인 것. 저장되기 전이라 스토어에 없다. */
@@ -72,21 +97,73 @@ type Draft =
 const clampScale = (scale: number): number =>
   Math.min(DRAW_MAX_SCALE, Math.max(DRAW_MIN_SCALE, scale));
 
+/** 입력칸에 글을 쓰는 중인가 — 단축키가 물러서야 하는 유일한 조건. */
+const isTyping = (target: EventTarget | null): boolean => {
+  const node = target as HTMLElement | null;
+  const tag = node?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || node?.isContentEditable === true;
+};
+
 export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose: () => void }) {
   const addDrawElement = useWorkspaceStore((s) => s.addDrawElement);
   const putDrawElement = useWorkspaceStore((s) => s.putDrawElement);
   const updateDrawElement = useWorkspaceStore((s) => s.updateDrawElement);
   const deleteDrawElement = useWorkspaceStore((s) => s.deleteDrawElement);
+  const setDrawPageBackground = useWorkspaceStore((s) => s.setDrawPageBackground);
+  const cards = useWorkspaceStore((s) => s.workspace.cards);
+  const focusCard = useUiStore((s) => s.focusCard);
+  const setTab = useUiStore((s) => s.setTab);
 
-  const [tool, setTool] = useState<DrawTool>('pen');
-  const [color, setColor] = useState(DRAW_COLORS[0].value);
-  const [width, setWidth] = useState(DRAW_WIDTHS[1].value);
-  const [sticker, setSticker] = useState(DRAW_STICKERS[0]);
-  const [stickerSize, setStickerSize] = useState(DRAW_STICKER_SIZES[0].value);
-  const [textSize, setTextSize] = useState(DRAW_TEXT_SIZES[0].value);
+  // 도구 서랍은 **사람의 것**이라 페이지를 옮겨도, 탭을 옮겨도 따라온다.
+  const saved = rememberedTools();
+  const [tool, setToolState] = useState<DrawTool>(saved.tool);
+  const [color, setColorState] = useState(saved.color);
+  const [width, setWidthState] = useState(saved.width);
+  const [sticker, setStickerState] = useState(saved.sticker);
+  const [stickerSize, setStickerSizeState] = useState(saved.stickerSize);
+  const [textSize, setTextSizeState] = useState(saved.textSize);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [linksOpen, setLinksOpen] = useState(false);
+  const [backgroundOpen, setBackgroundOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 });
+  const setTool = useCallback((next: DrawTool) => {
+    rememberTools({ tool: next });
+    setToolState(next);
+  }, []);
+  const setColor = useCallback((next: string) => {
+    rememberTools({ color: next });
+    setColorState(next);
+  }, []);
+  const setWidth = useCallback((next: number) => {
+    rememberTools({ width: next });
+    setWidthState(next);
+  }, []);
+  const setSticker = useCallback((next: string) => {
+    rememberTools({ sticker: next });
+    setStickerState(next);
+  }, []);
+  const setStickerSize = useCallback((next: number) => {
+    rememberTools({ stickerSize: next });
+    setStickerSizeState(next);
+  }, []);
+  const setTextSize = useCallback((next: number) => {
+    rememberTools({ textSize: next });
+    setTextSizeState(next);
+  }, []);
+
+  /**
+   * 뷰는 **페이지 id를 달고** 산다.
+   *
+   * 페이지를 바꾸면 한 렌더 동안은 상태가 아직 옛 페이지의 것이다 — id가 붙어
+   * 있으면 그 렌더에서 옛 뷰가 새 페이지의 서랍에 잘못 저장되지 않는다.
+   */
+  const [viewState, setViewState] = useState<View & { pageId: Id }>(() => ({
+    pageId: page.id,
+    ...(rememberedView(page.id) ?? { x: 0, y: 0, scale: 1 }),
+  }));
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [draft, setDraft] = useState<Draft>(null);
   const [selectedId, setSelectedId] = useState<Id | null>(null);
@@ -98,14 +175,21 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
    * 상태 배열에 담고 `setState(fn)` 안에서 스토어를 건드리면 StrictMode의 개발
    * 빌드가 그 함수를 두 번 불러 되돌리기가 두 번 일어난다 — 업데이터는 순수해야
    * 한다는 규칙이 실제로 물리는 드문 자리다.
+   *
+   * 배열 자신은 `drawSession`의 것이다(같은 참조) — 탭을 다녀와도 이어진다.
    */
-  const undoRef = useRef<DrawOp[]>([]);
-  const redoRef = useRef<DrawOp[]>([]);
-  const [stackSizes, setStackSizes] = useState({ undo: 0, redo: 0 });
+  const undoRef = useRef<DrawOp[]>(undoStack(page.id));
+  const redoRef = useRef<DrawOp[]>(redoStack(page.id));
+  const [stackSizes, setStackSizes] = useState({
+    undo: undoRef.current.length,
+    redo: redoRef.current.length,
+  });
   const [spaceHeld, setSpaceHeld] = useState(false);
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const menuRef = useRef<HTMLButtonElement | null>(null);
+  const linksRef = useRef<HTMLDivElement | null>(null);
   /** 지금 화면에 닿아 있는 포인터들 — 두 개가 되면 팬/줌이다. */
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   /** 직전 프레임의 두 손가락 상태(거리·가운데점). */
@@ -115,8 +199,18 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
   /** 선택 이동 중인 요소와 시작 지점. */
   const dragging = useRef<{ element: DrawElement; x: number; y: number; dx: number; dy: number } | null>(null);
   const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number } | null>(null);
+  const pageIdRef = useRef(page.id);
+  pageIdRef.current = page.id;
 
   const elements = useMemo(() => visibleElements(page), [page]);
+  const backgroundUrl = usePhotoUrl(page.background?.photoId);
+  const backgroundOpacity = page.background ? clampOpacity(page.background.opacity) : 1;
+
+  /** 이 페이지를 가리키는 카드들 (M52b) — 헤더의 「연결된 카드 N」. */
+  const linkedCards = useMemo(
+    () => Object.values(cards).filter((card) => card.drawPageId === page.id),
+    [cards, page.id],
+  );
 
   /* ---------------------------------------------------------------- *
    * 뷰 — 크기 추적과 첫 중앙 정렬
@@ -133,46 +227,77 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
     return () => observer.disconnect();
   }, []);
 
-  /** 페이지를 열면 한가운데에서 시작한다 — 4000×4000의 왼쪽 위 구석은 아무것도 없다. */
+  /** 이 렌더가 쓰는 뷰 — 상태가 아직 옛 페이지의 것이면 서랍(또는 가운데)을 본다. */
+  const view: View =
+    viewState.pageId === page.id
+      ? { x: viewState.x, y: viewState.y, scale: viewState.scale }
+      : (rememberedView(page.id) ?? {
+          x: DRAW_PAGE_SIZE / 2 - size.w / 2,
+          y: DRAW_PAGE_SIZE / 2 - size.h / 2,
+          scale: 1,
+        });
+
+  const setView = useCallback((next: View | ((current: View) => View)) => {
+    setViewState((current) => {
+      const base: View =
+        current.pageId === pageIdRef.current
+          ? current
+          : (rememberedView(pageIdRef.current) ?? current);
+      const value = typeof next === 'function' ? next(base) : next;
+      return { pageId: pageIdRef.current, ...value };
+    });
+  }, []);
+
+  /**
+   * 페이지를 열면 한가운데에서 시작한다 — 4000×4000의 왼쪽 위 구석은 아무것도
+   * 없다. 지난 방문의 뷰가 서랍에 있으면 **그 자리로** 돌아간다(M52b).
+   */
   const centered = useRef<Id | null>(null);
   useEffect(() => {
     if (size.w === 0 || size.h === 0) return;
     if (centered.current === page.id) return;
     centered.current = page.id;
-    setView({ x: DRAW_PAGE_SIZE / 2 - size.w / 2, y: DRAW_PAGE_SIZE / 2 - size.h / 2, scale: 1 });
+    const remembered = rememberedView(page.id);
+    setViewState({
+      pageId: page.id,
+      ...(remembered ?? {
+        x: DRAW_PAGE_SIZE / 2 - size.w / 2,
+        y: DRAW_PAGE_SIZE / 2 - size.h / 2,
+        scale: 1,
+      }),
+    });
   }, [page.id, size.w, size.h]);
 
-  // 페이지를 바꾸면 실행취소 스택은 이 방문의 것이 아니다.
+  /** 바뀐 뷰를 서랍에 적어 둔다 — 옛 페이지의 뷰는 적지 않는다. */
   useEffect(() => {
-    undoRef.current = [];
-    redoRef.current = [];
-    setStackSizes({ undo: 0, redo: 0 });
+    if (viewState.pageId !== page.id) return;
+    rememberView(page.id, { x: viewState.x, y: viewState.y, scale: viewState.scale });
+  }, [page.id, viewState]);
+
+  // 페이지를 바꾸면 실행취소 스택은 그 페이지의 것으로 갈아 끼운다.
+  useEffect(() => {
+    undoRef.current = undoStack(page.id);
+    redoRef.current = redoStack(page.id);
+    setStackSizes({ undo: undoRef.current.length, redo: redoRef.current.length });
     setSelectedId(null);
   }, [page.id]);
 
-  /** Space를 누르고 있는 동안은 손 모드 — 입력칸에 글을 쓰는 중이면 아니다. */
+  /** 팝오버는 바깥을 누르면 닫힌다 (카드의 일정 배지와 같은 규칙). */
   useEffect(() => {
-    const isTyping = (target: EventTarget | null): boolean => {
-      const node = target as HTMLElement | null;
-      const tag = node?.tagName;
-      return tag === 'INPUT' || tag === 'TEXTAREA' || node?.isContentEditable === true;
+    if (!linksOpen) return;
+    const onDown = (event: PointerEvent) => {
+      if (!linksRef.current?.contains(event.target as Node)) setLinksOpen(false);
     };
-    const down = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' || isTyping(event.target)) return;
-      event.preventDefault();
-      setSpaceHeld(true);
-    };
-    const up = (event: KeyboardEvent) => {
-      if (event.code !== 'Space') return;
-      setSpaceHeld(false);
-    };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-    };
-  }, []);
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [linksOpen]);
+
+  /** 알림 한 줄은 스스로 사라진다. */
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const toLocal = useCallback(
     (clientX: number, clientY: number): { x: number; y: number } => {
@@ -187,21 +312,24 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
   );
 
   /** 화면의 한 점을 붙들어 둔 채 배율만 바꾼다. */
-  const zoomAt = useCallback((clientX: number, clientY: number, factor: number) => {
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setView((current) => {
-      const scale = clampScale(current.scale * factor);
-      if (scale === current.scale) return current;
-      const px = clientX - rect.left;
-      const py = clientY - rect.top;
-      return {
-        scale,
-        x: current.x + px / current.scale - px / scale,
-        y: current.y + py / current.scale - py / scale,
-      };
-    });
-  }, []);
+  const zoomAt = useCallback(
+    (clientX: number, clientY: number, factor: number) => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setView((current) => {
+        const scale = clampScale(current.scale * factor);
+        if (scale === current.scale) return current;
+        const px = clientX - rect.left;
+        const py = clientY - rect.top;
+        return {
+          scale,
+          x: current.x + px / current.scale - px / scale,
+          y: current.y + py / current.scale - py / scale,
+        };
+      });
+    },
+    [setView],
+  );
 
   /* ---------------------------------------------------------------- *
    * 실행취소 — 한 가지 모양의 걸음 하나로 전부를 표현한다
@@ -215,7 +343,7 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
     (op: DrawOp) => {
       undoRef.current.push(op);
       // 새 일을 하면 「다시실행」의 미래는 사라진다 — 모든 편집기가 그렇다.
-      redoRef.current = [];
+      redoRef.current.length = 0;
       syncStacks();
     },
     [syncStacks],
@@ -267,12 +395,93 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
   );
 
   /* ---------------------------------------------------------------- *
+   * 키보드 — 데스크톱의 손 (M52b)
+   * ---------------------------------------------------------------- */
+
+  /**
+   * Space는 손 모드, 그 밖은 편집기의 단축키다.
+   *
+   * **입력칸에 글을 쓰는 중이면 전부 물러선다** — 「1」을 타이핑하다 도구가
+   * 바뀌면 그건 단축키가 아니라 사고다. 시트가 열려 있을 때도 마찬가지인데,
+   * 시트의 입력칸이 곧 포커스를 가져가므로 같은 규칙 하나로 덮인다.
+   */
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => {
+      if (isTyping(event.target)) return;
+
+      if (event.code === 'Space') {
+        event.preventDefault();
+        setSpaceHeld(true);
+        return;
+      }
+
+      const meta = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+
+      if (meta && key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (meta && key === 'y') {
+        event.preventDefault();
+        redo();
+        return;
+      }
+      if (meta) return;
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        const element = selectedId ? page.elements[selectedId] : undefined;
+        if (element && !element.deletedAt) {
+          event.preventDefault();
+          removeElement(element);
+        }
+        return;
+      }
+      if (event.key === 'Escape') {
+        if (textAt) {
+          setTextAt(null);
+          setTextValue('');
+        } else if (selectedId) {
+          setSelectedId(null);
+        }
+        return;
+      }
+      // 숫자 하나가 도구 하나 — 도구 바의 순서 그대로다.
+      if (/^[1-9]$/.test(event.key)) {
+        const spec = DRAW_TOOLS[Number(event.key) - 1];
+        if (!spec) return;
+        event.preventDefault();
+        setTool(spec.id);
+        if (spec.id !== 'select') setSelectedId(null);
+      }
+    };
+    const up = (event: KeyboardEvent) => {
+      if (event.code !== 'Space') return;
+      setSpaceHeld(false);
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  }, [page.elements, redo, removeElement, selectedId, setTool, textAt, undo]);
+
+  /* ---------------------------------------------------------------- *
    * 포인터 — 한 손가락은 도구, 두 손가락은 언제나 팬/줌
    * ---------------------------------------------------------------- */
 
   const handToolActive = tool === 'hand' || spaceHeld;
 
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>): void => {
+    // 오른쪽·가운데 버튼으로는 그리지 않는다 (M52a-fix ⑤). 마우스에서만 묻는
+    // 조건인 이유는 **손가락 둘**이 곧 팬/줌이기 때문이다: 두 번째 손가락은
+    // `isPrimary`가 false이고, 그것까지 막으면 확대가 사라진다.
+    if (event.button !== 0) return;
+    if (event.pointerType === 'mouse' && !event.isPrimary) return;
+
     (event.target as Element).setPointerCapture?.(event.pointerId);
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
@@ -474,12 +683,102 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
   const eraserPad = (): number => 10 / view.scale;
 
   const submitText = (): void => {
-    const value = textValue.trim();
+    // 상한은 화면이 아니라 **저장 직전**에 건다 (M52a-fix ⑨): 500자를 넘는 글자
+    // 하나는 페이지를 가로지르는 한 줄이 되고, 그것을 지우려면 그 줄을 찾아
+    // 짚어야 한다.
+    const value = textValue.trim().slice(0, DRAW_TEXT_MAX);
     const at = textAt;
     setTextAt(null);
     setTextValue('');
     if (!at || value === '') return;
     commit({ type: 'text', x: at.x, y: at.y, text: value, color, size: textSize });
+  };
+
+  /* ---------------------------------------------------------------- *
+   * 배경 사진 (M52b)
+   * ---------------------------------------------------------------- */
+
+  /**
+   * 고른 사진 하나를 배경으로.
+   *
+   * 카드 사진(M10)과 **완전히 같은 길**이다: 압축 → 새 id로 바이트 저장 →
+   * 그다음에 메타데이터(여기서는 `DrawPage.background`). 중간에 죽으면 주인
+   * 없는 블롭 하나가 남고 GC가 쓸어 간다 — 그 반대(가리키는데 바이트가 없다)는
+   * 깨진 화면이라 일어나면 안 된다.
+   */
+  const pickBackground = async (file: File | undefined): Promise<void> => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setBusy('사진을 준비하는 중…');
+    try {
+      const prepared = await preparePhoto(file);
+      const id = newId();
+      await putPhotoBlob(id, prepared.buf);
+      setDrawPageBackground(page.id, { photoId: id, opacity: backgroundOpacity });
+      setBackgroundOpen(false);
+      setNotice('배경을 깔았어요');
+    } catch {
+      setNotice('사진을 읽지 못했어요');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** 붙여넣기로도 깔린다 (데스크톱) — 배경 시트가 열려 있을 때만 듣는다. */
+  useEffect(() => {
+    if (!backgroundOpen) return;
+    const onPaste = (event: ClipboardEvent): void => {
+      const file = [...(event.clipboardData?.files ?? [])].find((item) =>
+        item.type.startsWith('image/'),
+      );
+      if (!file) return;
+      event.preventDefault();
+      void pickBackground(file);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  });
+
+  const removeBackground = (): void => {
+    // 바이트는 **직접 지우지 않는다** — 복제한 페이지가 같은 사진을 쓰고 있을 수
+    // 있다(불변 블롭이라 공유가 안전한 이유이기도 하다). 아무도 가리키지 않게
+    // 되면 `photoGc`가 30초 뒤에 쓸어 간다 — 카드 사진을 뗄 때와 같은 길이다.
+    setDrawPageBackground(page.id, undefined);
+    setBackgroundOpen(false);
+    setNotice('배경을 뺐어요');
+  };
+
+  /* ---------------------------------------------------------------- *
+   * PNG (M52b)
+   * ---------------------------------------------------------------- */
+
+  const savePng = async (): Promise<void> => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    setMenuOpen(false);
+    setBusy('그림을 만드는 중…');
+    try {
+      let backgroundDataUrl: string | undefined;
+      let bgBox = null as ReturnType<typeof backgroundRect> | null;
+      const photoId = page.background?.photoId;
+      if (photoId) {
+        const buf = await getPhotoBlob(photoId);
+        if (buf) {
+          backgroundDataUrl = bufferToDataUrl(buf);
+          // 파일에 담을 넓이를 알려면 사진의 원래 비율이 필요하다 — 화면에서는
+          // `preserveAspectRatio`가 대신 답해 주던 질문이다.
+          const measured = await measure(backgroundDataUrl);
+          bgBox = backgroundRect(measured.w, measured.h);
+        }
+      }
+      const bounds = exportBounds(page, bgBox);
+      const blob = await svgToPngBlob(svg, bounds, { backgroundDataUrl });
+      const how = await deliverPng(blob, pngFileName(page.title));
+      setNotice(how === 'share' ? '공유 시트를 열었어요' : '그림을 저장했어요');
+    } catch {
+      setNotice('그림을 만들지 못했어요');
+    } finally {
+      setBusy(null);
+    }
   };
 
   const selected = selectedId ? page.elements[selectedId] : undefined;
@@ -494,26 +793,70 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
       data-page-id={page.id}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <header className="flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
+      <header className="flex shrink-0 items-center gap-1 px-3 pb-2 pt-3">
         <button
           type="button"
           data-testid="draw-back"
           aria-label="페이지 목록으로"
+          title="페이지 목록으로"
           onClick={onClose}
-          className={ICON_BUTTON_CLASS}
+          className={TOUCH_ICON_BUTTON_CLASS}
         >
           <Icon name="chevron-left" size={20} />
         </button>
         <h1 data-testid="draw-page-title" className="min-w-0 flex-1 truncate text-title text-ink">
           {page.title}
         </h1>
+
+        {/* 연결된 카드 (M52b) — 이 페이지가 어느 아이디어의 것인지, 페이지 쪽에서도
+            보이게. 팝오버 한 줄을 누르면 그 카드가 보드에서 열린다. */}
+        {linkedCards.length > 0 ? (
+          <div ref={linksRef} className="relative shrink-0">
+            <button
+              type="button"
+              data-testid="draw-links"
+              data-count={linkedCards.length}
+              aria-label={`연결된 카드 ${linkedCards.length}`}
+              title={`연결된 카드 ${linkedCards.length}`}
+              aria-expanded={linksOpen}
+              onClick={() => setLinksOpen((open) => !open)}
+              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-full bg-sunken px-2 text-micro tabular-nums text-ink-muted"
+            >
+              <span aria-hidden="true">🎨</span>
+              {linkedCards.length}
+            </button>
+            {linksOpen ? (
+              <div data-testid="draw-links-popover" className={`${POPOVER_CLASS} right-0 top-full`}>
+                {linkedCards.map((card) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    data-testid="draw-link-card"
+                    data-card-id={card.id}
+                    onClick={() => {
+                      setLinksOpen(false);
+                      focusCard(card.id);
+                      setTab('board');
+                    }}
+                    className={POPOVER_ROW_CLASS}
+                  >
+                    <Icon name="board" size={16} />
+                    <span className="min-w-0 flex-1 truncate text-left">{card.title}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <button
           type="button"
           data-testid="draw-undo"
           aria-label="실행취소"
+          title="실행취소 (Ctrl+Z)"
           disabled={stackSizes.undo === 0}
           onClick={undo}
-          className={ICON_BUTTON_CLASS}
+          className={TOUCH_ICON_BUTTON_CLASS}
         >
           <Icon name="undo" size={20} />
         </button>
@@ -521,13 +864,61 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
           type="button"
           data-testid="draw-redo"
           aria-label="다시실행"
+          title="다시실행 (Ctrl+Shift+Z)"
           disabled={stackSizes.redo === 0}
           onClick={redo}
-          className={ICON_BUTTON_CLASS}
+          className={TOUCH_ICON_BUTTON_CLASS}
         >
           <Icon name="redo" size={20} />
         </button>
+        <button
+          type="button"
+          ref={menuRef}
+          data-testid="draw-menu"
+          aria-label="페이지 메뉴"
+          title="페이지 메뉴"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+          className={TOUCH_ICON_BUTTON_CLASS}
+        >
+          <Icon name="more" size={20} />
+        </button>
       </header>
+
+      {menuOpen ? (
+        <AnchoredMenu anchor={menuRef.current} testId="draw-menu-panel" onClose={() => setMenuOpen(false)}>
+          <button
+            type="button"
+            data-testid="draw-background-open"
+            onClick={() => {
+              setMenuOpen(false);
+              setBackgroundOpen(true);
+            }}
+            className={POPOVER_ROW_CLASS}
+          >
+            <Icon name="camera" size={16} />
+            배경 사진
+          </button>
+          <button
+            type="button"
+            data-testid="draw-png"
+            onClick={() => void savePng()}
+            className={POPOVER_ROW_CLASS}
+          >
+            <Icon name="upload" size={16} />
+            PNG로 저장
+          </button>
+        </AnchoredMenu>
+      ) : null}
+
+      {busy || notice ? (
+        <p
+          data-testid="draw-notice"
+          className="mx-3 mb-1 rounded-md bg-sunken px-3 py-1 text-micro font-normal text-ink-muted"
+        >
+          {busy ?? notice}
+        </p>
+      ) : null}
 
       <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden border-y border-line">
         <svg
@@ -535,6 +926,7 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
           data-testid="draw-canvas"
           data-scale={view.scale.toFixed(3)}
           data-tool={handToolActive ? 'hand' : tool}
+          data-background={page.background ? 'true' : 'false'}
           viewBox={viewBox}
           preserveAspectRatio="none"
           width="100%"
@@ -548,9 +940,9 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
           onPointerCancel={endPointer}
           onWheel={onWheel}
         >
-          {/* 페이지 자신 — 4000×4000의 흰 바닥. 배경 사진은 M52b에서 이 위에
-              깔린다(`DrawPage.background`는 이미 모델에 있다). */}
+          {/* 페이지 자신 — 4000×4000의 흰 바닥. */}
           <rect
+            data-testid="draw-page-bg"
             x={0}
             y={0}
             width={DRAW_PAGE_SIZE}
@@ -560,6 +952,23 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
             strokeWidth={2}
             vectorEffect="non-scaling-stroke"
           />
+          {/* 배경 사진 (M52b) — **요소보다 먼저** 그린다(맨 아래 층). 페이지
+              한가운데에 원본 비율로 들어간다: 늘려 채우면 사람 얼굴이 퍼지고,
+              왼쪽 위 구석에 두면 페이지를 열자마자 그것을 찾으러 가야 한다.
+              그 두 가지를 `preserveAspectRatio` 한 줄이 답한다. */}
+          {backgroundUrl ? (
+            <image
+              data-testid="draw-background"
+              href={backgroundUrl}
+              x={0}
+              y={0}
+              width={DRAW_PAGE_SIZE}
+              height={DRAW_PAGE_SIZE}
+              preserveAspectRatio="xMidYMid meet"
+              opacity={backgroundOpacity}
+              style={{ pointerEvents: 'none' }}
+            />
+          ) : null}
           {elements.map((element) => {
             const moving = dragOffset && dragging.current?.element.id === element.id;
             const shown = moving
@@ -586,8 +995,9 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
               type="button"
               data-testid="draw-delete-selected"
               onClick={() => removeElement(selected)}
-              className={ICON_BUTTON_CLASS}
+              className={TOUCH_ICON_BUTTON_CLASS}
               aria-label="선택한 것 삭제"
+              title="선택한 것 삭제 (Delete)"
             >
               <Icon name="trash" size={16} />
             </button>
@@ -610,7 +1020,7 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-1 px-2 py-2">
           <div className="flex items-center gap-1 overflow-x-auto">
-            {DRAW_TOOLS.map((spec) => (
+            {DRAW_TOOLS.map((spec, index) => (
               <button
                 key={spec.id}
                 type="button"
@@ -618,13 +1028,16 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
                 data-tool={spec.id}
                 data-active={spec.id === tool}
                 aria-label={spec.label}
+                // 데스크톱의 손에는 이름과 단축키가 보여야 한다 (M52b) — 아이콘
+                // 열한 개 중 무엇이 형광펜인지는 눌러 보기 전에는 모른다.
+                title={index < 9 ? `${spec.label} (${index + 1})` : spec.label}
                 aria-pressed={spec.id === tool}
                 onClick={() => {
                   setTool(spec.id);
                   if (spec.id !== 'select') setSelectedId(null);
                   if (spec.id === 'sticker') setPickerOpen(true);
                 }}
-                className={`${ICON_BUTTON_CLASS} shrink-0 ${
+                className={`${TOUCH_ICON_BUTTON_CLASS} ${
                   spec.id === tool ? 'bg-inverse text-surface hover:bg-inverse hover:text-surface' : ''
                 }`}
               >
@@ -642,13 +1055,19 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
                 data-color={swatch.value}
                 data-active={swatch.value === color}
                 aria-label={swatch.label}
+                title={swatch.label}
                 aria-pressed={swatch.value === color}
                 onClick={() => setColor(swatch.value)}
-                className={`h-8 w-8 shrink-0 rounded-full border-2 ${
-                  swatch.value === color ? 'border-ink' : 'border-line'
-                }`}
-                style={{ backgroundColor: swatch.value }}
-              />
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full lg:h-9 lg:w-9"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`block h-7 w-7 rounded-full border-2 lg:h-6 lg:w-6 ${
+                    swatch.value === color ? 'border-ink' : 'border-line'
+                  }`}
+                  style={{ backgroundColor: swatch.value }}
+                />
+              </button>
             ))}
             <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-line" />
             {DRAW_WIDTHS.map((step) => (
@@ -659,9 +1078,10 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
                 data-width={step.value}
                 data-active={step.value === width}
                 aria-label={step.label}
+                title={step.label}
                 aria-pressed={step.value === width}
                 onClick={() => setWidth(step.value)}
-                className={`${step.value === width ? CHIP_SELECTED : CHIP_BUTTON} shrink-0`}
+                className={`${step.value === width ? CHIP_SELECTED : CHIP_BUTTON} h-11 shrink-0 lg:h-9`}
               >
                 {step.label}
               </button>
@@ -670,8 +1090,9 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
             <button
               type="button"
               data-testid="draw-sticker-open"
+              title="스티커"
               onClick={() => setPickerOpen(true)}
-              className={`${CHIP_BUTTON} shrink-0`}
+              className={`${CHIP_BUTTON} h-11 shrink-0 lg:h-9`}
             >
               <span aria-hidden="true">{sticker}</span>
               스티커
@@ -680,8 +1101,9 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
               type="button"
               data-testid="draw-zoom-out"
               aria-label="축소"
+              title="축소"
               onClick={() => zoomAt(centerX(), centerY(), 1 / 1.25)}
-              className={`${ICON_BUTTON_CLASS} shrink-0`}
+              className={TOUCH_ICON_BUTTON_CLASS}
             >
               <Icon name="minus" size={16} />
             </button>
@@ -689,16 +1111,18 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
               type="button"
               data-testid="draw-zoom-in"
               aria-label="확대"
+              title="확대"
               onClick={() => zoomAt(centerX(), centerY(), 1.25)}
-              className={`${ICON_BUTTON_CLASS} shrink-0`}
+              className={TOUCH_ICON_BUTTON_CLASS}
             >
               <Icon name="plus" size={16} />
             </button>
           </div>
         </div>
       </div>
-      {/* 폰에서 도구 바가 캔버스를 가리지 않도록 그 높이만큼 자리를 비운다. */}
-      <div aria-hidden="true" className="h-[6.5rem] shrink-0 lg:hidden" />
+      {/* 폰에서 도구 바가 캔버스를 가리지 않도록 그 높이만큼 자리를 비운다
+          (44px 두 줄 + 패딩 — M52b에서 터치 타깃이 커진 만큼 함께 자랐다). */}
+      <div aria-hidden="true" className="h-[7.5rem] shrink-0 lg:hidden" />
 
       {pickerOpen ? (
         <Sheet
@@ -752,6 +1176,91 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
         </Sheet>
       ) : null}
 
+      {backgroundOpen ? (
+        <Sheet
+          title="배경 사진"
+          testId="draw-bg-sheet"
+          onClose={() => setBackgroundOpen(false)}
+          footer={
+            <div className="flex gap-2">
+              {page.background ? (
+                <button
+                  type="button"
+                  data-testid="draw-bg-remove"
+                  onClick={removeBackground}
+                  className={`${SECONDARY_BUTTON_CLASS} flex-1`}
+                >
+                  <Icon name="close" size={16} />
+                  제거
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setBackgroundOpen(false)}
+                className={`${PRIMARY_BUTTON_CLASS} flex-1`}
+              >
+                닫기
+              </button>
+            </div>
+          }
+        >
+          <p className="text-label font-normal text-ink-muted">
+            관광지 사진을 깔고 그 위에 낙서하세요. 붙여넣기(Ctrl+V)도 돼요.
+          </p>
+
+          {/* `<label>`이 감싼 숨은 input — 모든 모바일 웹뷰에서 동작하는 한 가지
+              모양이다(M10의 그 규칙). `multiple`이 없는 이유는 배경이 하나이기
+              때문이다. */}
+          <label
+            data-testid="draw-bg-add"
+            data-busy={busy ? 'true' : 'false'}
+            className="mt-3 flex h-11 cursor-pointer items-center justify-center gap-1 rounded-md border border-dashed border-line text-label font-normal text-ink-muted hover:border-line-strong hover:bg-sunken"
+          >
+            <Icon name="plus" size={16} />
+            {page.background ? '사진 바꾸기' : '사진 고르기'}
+            <input
+              data-testid="draw-bg-input"
+              type="file"
+              accept="image/*"
+              hidden
+              disabled={Boolean(busy)}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                void pickBackground(file);
+              }}
+            />
+          </label>
+
+          {page.background ? (
+            <div className="mt-4">
+              <label className="block text-label font-medium text-ink-muted" htmlFor="draw-bg-opacity">
+                진하기
+              </label>
+              <input
+                id="draw-bg-opacity"
+                data-testid="draw-bg-opacity"
+                type="range"
+                min={DRAW_BG_MIN_OPACITY}
+                max={1}
+                step={0.05}
+                value={backgroundOpacity}
+                onChange={(event) =>
+                  setDrawPageBackground(page.id, {
+                    photoId: page.background!.photoId,
+                    opacity: Number(event.target.value),
+                  })
+                }
+                className="mt-2 h-11 w-full"
+              />
+              <p className="text-micro font-normal text-ink-faint">
+                {Math.round(backgroundOpacity * 100)}%
+              </p>
+            </div>
+          ) : null}
+        </Sheet>
+      ) : null}
+
       {textAt ? (
         <Sheet
           title="글자 넣기"
@@ -777,16 +1286,24 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
             </div>
           }
         >
-          <input
+          {/* `textarea`인 이유는 줄바꿈이 실제로 저장·렌더되기 때문이다 (M52b).
+              Enter는 그대로 「넣기」이고(가장 흔한 손짓), 줄을 바꾸려면
+              Shift+Enter다 — 메신저들이 쓰는 그 규칙. */}
+          <textarea
             data-testid="draw-text-input"
             autoFocus
+            rows={2}
+            maxLength={DRAW_TEXT_MAX}
             value={textValue}
             onChange={(event) => setTextValue(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) submitText();
+              if (event.key !== 'Enter' || event.shiftKey) return;
+              if (event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              submitText();
             }}
             placeholder="여기 어때?"
-            className={INPUT_CLASS}
+            className={`${TEXTAREA_CLASS} mt-0`}
           />
           <div className="mt-3 flex items-center gap-2">
             {DRAW_TEXT_SIZES.map((step) => (
@@ -815,6 +1332,16 @@ export default function DrawEditor({ page, onClose }: { page: DrawPage; onClose:
     const rect = svgRef.current?.getBoundingClientRect();
     return rect ? rect.top + rect.height / 2 : 0;
   }
+}
+
+/** data URI 하나의 원래 크기 — 배경을 파일에 담을 때만 필요하다. */
+function measure(dataUrl: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve({ w: image.naturalWidth || 1, h: image.naturalHeight || 1 });
+    image.onerror = () => resolve({ w: 1, h: 1 });
+    image.src = dataUrl;
+  });
 }
 
 /** 그리는 중인 것을 저장될 요소와 **같은 컴포넌트**로 그린다. */

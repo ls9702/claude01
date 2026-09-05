@@ -1048,6 +1048,111 @@ describe('merge — drawPages', () => {
     expect(merge(once, once, NOW)).toEqual(once);
   });
 
+  /* ---------------------------------------------------------------- *
+   * M52a-fix — 「이름 변경이 상대의 획 하나에 덮인다」와 그 이웃들
+   * ---------------------------------------------------------------- */
+
+  it('이름 변경(먼저) vs 획 추가(나중) — 이름이 살아남는다 (C5)', () => {
+    // A는 이름을 바꿨다: 껍데기의 시각이 앞으로 간다.
+    const a = wsPages([page('p1', T(5), { title: '난바 밤', updatedAt: T(30) })], ['p1']);
+    // B는 **나중에** 획 하나를 그렸다 — 그래도 껍데기 시각은 그대로다
+    // (`putPageBody`, M52a-fix ①). 그것이 이 판정의 전부다.
+    const b = wsPages([withElements('p1', T(5), [sticker('x', T(60))])], ['p1']);
+
+    for (const merged of [merge(a, b, NOW), merge(b, a, NOW)]) {
+      expect(merged.drawPages!.p1.title).toBe('난바 밤');
+      expect(Object.keys(merged.drawPages!.p1.elements)).toEqual(['x']);
+    }
+  });
+
+  it('획 추가(먼저) vs 이름 변경(나중) — 이름이 이기고 획도 남는다 (C5b)', () => {
+    const a = wsPages([withElements('p1', T(5), [sticker('x', T(10))])], ['p1']);
+    const b = wsPages([page('p1', T(5), { title: '난바 밤', updatedAt: T(30) })], ['p1']);
+
+    for (const merged of [merge(a, b, NOW), merge(b, a, NOW)]) {
+      expect(merged.drawPages!.p1.title).toBe('난바 밤');
+      expect(Object.keys(merged.drawPages!.p1.elements)).toEqual(['x']);
+    }
+  });
+
+  it('둘이 동시에 그린 요소는 **순서 배열에서도** 둘 다 제자리를 지킨다', () => {
+    // 공통 앞부분 [a] 위에 각자 하나씩 얹었다.
+    const local = wsPages(
+      [withElements('p1', T(5), [sticker('a', T(10)), sticker('mine', T(20))])],
+      ['p1'],
+    );
+    const remote = wsPages(
+      [withElements('p1', T(5), [sticker('a', T(10)), sticker('yours', T(21))])],
+      ['p1'],
+    );
+
+    // 어느 쪽에서 합치든 **셋 다** 순서 배열에 있고 공통 앞부분은 그대로다.
+    // (동점은 `mergeMap`과 같은 이유로 remote가 이기므로, 두 새 요소의 앞뒤는
+    // 합치는 방향에 따라 갈린다 — 층이 하나 뒤바뀌는 것과 요소가 사라지는 것은
+    // 다른 크기의 일이다.)
+    for (const merged of [merge(local, remote, NOW), merge(remote, local, NOW)]) {
+      const order = merged.drawPages!.p1.elementOrder;
+      expect(order[0]).toBe('a');
+      expect([...order].sort()).toEqual(['a', 'mine', 'yours']);
+    }
+  });
+
+  it('페이지 순서 변경이 상대의 페이지 추가에 덮이지 않는다 (C8)', () => {
+    const pages = [page('p1', T(1)), page('p2', T(2)), page('p3', T(3))];
+    // A: 순서를 손으로 바꿨다 — 여행의 도장이 그때 찍힌다.
+    const a: Workspace = {
+      ...wsPages(pages, ['p1', 'p3', 'p2']),
+      trips: byId([trip('t1', T(1), { drawPageOrder: ['p1', 'p3', 'p2'], updatedAt: T(50) })]),
+    };
+    // B: **나중에** 페이지를 하나 더했다 — 그것은 여행의 도장을 찍지 않는다
+    // (`addDrawPage`, M52a-fix ③). 그래서 A의 순서가 이긴다.
+    const b: Workspace = {
+      ...wsPages([...pages, page('p4', T(9))], ['p1', 'p2', 'p3', 'p4']),
+      trips: byId([trip('t1', T(1), { drawPageOrder: ['p1', 'p2', 'p3', 'p4'] })]),
+    };
+
+    for (const merged of [merge(a, b, NOW), merge(b, a, NOW)]) {
+      // 새 페이지는 사라지지 않고, 사람이 만든 순서는 지켜진다.
+      expect(merged.drawPages!.p4).toBeDefined();
+      expect(merged.trips.t1.drawPageOrder).toEqual(['p1', 'p3', 'p2', 'p4']);
+    }
+  });
+
+  it('지운 뒤에 상대가 그렸으면 페이지가 살아난다 (C7)', () => {
+    // A가 T(30)에 지웠다. B는 그것을 모른 채 T(60)에 획 하나를 그렸다.
+    const a = wsPages([page('p1', T(5), { deletedAt: T(30), updatedAt: T(30) })], ['p1']);
+    const b = wsPages([withElements('p1', T(5), [sticker('x', T(60))])], ['p1']);
+
+    for (const merged of [merge(a, b, NOW), merge(b, a, NOW)]) {
+      expect(merged.drawPages!.p1.deletedAt).toBeUndefined();
+      expect(Object.keys(merged.drawPages!.p1.elements)).toEqual(['x']);
+    }
+  });
+
+  it('지우기 전에 그린 획은 페이지를 되살리지 못한다', () => {
+    const a = wsPages([page('p1', T(5), { deletedAt: T(30), updatedAt: T(30) })], ['p1']);
+    const b = wsPages([withElements('p1', T(5), [sticker('x', T(10))])], ['p1']);
+
+    for (const merged of [merge(a, b, NOW), merge(b, a, NOW)]) {
+      expect(merged.drawPages!.p1.deletedAt).toBe(T(30));
+    }
+  });
+
+  it('배경 사진도 껍데기라 LWW로 갈린다 (M52b)', () => {
+    const a = wsPages(
+      [page('p1', T(5), { background: { photoId: 'ph-a', opacity: 1 }, updatedAt: T(30) })],
+      ['p1'],
+    );
+    const b = wsPages(
+      [withElements('p1', T(5), [sticker('x', T(60))], { background: { photoId: 'ph-b' } })],
+      ['p1'],
+    );
+
+    const merged = merge(a, b, NOW);
+    expect(merged.drawPages!.p1.background).toEqual({ photoId: 'ph-a', opacity: 1 });
+    expect(Object.keys(merged.drawPages!.p1.elements)).toEqual(['x']);
+  });
+
   it('workspaceEquals가 획 하나의 차이를 본다', () => {
     const a = wsPages([withElements('p1', T(5), [sticker('a', T(10), { x: 10 })])], ['p1']);
     const b = wsPages([withElements('p1', T(5), [sticker('a', T(10), { x: 11 })])], ['p1']);

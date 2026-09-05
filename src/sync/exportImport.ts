@@ -216,6 +216,10 @@ function referencedIds(workspace: Workspace): Id[] {
   for (const memo of Object.values(workspace.memos ?? {})) {
     for (const photo of memo.photos ?? []) ids.add(photo.id);
   }
+  // 드로우 페이지의 배경 (M52b) — 사진 포함 백업이 그림의 바닥을 함께 싣는다.
+  for (const page of Object.values(workspace.drawPages ?? {})) {
+    if (page.background?.photoId) ids.add(page.background.photoId);
+  }
   return [...ids];
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeUrl } from './url';
+import { isInAppHash, normalizeUrl } from './url';
 
 describe('normalizeUrl (B13)', () => {
   it('prepends https:// to a bare host or path', () => {
@@ -39,5 +39,20 @@ describe('normalizeUrl (B13)', () => {
     expect(normalizeUrl('data:text/html,<script></script>')).toBeUndefined();
     expect(normalizeUrl('vbscript:msgbox')).toBeUndefined();
     expect(normalizeUrl('file:///etc/passwd')).toBeUndefined();
+  });
+});
+
+describe('앱 안의 해시 주소 (M52b)', () => {
+  it('`#/draw/<id>`는 그대로 남는다 — https://를 붙이면 열 수 없는 주소가 된다', () => {
+    expect(normalizeUrl('#/draw/abc123')).toBe('#/draw/abc123');
+    expect(normalizeUrl('  #/board  ')).toBe('#/board');
+    expect(isInAppHash('#/draw/abc123')).toBe(true);
+  });
+
+  it('그 밖의 것은 앱 안의 주소가 아니다', () => {
+    expect(isInAppHash('https://example.test/#/draw/a')).toBe(false);
+    expect(isInAppHash('#anchor')).toBe(false);
+    expect(isInAppHash(undefined)).toBe(false);
+    expect(normalizeUrl('example.test/#/draw/a')).toBe('https://example.test/#/draw/a');
   });
 });

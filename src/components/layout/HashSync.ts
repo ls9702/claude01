@@ -47,16 +47,25 @@ export function hashFor(tab: TabId, drawPageId?: string): string {
 export function useHashSync(): void {
   useEffect(() => {
     const applyHash = () => {
-      const tab = parseHash(window.location.hash);
+      // **주소를 먼저 다 읽는다** (M52a-fix ②). 예전에는 `setTab('draw')`를 부른
+      // 뒤에 두 번째 칸을 읽었는데, 그 사이에 아래의 구독자가 깨어나 「드로우
+      // 탭인데 페이지는 없다」를 보고 주소를 `#/draw`로 고쳐 썼다 — 다른 탭에서
+      // 딥링크를 밟으면 id가 그 자리에서 사라졌다(D6). 읽기를 먼저 끝내고
+      // **한 번의 상태 갱신**으로 반영하면 그 창이 없다.
+      const hash = window.location.hash;
+      const tab = parseHash(hash);
       if (tab) {
         const state = useUiStore.getState();
-        if (state.activeTab !== tab) state.setTab(tab);
         // 드로우가 아닌 탭으로 갈 때 페이지를 닫지 **않는다**: 지도에 다녀와도
         // 그리던 페이지로 돌아오는 편이 낫고, 탭을 옮기는 것은 페이지를 닫는
         // 뜻이 아니다. 드로우 해시일 때만 두 번째 칸이 주인 노릇을 한다.
         if (tab === 'draw') {
-          const pageId = parseDrawPageId(window.location.hash);
-          if (state.activeDrawPageId !== pageId) state.setActiveDrawPage(pageId);
+          const pageId = parseDrawPageId(hash);
+          if (state.activeTab !== tab || state.activeDrawPageId !== pageId) {
+            useUiStore.setState({ activeTab: tab, activeDrawPageId: pageId });
+          }
+        } else if (state.activeTab !== tab) {
+          state.setTab(tab);
         }
       } else {
         // Unknown/empty hash: normalize the URL without adding a history entry.

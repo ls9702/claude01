@@ -197,3 +197,29 @@ describe('photoUsage — 메모 포함 (M21)', () => {
     expect(photoUsage(ws)).toEqual({ count: 1, bytes: 100 });
   });
 });
+
+describe('referencedPhotoIds — 드로우 배경 (M52b)', () => {
+  it('페이지 배경의 사진도 「누군가 가리키는 바이트」다', () => {
+    const ids = referencedPhotoIds({
+      cards: { c1: { photos: [{ id: 'p1' }] } },
+      drawPages: {
+        d1: { background: { photoId: 'bg1' } },
+        d2: { background: { photoId: 'bg2' } },
+        d3: {},
+      },
+    });
+    expect([...ids].sort()).toEqual(['bg1', 'bg2', 'p1']);
+  });
+
+  it('두 페이지가 같은 사진을 써도 하나다 (복제한 페이지)', () => {
+    const ids = referencedPhotoIds({
+      cards: {},
+      drawPages: { d1: { background: { photoId: 'bg1' } }, d2: { background: { photoId: 'bg1' } } },
+    });
+    expect([...ids]).toEqual(['bg1']);
+  });
+
+  it('드로우를 쓴 적 없는 워크스페이스는 예전과 같은 답을 받는다', () => {
+    expect([...referencedPhotoIds({ cards: { c1: { photos: [{ id: 'p1' }] } } })]).toEqual(['p1']);
+  });
+});

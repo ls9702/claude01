@@ -30,7 +30,8 @@ import {
   type LegKind,
   type SheetFlightOpts,
 } from '../utils/flights';
-import { copyPageTitle, nextPageTitle } from '../draw/pages';
+import { clampPageTitle, copyPageTitle, nextPageTitle } from '../draw/pages';
+import { clampOpacity } from '../draw/tools';
 import { getActiveProfileId } from '../profile/profile';
 import { newId } from '../utils/ids';
 import { copySheetName } from '../utils/sheetName';
@@ -72,6 +73,8 @@ export type CardPatch = Partial<
     | 'defaultDurationMin'
     /** M49 — 장르 칩을 다시 눌러 해제하면 `undefined`가 실려 비워진다. */
     | 'gourmetGenre'
+    /** M52b — 드로우 페이지 연결. 「해제」는 `undefined`가 실린다. */
+    | 'drawPageId'
   >
 >;
 
@@ -153,6 +156,8 @@ export interface NewCardData {
   defaultDurationMin?: number;
   /** 맛집 카드의 장르 (M49) — 맛집 칸의 편집 시트만 이 값을 싣는다. */
   gourmetGenre?: string;
+  /** 붙여 둔 드로우 페이지 (M52b) — {@link Card.drawPageId}. */
+  drawPageId?: Id;
 }
 
 /** One of the columns seeded into every new trip. */
@@ -235,11 +240,32 @@ function livePage(draft: Draft, pageId: Id): DrawPage | null {
   return page && !page.deletedAt ? page : null;
 }
 
-/** 페이지 하나를 새 객체로 갈아 끼우고 `updatedAt`을 찍는다. */
-function putPage(draft: Draft, page: DrawPage, now: Millis): DrawPage {
+/**
+ * 페이지의 **껍데기**를 바꾼다 — 제목·배경·삭제 도장. `updatedAt`을 찍는다.
+ *
+ * 껍데기의 시각이 곧 병합의 판정 기준이다(`sync/merge.mergeDrawPage`): 여기
+ * 찍힌 시각이 상대의 제목·배경과 겨룬다.
+ */
+function putPageShell(draft: Draft, page: DrawPage, now: Millis): DrawPage {
   const next: DrawPage = { ...page, updatedAt: now };
   draft.drawPages = { ...(draft.drawPages ?? {}), [page.id]: next };
   return next;
+}
+
+/**
+ * 페이지의 **속**을 바꾼다 — 요소 하나의 추가·수정·삭제. `updatedAt`은 **그대로**.
+ *
+ * M52a는 여기서도 껍데기의 시각을 찍었고, 그것이 「이름 변경이 상대의 획 하나에
+ * 덮인다」의 원인이었다(M52a-fix ①): 껍데기 LWW는 제목·배경·`elementOrder`를
+ * 통째로 고르는데, 획 하나가 그 도장을 갱신해 버리면 늦게 그린 쪽의 **옛 제목**이
+ * 이긴다. 요소는 요소끼리 갈리므로(요소 단위 LWW) 껍데기 시각이 필요 없다.
+ *
+ * 목록의 「수정 시각」은 이제 `draw/pages.pageTouchedAt`이 껍데기와 요소의
+ * 최댓값으로 계산한다 — 화면이 잃는 것은 없다.
+ */
+function putPageBody(draft: Draft, page: DrawPage): DrawPage {
+  draft.drawPages = { ...(draft.drawPages ?? {}), [page.id]: page };
+  return page;
 }
 
 /**
@@ -680,8 +706,25 @@ export interface WorkspaceState {
    * 같은 모양이라는 뜻이다).
    */
   addDrawPage: (tripId: Id, title?: string) => Id | null;
-  /** 제목만 바꾼다. 빈 이름은 받지 않는다(기존 이름을 지킨다). */
+  /**
+   * 제목만 바꾼다. 빈 이름은 받지 않고(기존 이름을 지킨다), 긴 이름은
+   * {@link DRAW_TITLE_MAX}에서 잘린다.
+   */
   renameDrawPage: (id: Id, title: string) => void;
+  /**
+   * 배경 사진을 걸거나(`{photoId, opacity}`) 뗀다(`undefined`) — M52b.
+   *
+   * 바이트는 여기 없다: 사진은 카드 사진과 **완전히 같은 길**로 들어온다
+   * (`utils/photos.preparePhoto` → `stores/photoBlobs` → `sync/photoSync`). 이
+   * 필드는 그 id 하나를 들 뿐이고, 그래서 복제한 페이지가 같은 사진을 공유해도
+   * 안전하다(블롭은 불변이다).
+   *
+   * 제목과 **같은 층**이다 — 껍데기 LWW로 갈리므로 상대의 획이 덮지 못한다.
+   */
+  setDrawPageBackground: (
+    id: Id,
+    background: { photoId: Id; opacity?: number } | undefined,
+  ) => void;
   /**
    * 페이지 하나를 통째로 베낀다 — 요소마다 **새 id**를 받고 순서는 그대로다.
    *
@@ -1371,17 +1414,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               [pageId]: {
                 id: pageId,
                 tripId,
-                title: title?.trim() || nextPageTitle(existing),
+                title: clampPageTitle(title) || nextPageTitle(existing),
                 elements: {},
                 elementOrder: [],
                 createdAt: now,
                 updatedAt: now,
               },
             };
+            // 여행의 `updatedAt`은 **찍지 않는다** (M52a-fix ③). 페이지를 하나
+            // 붙이는 것은 순서를 「바꾼」 것이 아니라 「늘린」 것이고, 여기서
+            // 도장을 찍으면 여행 엔티티의 LWW가 상대가 방금 만든 순서를 덮는다
+            // (C8). 붙인 페이지는 병합의 `reconcileOrder`가 어차피 되찾아 준다 —
+            // 잃을 수 있는 것은 오직 사람이 손으로 만든 순서뿐이다.
             draft.trips[tripId] = {
               ...trip,
               drawPageOrder: [...(trip.drawPageOrder ?? []), pageId],
-              updatedAt: now,
             };
             return pageId;
           }),
@@ -1389,10 +1436,37 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         renameDrawPage: (id, title) => {
           run((draft, now) => {
             const page = livePage(draft, id);
-            const next = title.trim();
-            // 빈 이름과 같은 이름은 저장이 아니라 잡음이다 (`setColumnTodo` 참조).
+            // 빈 이름(공백만 적은 것 포함)은 저장이 아니라 잡음이다 — 원래 이름이
+            // 그대로 남는다 (`setColumnTodo` 참조). 200자짜리 이름은 목록 한 줄을
+            // 통째로 먹으므로 {@link DRAW_TITLE_MAX}에서 자른다 (M52a-fix ⑨).
+            const next = clampPageTitle(title);
             if (!page || next === '' || next === page.title) return null;
-            return putPage(draft, { ...page, title: next }, now);
+            return putPageShell(draft, { ...page, title: next }, now);
+          });
+        },
+
+        setDrawPageBackground: (id, background) => {
+          run((draft, now) => {
+            const page = livePage(draft, id);
+            if (!page) return null;
+            // 배경은 **껍데기**다 (M52b) — 제목과 같은 층에서 LWW로 갈린다.
+            if (!background) {
+              if (!page.background) return null;
+              const { background: _gone, ...rest } = page;
+              return putPageShell(draft, rest as DrawPage, now);
+            }
+            const opacity = clampOpacity(background.opacity);
+            if (
+              page.background?.photoId === background.photoId &&
+              page.background?.opacity === opacity
+            ) {
+              return null;
+            }
+            return putPageShell(
+              draft,
+              { ...page, background: { photoId: background.photoId, opacity } },
+              now,
+            );
           });
         },
 
@@ -1438,7 +1512,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             const at = order.indexOf(source.id);
             if (at < 0) order.push(copyId);
             else order.splice(at + 1, 0, copyId);
-            draft.trips[trip.id] = { ...trip, drawPageOrder: order, updatedAt: now };
+            // `addDrawPage`와 같은 이유로 여행의 도장은 찍지 않는다 (M52a-fix ③).
+            draft.trips[trip.id] = { ...trip, drawPageOrder: order };
 
             return copyId;
           }),
@@ -1449,7 +1524,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             if (!page) return null;
             // 도장만 찍는다: 순서 배열에서 빼지 않는 이유는 실행취소가 자리를
             // 되찾아야 하기 때문이고, 병합의 TTL이 언젠가 둘 다 걷어 간다.
-            putPage(draft, { ...page, deletedAt: now }, now);
+            putPageShell(draft, { ...page, deletedAt: now }, now);
             return true;
           });
         },
@@ -1490,15 +1565,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
             const elementId = newId();
             const next = { ...element, id: elementId, updatedAt: now } as DrawElement;
-            putPage(
-              draft,
-              {
-                ...page,
-                elements: { ...page.elements, [elementId]: next },
-                elementOrder: [...page.elementOrder, elementId],
-              },
-              now,
-            );
+            // 껍데기 시각은 그대로다 (M52a-fix ①) — 요소는 요소끼리 갈린다.
+            putPageBody(draft, {
+              ...page,
+              elements: { ...page.elements, [elementId]: next },
+              elementOrder: [...page.elementOrder, elementId],
+            });
             return elementId;
           }),
 
@@ -1511,17 +1583,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             // 보이는데 상대에게는 「지운 것」으로 건너간다.
             const { deletedAt: _removed, ...rest } = element;
             const next = { ...rest, updatedAt: now } as DrawElement;
-            putPage(
-              draft,
-              {
-                ...page,
-                elements: { ...page.elements, [element.id]: next },
-                elementOrder: page.elementOrder.includes(element.id)
-                  ? page.elementOrder
-                  : [...page.elementOrder, element.id],
-              },
-              now,
-            );
+            putPageBody(draft, {
+              ...page,
+              elements: { ...page.elements, [element.id]: next },
+              elementOrder: page.elementOrder.includes(element.id)
+                ? page.elementOrder
+                : [...page.elementOrder, element.id],
+            });
             return true;
           });
         },
@@ -1532,7 +1600,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             const current = page?.elements[elementId];
             if (!page || !current || current.deletedAt) return null;
             const next = { ...current, ...patch, updatedAt: now } as DrawElement;
-            putPage(draft, { ...page, elements: { ...page.elements, [elementId]: next } }, now);
+            putPageBody(draft, { ...page, elements: { ...page.elements, [elementId]: next } });
             return true;
           });
         },
@@ -1542,17 +1610,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             const page = livePage(draft, pageId);
             const current = page?.elements[elementId];
             if (!page || !current || current.deletedAt) return null;
-            putPage(
-              draft,
-              {
-                ...page,
-                elements: {
-                  ...page.elements,
-                  [elementId]: { ...current, deletedAt: now, updatedAt: now },
-                },
+            putPageBody(draft, {
+              ...page,
+              elements: {
+                ...page.elements,
+                [elementId]: { ...current, deletedAt: now, updatedAt: now },
               },
-              now,
-            );
+            });
             return true;
           });
         },

@@ -85,6 +85,34 @@ export const HIGHLIGHT_WIDTH_FACTOR = 4;
 /** 형광펜의 불투명도 — 밑의 그림이 비쳐야 형광펜이다. */
 export const HIGHLIGHT_OPACITY = 0.35;
 
+/* ── 배경 사진 (M52b) ──────────────────────────────── */
+
+/**
+ * 배경 투명도의 하한과 기본값.
+ *
+ * 0까지 내려가지 않는 이유는 **사라진 사진은 되돌릴 손잡이가 없기 때문**이다:
+ * 0으로 내린 배경은 화면에서 완전히 없어지고, 그 상태에서 페이지를 닫으면 다음에
+ * 열었을 때 「배경을 넣었던가?」가 된다. 0.2는 아직 보이는 가장 옅은 값이다.
+ */
+export const DRAW_BG_MIN_OPACITY = 0.2;
+export const DRAW_BG_DEFAULT_OPACITY = 1;
+
+/** 저장되기 전에 한 번 지나는 문 — 0.2~1, 소수 둘째 자리까지. */
+export function clampOpacity(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DRAW_BG_DEFAULT_OPACITY;
+  const clamped = Math.min(1, Math.max(DRAW_BG_MIN_OPACITY, value));
+  return Math.round(clamped * 100) / 100;
+}
+
+/**
+ * 글자 요소 하나의 상한 (M52a-fix ⑨).
+ *
+ * 붙여넣기 한 번이면 500자는 쉽게 넘고, 그 한 줄은 페이지를 가로지른 뒤 어디서도
+ * 잡히지 않는다. 여기서 자르는 이유는 **저장되는 값**이 화면의 값과 같아야 하기
+ * 때문이다.
+ */
+export const DRAW_TEXT_MAX = 500;
+
 /** 글자 크기 두 단(스티커와 같은 결). */
 export const DRAW_TEXT_SIZES: readonly { value: number; label: string }[] = [
   { value: 24, label: '작게' },

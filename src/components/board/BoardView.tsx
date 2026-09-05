@@ -449,6 +449,7 @@ export default function BoardView() {
           columnIcon={dialog.column.icon}
           // 맛집 칸이면 장르 픽커 한 줄이 선다 (M49).
           gourmet={dialog.column.gourmet === true}
+          tripId={trip.id}
           tripDestination={trip.destination}
           onSubmit={submitCard}
           onClose={() => setDialog(null)}
@@ -462,6 +463,7 @@ export default function BoardView() {
           columnColor={columnOf(dialog.card.columnId)?.color}
           columnIcon={columnOf(dialog.card.columnId)?.icon}
           gourmet={columnOf(dialog.card.columnId)?.gourmet === true}
+          tripId={trip.id}
           currency={trip.currency}
           tripDestination={trip.destination}
           localCurrency={trip.localCurrency}

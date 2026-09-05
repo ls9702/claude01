@@ -121,6 +121,18 @@ export const ICON_BUTTON_CLASS =
   'hover:bg-sunken hover:text-ink focus-visible:ring-2 focus-visible:ring-line-strong ' +
   'disabled:text-ink-faint disabled:hover:bg-transparent';
 
+/**
+ * 아이콘 전용 버튼 중 **손가락으로 누르는 것** (M52b) — 모바일 44px / lg 36px.
+ *
+ * {@link ICON_BUTTON_CLASS}는 36px 고정이라 「호출부에서 44px을 확보한다」가
+ * 규칙이었는데, 도구 바처럼 아이콘만 열한 개가 늘어선 자리에서는 그 확보가
+ * 일어나지 않았다(실측 36px). 앱 표준(`BTN_SIZE`)과 같은 두 단을 이름 하나로
+ * 묶어 둔다 — 크기를 덧쓰지 않고 **걷어낸 뒤** 다시 준다(`withoutWidth` 참조).
+ */
+export const TOUCH_ICON_BUTTON_CLASS = `${withoutHeight(
+  withoutWidth(ICON_BUTTON_CLASS),
+)} h-11 w-11 lg:h-9 lg:w-9`;
+
 /* ── 칩 ──────────────────────────────────────────────── */
 export const CHIP_BASE =
   'inline-flex h-6 max-w-full shrink-0 items-center gap-1 rounded-full px-2 ' +

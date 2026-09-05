@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DrawBox, DrawElement, DrawStroke } from '../types/models';
+import type { DrawBox, DrawElement, DrawStroke, DrawText } from '../types/models';
 import {
   arrowHead,
   boxHit,
@@ -197,5 +197,53 @@ describe('boxHit', () => {
     const box = { x: 0, y: 0, w: 10, h: 10 };
     expect(boxHit(box, 12, 5)).toBe(false);
     expect(boxHit(box, 12, 5, 3)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 글자 상자 — 한글은 한 칸을 다 먹는다 (M52a-fix ④)
+ * ------------------------------------------------------------------ */
+
+describe('글자 요소의 상자', () => {
+  const text = (value: string, size = 24): DrawText => ({
+    id: 't1',
+    updatedAt: 1,
+    type: 'text',
+    x: 0,
+    y: 100,
+    text: value,
+    color: '#000',
+    size,
+  });
+
+  it('「오」 스무 자는 영문 스무 자보다 훨씬 넓다 (전각 1.0em vs 0.62em)', () => {
+    const korean = elementBounds(text('오'.repeat(20)));
+    const latin = elementBounds(text('a'.repeat(20)));
+    expect(korean.w).toBeCloseTo(20 * 24, 5);
+    expect(latin.w).toBeCloseTo(20 * 24 * 0.62, 5);
+    expect(korean.w).toBeGreaterThan(latin.w * 1.5);
+  });
+
+  it('한글 줄의 오른쪽 끝을 짚어도 맞는다 — 62%짜리 상자였던 자리', () => {
+    const element = text('오사카 어디 갈까');
+    const box = elementBounds(element);
+    // 예전 어림(0.62em 고정)이면 상자가 여기까지 오지 못했다.
+    const rightEdge = box.x + box.w - 2;
+    expect(rightEdge).toBeGreaterThan(element.text.length * 24 * 0.62);
+    expect(hitTest(element, rightEdge, element.y - 4)).toBe(true);
+  });
+
+  it('이모지는 한 글자로 세고 전각으로 친다', () => {
+    expect(elementBounds(text('👍')).w).toBeCloseTo(24, 5);
+  });
+
+  it('여러 줄은 가장 긴 줄이 폭이고 줄 수가 높이다', () => {
+    const box = elementBounds(text('가나다\nab'));
+    expect(box.w).toBeCloseTo(3 * 24, 5);
+    expect(box.h).toBeCloseTo(24 * 1.35 * 2, 5);
+  });
+
+  it('빈 글자도 상자를 잃지 않는다 (한 글자 폭이 하한)', () => {
+    expect(elementBounds(text('')).w).toBe(24);
   });
 });

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { emptyWorkspace, type DrawPage, type Id, type Workspace } from '../types/models';
-import { copyPageTitle, liveElementCount, nextPageTitle, tripPages, visibleElements } from './pages';
+import {
+  DRAW_TITLE_MAX,
+  clampPageTitle,
+  copyPageTitle,
+  liveElementCount,
+  nextPageTitle,
+  pageTouchedAt,
+  tripPages,
+  visibleElements,
+} from './pages';
 
 const page = (id: Id, over: Partial<DrawPage> = {}): DrawPage => ({
   id,
@@ -106,5 +115,59 @@ describe('visibleElements / liveElementCount', () => {
     });
     expect(visibleElements(orphan)).toHaveLength(1);
     expect(liveElementCount(orphan)).toBe(1);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M52a-fix — 이름의 상한과 「손댄 때」
+ * ------------------------------------------------------------------ */
+
+describe('clampPageTitle', () => {
+  it('앞뒤 공백을 걷고 60자에서 자른다', () => {
+    expect(clampPageTitle('  난바 밤  ')).toBe('난바 밤');
+    expect(clampPageTitle('오'.repeat(200))).toHaveLength(DRAW_TITLE_MAX);
+  });
+
+  it('빈 말은 빈 문자열이다 — 부르는 쪽이 원래 이름을 지킨다', () => {
+    expect(clampPageTitle('   ')).toBe('');
+    expect(clampPageTitle(undefined)).toBe('');
+  });
+});
+
+describe('pageTouchedAt', () => {
+  it('껍데기와 요소 중 가장 늦은 시각이다', () => {
+    const touched = page('a', {
+      updatedAt: 1000,
+      elements: {
+        e1: { id: 'e1', updatedAt: 5000, type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 },
+        e2: { id: 'e2', updatedAt: 3000, type: 'sticker', x: 0, y: 0, emoji: '⭐', size: 48 },
+      },
+      elementOrder: ['e1', 'e2'],
+    });
+    expect(pageTouchedAt(touched)).toBe(5000);
+  });
+
+  it('지운 요소도 손댄 것이다', () => {
+    const touched = page('a', {
+      updatedAt: 1000,
+      elements: {
+        e1: {
+          id: 'e1',
+          updatedAt: 7000,
+          deletedAt: 7000,
+          type: 'sticker',
+          x: 0,
+          y: 0,
+          emoji: '📍',
+          size: 48,
+        },
+      },
+      elementOrder: ['e1'],
+    });
+    expect(pageTouchedAt(touched)).toBe(7000);
+  });
+
+  it('요소가 없으면 껍데기의 시각이다', () => {
+    expect(pageTouchedAt(page('a', { updatedAt: 4200 }))).toBe(4200);
   });
 });

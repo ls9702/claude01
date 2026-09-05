@@ -1,4 +1,4 @@
-import { arrowHead, elementBounds } from '../../draw/geometry';
+import { LINE_HEIGHT, arrowHead, elementBounds, textLines } from '../../draw/geometry';
 import { HIGHLIGHT_OPACITY } from '../../draw/tools';
 import type { DrawElement } from '../../types/models';
 
@@ -117,7 +117,11 @@ export default function DrawElementView({
       );
     }
 
-    case 'text':
+    case 'text': {
+      // 여러 줄은 `tspan` 여럿이다 (M52a-fix ⑨). SVG의 `<text>`는 `\n`을 공백
+      // 하나로 뭉개므로, 붙여넣은 두 줄짜리 메모가 한 줄로 이어져 페이지 밖까지
+      // 뻗던 자리다. 줄 간격은 맞힘 판정과 **같은 상수**를 쓴다.
+      const lines = textLines(element.text);
       return (
         <g {...common}>
           <text
@@ -127,11 +131,22 @@ export default function DrawElementView({
             fontSize={element.size}
             fontWeight={600}
           >
-            {element.text}
+            {lines.map((line, index) => (
+              <tspan
+                key={index}
+                x={element.x}
+                dy={index === 0 ? 0 : element.size * LINE_HEIGHT}
+                // 빈 줄도 자리를 차지해야 다음 줄이 제자리에 온다.
+                xmlSpace="preserve"
+              >
+                {line === '' ? ' ' : line}
+              </tspan>
+            ))}
           </text>
           {selected ? <SelectionRing element={element} /> : null}
         </g>
       );
+    }
 
     case 'sticker':
       return (

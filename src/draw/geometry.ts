@@ -106,6 +106,31 @@ export function arrowHead(
   ];
 }
 
+/** 글자 요소의 줄 간격 — 렌더러(`DrawElementView`)와 같은 값을 쓴다. */
+export const LINE_HEIGHT = 1.35;
+
+/** 글자 요소를 줄로 — 저장된 `\n`을 그대로 따른다(빈 줄도 한 줄이다). */
+export const textLines = (text: string): string[] => text.split('\n');
+
+/**
+ * CJK·전각 문자인가 — 한글(자모·완성형), 한자, 가나, 전각 문장부호.
+ *
+ * 이모지도 여기 든다(대부분의 글꼴에서 전각 한 칸을 먹는다). 코드포인트 하나가
+ * 아니라 **문자 하나**로 세기 위해 부르는 쪽이 `[...text]`로 돈다 — `'👍'.length`는
+ * 2이고, 그 둘을 각각 세면 이모지 하나가 두 칸이 된다.
+ */
+const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE10-\uFE19\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]|[\u{1F000}-\u{1FAFF}]|[\u{20000}-\u{3FFFD}]/u;
+
+/** 문자 하나의 어림 폭(em). */
+export const charWidthEm = (ch: string): number => (WIDE.test(ch) ? 1 : 0.62);
+
+/** 한 줄의 어림 폭(em) — 문자마다 따로 센다. */
+export function textWidthEm(text: string): number {
+  let width = 0;
+  for (const ch of text) width += charWidthEm(ch);
+  return width;
+}
+
 /** 요소를 감싸는 상자 — 선택 테두리와 맞힘 판정의 1차 관문. */
 export function elementBounds(element: DrawElement): Box {
   switch (element.type) {
@@ -133,16 +158,24 @@ export function elementBounds(element: DrawElement): Box {
     case 'line':
     case 'arrow':
       return normalizeBox(element.x1, element.y1, element.x2, element.y2);
-    case 'text':
-      // 글자 폭은 글꼴이 정하므로 잴 수 없다 — 글자당 0.62em은 한글·영문 모두에서
-      // 실제 폭보다 넉넉하지 않은 쪽으로 틀리지 않는 어림이다. `y`는 baseline이라
-      // 상자는 그 위로 올라간다.
+    case 'text': {
+      // 글자 폭은 글꼴이 정하므로 정확히 잴 수는 없다. 그래도 **글자마다 다르게**
+      // 어림해야 한다 (M52a-fix ④): 한 글자 0.62em으로 뭉뚱그리면 한글은 실제
+      // 폭의 62%짜리 상자를 갖고, 「오사카 어디 갈까」의 오른쪽 절반은 지우개도
+      // 선택도 닿지 않는 죽은 자리가 된다(실측 62%). 한글·한자·가나·전각은
+      // 1.0em, 그 밖(라틴·숫자·공백)은 0.62em이다.
+      //
+      // 여러 줄이면 가장 긴 줄이 폭이고 줄 수가 높이다 — `y`는 첫 줄의
+      // baseline이라 상자는 그 위로 한 줄만 올라간다.
+      const lines = textLines(element.text);
+      const widest = Math.max(...lines.map((line) => textWidthEm(line)), 0);
       return {
         x: element.x,
         y: element.y - element.size,
-        w: Math.max(element.size, element.text.length * element.size * 0.62),
-        h: element.size * 1.35,
+        w: Math.max(element.size, widest * element.size),
+        h: element.size * LINE_HEIGHT * lines.length,
       };
+    }
     case 'sticker':
       // 스티커의 `x`/`y`는 **가운데**다 — 붙이는 손가락이 가리키는 곳이 가운데다.
       return {

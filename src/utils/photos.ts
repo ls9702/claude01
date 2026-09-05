@@ -249,6 +249,7 @@ export async function preparePhoto(file: Blob): Promise<PreparedPhoto> {
 export function referencedPhotoIds(workspace: {
   cards: Record<string, { photos?: { id: string }[] }>;
   memos?: Record<string, { photos?: { id: string }[] }>;
+  drawPages?: Record<string, { background?: { photoId: string } }>;
 }): Set<string> {
   const ids = new Set<string>();
   for (const card of Object.values(workspace.cards)) {
@@ -256,6 +257,13 @@ export function referencedPhotoIds(workspace: {
   }
   for (const memo of Object.values(workspace.memos ?? {})) {
     for (const photo of memo.photos ?? []) ids.add(photo.id);
+  }
+  // 드로우 페이지의 배경 (M52b) — **이 세 줄이 없으면 배경은 30초 뒤에
+  // 사라진다**. GC는 「워크스페이스가 말하지 않는 블롭」을 지우는 물건이고,
+  // 배경은 카드 사진과 똑같이 워크스페이스가 id로만 들고 있는 바이트다.
+  // 업로드(`sync/photoSync`)와 사진 포함 백업도 같은 답을 여기서 받는다.
+  for (const page of Object.values(workspace.drawPages ?? {})) {
+    if (page.background?.photoId) ids.add(page.background.photoId);
   }
   return ids;
 }

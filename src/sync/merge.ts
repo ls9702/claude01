@@ -166,6 +166,53 @@ function byUpdate(a: DrawElement, b: DrawElement): number {
 }
 
 /**
+ * 두 순서 배열을 하나로 겹친다 — 양쪽의 상대적 순서를 지키면서.
+ *
+ * 두 기기가 같은 페이지에 하나씩 그리면 각자의 `elementOrder`는 공통 앞부분 +
+ * 자기 것 하나가 된다. 한쪽 배열만 살리면 상대의 요소는 배열에 없는 요소가 되어
+ * {@link reconcileList}가 **맨 뒤에** 다시 붙이고, 그 순간 겹치는 층이 바뀐다.
+ *
+ * 규칙은 세 줄이다: 머리가 같으면 하나 내보내고 둘 다 전진, 한쪽 머리가 상대에게
+ * 아예 없으면 그것을 먼저 내보내고(그쪽이 새로 넣은 것이다), 둘 다 있는데 자리가
+ * 다르면 `primary`가 이긴다. 결정적이고, 같은 입력에 같은 답을 낸다.
+ */
+function mergeSequences(primary: readonly Id[], secondary: readonly Id[]): Id[] {
+  const inPrimary = new Set(primary);
+  const inSecondary = new Set(secondary);
+  const out: Id[] = [];
+  const seen = new Set<Id>();
+  const emit = (id: Id): void => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  };
+
+  let i = 0;
+  let j = 0;
+  while (i < primary.length && j < secondary.length) {
+    const a = primary[i];
+    const b = secondary[j];
+    if (a === b) {
+      emit(a);
+      i += 1;
+      j += 1;
+    } else if (!inSecondary.has(a)) {
+      emit(a);
+      i += 1;
+    } else if (!inPrimary.has(b)) {
+      emit(b);
+      j += 1;
+    } else {
+      emit(a);
+      i += 1;
+    }
+  }
+  for (; i < primary.length; i += 1) emit(primary[i]);
+  for (; j < secondary.length; j += 1) emit(secondary[j]);
+  return out;
+}
+
+/**
  * 두 드로우 페이지 맵을 겹친다 (M52a) — **두 겹의 병합**.
  *
  * 페이지의 껍데기(제목·배경·`elementOrder`)는 평범한 엔티티 LWW로 갈리고,
@@ -184,6 +231,7 @@ function byUpdate(a: DrawElement, b: DrawElement): number {
 function mergeDrawPage(local: DrawPage, remote: DrawPage, now: Millis): DrawPage {
   // 껍데기는 엔티티 LWW — 동점은 `mergeMap`과 같은 이유로 remote가 이긴다.
   const shell = remote.updatedAt >= local.updatedAt ? remote : local;
+  const other = shell === remote ? local : remote;
 
   const elements: Record<Id, DrawElement> = {};
   for (const source of [local.elements, remote.elements]) {
@@ -199,12 +247,31 @@ function mergeDrawPage(local: DrawPage, remote: DrawPage, now: Millis): DrawPage
     }
   }
 
-  const elementOrder = reconcileList(shell.elementOrder ?? [], Object.values(elements), byUpdate);
+  // 순서는 **요소와 같은 층에서** 갈린다 (M52a-fix ①): 껍데기 LWW의 배열 하나만
+  // 살리면, 두 사람이 동시에 그린 두 획 중 한쪽이 순서 배열에서 빠진 채 맨 뒤로
+  // 다시 붙는다(층이 뒤바뀐다). 두 배열을 겹친 뒤 살아남은 요소로 재조정한다.
+  const elementOrder = reconcileList(
+    mergeSequences(shell.elementOrder ?? [], other.elementOrder ?? []),
+    Object.values(elements),
+    byUpdate,
+  );
+
+  // 지운 **뒤에** 상대가 그렸으면 페이지는 살아난다 (M52a-fix ①의 뒷면).
+  //
+  // 요소는 더 이상 껍데기의 시각을 밀지 않으므로(그래야 이름 변경이 획 하나에
+  // 덮이지 않는다), 「지웠는데 상대는 계속 그리고 있었다」를 껍데기 LWW만으로는
+  // 판정할 수 없게 됐다. 그 판정을 여기서 명시적으로 한다 — 요소 하나가 지운
+  // 시각보다 늦으면 그 사람은 살아 있는 페이지를 보고 있었던 것이고, 톰스톤이
+  // 나중에 편집된 엔티티를 이기지 못하는 규칙(`merge`의 3번)과 같은 답이다.
+  const revived =
+    shell.deletedAt !== undefined &&
+    Object.values(elements).some(
+      (element) => element.deletedAt === undefined && element.updatedAt > shell.deletedAt!,
+    );
+  const { deletedAt: _stamp, ...alive } = shell;
 
   return {
-    ...shell,
-    // 삭제 도장은 **양쪽 중 무엇이든 찍힌 쪽**이 아니라 껍데기 LWW를 따른다:
-    // 지운 뒤 되살린 페이지가 다시 지워지면 안 되고, 그 판정은 시각이 한다.
+    ...(revived ? alive : shell),
     elements,
     elementOrder,
   };

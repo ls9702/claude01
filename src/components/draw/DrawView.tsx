@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { drawBytes, drawSizeWarning } from '../../draw/limits';
-import { liveElementCount, tripPages } from '../../draw/pages';
+import { DRAW_TITLE_MAX, liveElementCount, pageTouchedAt, tripPages } from '../../draw/pages';
 import { useIsDesktop } from '../../hooks/useMediaQuery';
 import { useUiStore } from '../../stores/uiStore';
+import { forgetDrawPage } from '../../stores/drawSession';
 import { deleteWithUndo } from '../../stores/undoDelete';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { DrawPage } from '../../types/models';
@@ -12,11 +13,11 @@ import Sheet from '../common/Sheet';
 import SyncStatusChip from '../common/SyncStatusChip';
 import {
   COUNT_BADGE_CLASS,
-  ICON_BUTTON_CLASS,
   INPUT_CLASS,
   LABEL_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
+  TOUCH_ICON_BUTTON_CLASS,
 } from '../common/formStyles';
 import DrawEditor from './DrawEditor';
 
@@ -71,7 +72,13 @@ function TripPrompt() {
   );
 }
 
-/** 「9월 4일 14:20」 — 목록 줄의 마지막 손질 시각. */
+/**
+ * 「9월 4일 14:20」 — 목록 줄의 마지막 손질 시각.
+ *
+ * 값은 `page.updatedAt`이 아니라 {@link pageTouchedAt}이다 (M52a-fix ①): 요소를
+ * 그려도 페이지의 도장은 움직이지 않으므로, 「손댄 때」는 껍데기와 요소 중 가장
+ * 늦은 것으로 **계산된다**.
+ */
 function whenLabel(at: number): string {
   const date = new Date(at);
   const pad = (value: number): string => String(value).padStart(2, '0');
@@ -112,6 +119,7 @@ function RenameDialog({ page, onClose }: { page: DrawPage; onClose: () => void }
         id="draw-rename"
         data-testid="draw-rename-input"
         value={title}
+        maxLength={DRAW_TITLE_MAX}
         autoFocus
         onChange={(event) => setTitle(event.target.value)}
         onKeyDown={(event) => {
@@ -247,7 +255,7 @@ export default function DrawView() {
                     </span>
                     <span>요소</span>
                     <span aria-hidden="true">·</span>
-                    <span>{whenLabel(page.updatedAt)}</span>
+                    <span>{whenLabel(pageTouchedAt(page))}</span>
                   </span>
                 </button>
 
@@ -258,7 +266,7 @@ export default function DrawView() {
                     aria-label="위로"
                     disabled={index === 0}
                     onClick={() => moveDrawPage(page.id, -1)}
-                    className={ICON_BUTTON_CLASS}
+                    className={TOUCH_ICON_BUTTON_CLASS}
                   >
                     <Icon name="chevron-up" size={16} />
                   </button>
@@ -268,7 +276,7 @@ export default function DrawView() {
                     aria-label="아래로"
                     disabled={index === pages.length - 1}
                     onClick={() => moveDrawPage(page.id, 1)}
-                    className={ICON_BUTTON_CLASS}
+                    className={TOUCH_ICON_BUTTON_CLASS}
                   >
                     <Icon name="chevron-down" size={16} />
                   </button>
@@ -277,7 +285,7 @@ export default function DrawView() {
                     data-testid="draw-page-rename"
                     aria-label="이름 바꾸기"
                     onClick={() => setRenaming(page)}
-                    className={ICON_BUTTON_CLASS}
+                    className={TOUCH_ICON_BUTTON_CLASS}
                   >
                     <Icon name="pencil" size={16} />
                   </button>
@@ -286,7 +294,7 @@ export default function DrawView() {
                     data-testid="draw-page-duplicate"
                     aria-label="복제"
                     onClick={() => duplicateDrawPage(page.id)}
-                    className={ICON_BUTTON_CLASS}
+                    className={TOUCH_ICON_BUTTON_CLASS}
                   >
                     <Icon name="copy" size={16} />
                   </button>
@@ -295,9 +303,15 @@ export default function DrawView() {
                     data-testid="draw-page-delete"
                     aria-label="삭제"
                     onClick={() =>
-                      deleteWithUndo('drawPage', page.title, () => deleteDrawPage(page.id))
+                      deleteWithUndo('drawPage', page.title, () => {
+                        deleteDrawPage(page.id);
+                        // 방문의 서랍도 함께 비운다 (M52b) — 되살아난 페이지는
+                        // 새 방문이고, 지워진 페이지의 실행취소 스택이 남아
+                        // 있으면 그것이 다음 방문에 이어 붙는다.
+                        forgetDrawPage(page.id);
+                      })
                     }
-                    className={ICON_BUTTON_CLASS}
+                    className={TOUCH_ICON_BUTTON_CLASS}
                   >
                     <Icon name="trash" size={16} />
                   </button>

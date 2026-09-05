@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   USER_GENRE_EMOJI,
   USER_GENRE_LABEL,
@@ -6,7 +6,9 @@ import {
   userGenreOf,
   type UserGourmetGenre,
 } from '../../gourmet/userGenres';
-import type { Card, GeoPoint } from '../../types/models';
+import { tripPages } from '../../draw/pages';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
+import type { Card, GeoPoint, Id } from '../../types/models';
 import { formatLatLng } from '../../utils/geo';
 import { MAX_AMOUNT, formatBudget, isValidBudget } from '../../utils/money';
 import { DURATION_PRESETS, formatDuration } from '../../utils/time';
@@ -47,6 +49,13 @@ export interface CardFormValues {
    * 다시 실어, 카드를 다른 칸으로 옮겼다가 편집했다고 이름표가 지워지지 않는다.
    */
   gourmetGenre?: string;
+  /**
+   * 붙여 둔 드로우 페이지 (M52b) — 해제하면 `undefined`.
+   *
+   * 장르와 달리 「이 칸에서만 보인다」가 없다: 어떤 카드든 스케치 한 장을 달 수
+   * 있고, 그래서 조건 없이 늘 그 줄이 선다.
+   */
+  drawPageId?: Id;
 }
 
 /**
@@ -80,6 +89,8 @@ interface CardEditSheetProps extends LocalMoney {
   gourmet?: boolean;
   /** Trip currency, used by the 지출 기록 section. Defaults to `KRW`. */
   currency?: string;
+  /** 이 카드가 속한 여행 (M52b) — 드로우 페이지 픽커가 고를 목록의 범위. */
+  tripId?: Id;
   /** The trip's 목적지 (M12) — where 지도에서 선택 opens for an unplaced card. */
   tripDestination?: GeoPoint;
   /** Timeline entries this card already has; shown next to 시간표에 추가. */
@@ -109,6 +120,7 @@ export default function CardEditSheet({
   columnIcon = '📍',
   gourmet = false,
   currency = 'KRW',
+  tripId,
   tripDestination,
   localCurrency,
   fxRate,
@@ -135,11 +147,24 @@ export default function CardEditSheet({
   const [genre, setGenre] = useState<UserGourmetGenre | null>(() =>
     userGenreOf(card?.gourmetGenre),
   );
+  /** 붙여 둔 드로우 페이지 (M52b). */
+  const [drawPageId, setDrawPageId] = useState<Id | undefined>(card?.drawPageId);
+  const [drawPickerOpen, setDrawPickerOpen] = useState(false);
   const [picker, setPicker] = useState<Picker>(null);
   /** 직접 입력 is open when the stored value is not one of the presets. */
   const [customOpen, setCustomOpen] = useState(
     () => duration !== undefined && !DURATION_PRESETS.includes(duration),
   );
+
+  /**
+   * 이 여행의 페이지들 (M52b). 시트가 스토어를 직접 보는 이유는 `CardPhotoStrip`이
+   * 그러는 이유와 같다 — 목록은 부모가 아니라 **데이터**가 답할 질문이고, 프롭
+   * 하나를 더 꿰면 보드 화면이 드로우를 알아야 한다.
+   */
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  const addDrawPage = useWorkspaceStore((s) => s.addDrawPage);
+  const drawPages = useMemo(() => tripPages(workspace, tripId), [workspace, tripId]);
+  const linkedPage = drawPageId ? drawPages.find((option) => option.id === drawPageId) : undefined;
 
   const parsedBudget = numberOrUndefined(budget);
   /** A 예산 may be 0 but never negative, and never a slipped extra digit (B18). */
@@ -167,6 +192,7 @@ export default function CardEditSheet({
         // 맛집 칸이 아니면 화면에 픽커가 없었으므로 고칠 자격도 없다 — 원래 값을
         // 그대로 되돌려 싣는다 (`CardFormValues.gourmetGenre`).
         gourmetGenre: gourmet ? (genre ?? undefined) : card?.gourmetGenre,
+        drawPageId,
       }),
     );
   };
@@ -238,6 +264,100 @@ export default function CardEditSheet({
               placeholder="기억해 둘 것"
               className={TEXTAREA_CLASS}
             />
+          </div>
+
+          {/* 드로우 페이지 (M52b) — 「기본」에 사는 이유는 이것이 계획이 아니라
+              **이 카드가 무엇인가**의 일부이기 때문이다: 스케치 한 장이 곧
+              「여기 어때」의 본문인 카드가 있다.
+
+              픽커가 목록을 그 자리에서 펼치는 이유는 고를 것이 대개 두세 개이고,
+              시트 위에 시트를 또 얹으면 폰에서 돌아올 길이 두 겹이 되기 때문이다
+              (위치 검색은 지도가 필요해서 층을 하나 쓴다 — 여기는 아니다). */}
+          <div>
+            <span className={LABEL_CLASS}>드로우 페이지</span>
+            <p
+              data-testid="card-draw-name"
+              data-page-id={drawPageId ?? ''}
+              className={`mt-2 break-words rounded-md bg-sunken px-3 py-2 text-label font-normal ${
+                linkedPage ? 'text-ink' : 'text-ink-faint'
+              }`}
+            >
+              {linkedPage ? `🎨 ${linkedPage.title}` : drawPageId ? '없는 페이지' : '없음'}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-testid="card-draw-pick"
+                aria-expanded={drawPickerOpen}
+                onClick={() => setDrawPickerOpen((open) => !open)}
+                className={CHIP_BUTTON}
+              >
+                <Icon name="palette" size={16} />
+                페이지 고르기
+              </button>
+              {tripId ? (
+                <button
+                  type="button"
+                  data-testid="card-draw-new"
+                  onClick={() => {
+                    // 여기서 페이지가 **바로** 만들어진다(저장을 기다리지 않는다).
+                    // 사진 한 장이 그런 것과 같은 이유다: 사람이 「만들어 연결」을
+                    // 누른 순간 그 페이지는 이미 있는 것으로 보이고, 시트를 닫아도
+                    // 그리러 갈 자리가 남아 있어야 한다.
+                    const id = addDrawPage(tripId, title.trim());
+                    if (id) {
+                      setDrawPageId(id);
+                      setDrawPickerOpen(false);
+                    }
+                  }}
+                  className={CHIP_BUTTON}
+                >
+                  <Icon name="plus" size={16} />
+                  새 페이지 만들어 연결
+                </button>
+              ) : null}
+              {drawPageId ? (
+                <button
+                  type="button"
+                  data-testid="card-draw-clear"
+                  onClick={() => {
+                    setDrawPageId(undefined);
+                    setDrawPickerOpen(false);
+                  }}
+                  className={CHIP_BUTTON_DANGER}
+                >
+                  <Icon name="close" size={16} />
+                  해제
+                </button>
+              ) : null}
+            </div>
+
+            {drawPickerOpen ? (
+              <div data-testid="card-draw-picker" className="mt-2 flex flex-wrap gap-2">
+                {drawPages.length === 0 ? (
+                  <p className="text-micro font-normal text-ink-faint">
+                    이 여행에는 아직 페이지가 없어요.
+                  </p>
+                ) : (
+                  drawPages.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      data-testid="card-draw-option"
+                      data-page-id={option.id}
+                      aria-pressed={option.id === drawPageId}
+                      onClick={() => {
+                        setDrawPageId(option.id);
+                        setDrawPickerOpen(false);
+                      }}
+                      className={option.id === drawPageId ? CHIP_SELECTED : CHIP_BUTTON}
+                    >
+                      {option.title}
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
           </div>
 
           <div>

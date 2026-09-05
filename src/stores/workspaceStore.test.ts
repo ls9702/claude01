@@ -2063,3 +2063,139 @@ describe('드로우 요소', () => {
     expect(useWorkspaceStore.getState().dirty).toBe(false);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * 드로우 — M52a-fix / M52b
+ * ------------------------------------------------------------------ */
+
+describe('드로우 껍데기와 속 (M52a-fix ①③)', () => {
+  const sticker = { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 } as const;
+
+  it('요소를 그려도 페이지의 updatedAt은 움직이지 않는다', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+    const born = ws().drawPages![pageId].updatedAt;
+
+    store().addDrawElement(pageId, sticker);
+    expect(ws().drawPages![pageId].updatedAt).toBe(born);
+
+    const id = ws().drawPages![pageId].elementOrder[0];
+    store().updateDrawElement(pageId, id, { x: 30 });
+    expect(ws().drawPages![pageId].updatedAt).toBe(born);
+
+    store().deleteDrawElement(pageId, id);
+    expect(ws().drawPages![pageId].updatedAt).toBe(born);
+    // 그래도 요소 자신의 시각은 찍힌다 — 병합이 그것으로 갈린다.
+    expect(ws().drawPages![pageId].elements[id].updatedAt).toBeGreaterThanOrEqual(born);
+  });
+
+  it('이름·배경은 껍데기라 updatedAt을 찍는다', async () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+    const born = ws().drawPages![pageId].updatedAt;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+
+    store().renameDrawPage(pageId, '난바 밤');
+    const renamed = ws().drawPages![pageId].updatedAt;
+    expect(renamed).toBeGreaterThan(born);
+
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    store().setDrawPageBackground(pageId, { photoId: 'ph1', opacity: 0.5 });
+    expect(ws().drawPages![pageId].background).toEqual({ photoId: 'ph1', opacity: 0.5 });
+    expect(ws().drawPages![pageId].updatedAt).toBeGreaterThan(renamed);
+  });
+
+  it('페이지를 더해도 여행의 updatedAt은 움직이지 않는다 (순서 덮어쓰기 방지)', () => {
+    const tripId = store().addTrip('오사카');
+    const born = ws().trips[tripId].updatedAt;
+
+    const a = store().addDrawPage(tripId)!;
+    expect(ws().trips[tripId].updatedAt).toBe(born);
+    expect(ws().trips[tripId].drawPageOrder).toEqual([a]);
+
+    store().duplicateDrawPage(a);
+    expect(ws().trips[tripId].updatedAt).toBe(born);
+  });
+
+  it('순서를 **손으로** 바꾸는 것은 여행의 편집이라 도장을 찍는다', async () => {
+    const tripId = store().addTrip('오사카');
+    const a = store().addDrawPage(tripId)!;
+    const b = store().addDrawPage(tripId)!;
+    const born = ws().trips[tripId].updatedAt;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+
+    store().moveDrawPage(b, -1);
+    expect(ws().trips[tripId].drawPageOrder).toEqual([b, a]);
+    expect(ws().trips[tripId].updatedAt).toBeGreaterThan(born);
+  });
+});
+
+describe('드로우 배경 사진 (M52b)', () => {
+  it('투명도는 0.2~1로 갇히고, 제거하면 키째 사라진다', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+
+    store().setDrawPageBackground(pageId, { photoId: 'ph1', opacity: 0 });
+    expect(ws().drawPages![pageId].background).toEqual({ photoId: 'ph1', opacity: 0.2 });
+
+    store().setDrawPageBackground(pageId, { photoId: 'ph1', opacity: 5 });
+    expect(ws().drawPages![pageId].background!.opacity).toBe(1);
+
+    store().setDrawPageBackground(pageId, undefined);
+    expect('background' in ws().drawPages![pageId]).toBe(false);
+
+    // 없는 배경을 또 빼는 것은 아무 일도 아니다.
+    useWorkspaceStore.setState({ dirty: false });
+    store().setDrawPageBackground(pageId, undefined);
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
+  it('복제한 페이지는 같은 사진을 가리킨다 (불변 블롭이라 안전하다)', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+    store().setDrawPageBackground(pageId, { photoId: 'ph1' });
+
+    const copy = store().duplicateDrawPage(pageId)!;
+    expect(ws().drawPages![copy].background).toEqual({ photoId: 'ph1', opacity: 1 });
+  });
+});
+
+describe('드로우 이름의 상한 (M52a-fix ⑨)', () => {
+  it('200자 이름은 60자로 잘리고, 공백뿐인 이름은 원래 이름을 지킨다', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId, '  '.repeat(3))!;
+    expect(ws().drawPages![pageId].title).toBe('페이지 1');
+
+    store().renameDrawPage(pageId, '오'.repeat(200));
+    expect(ws().drawPages![pageId].title).toHaveLength(60);
+
+    store().renameDrawPage(pageId, '   ');
+    expect(ws().drawPages![pageId].title).toHaveLength(60);
+  });
+});
+
+describe('카드 → 드로우 페이지 연결 (M52b)', () => {
+  it('카드가 페이지 id 하나를 들고, 해제하면 키가 사라진다', () => {
+    const tripId = store().addTrip('오사카');
+    const columnId = ws().trips[tripId].columnOrder[0];
+    const pageId = store().addDrawPage(tripId)!;
+    const cardId = store().addCard(tripId, columnId, { title: '난바', drawPageId: pageId })!;
+
+    expect(ws().cards[cardId].drawPageId).toBe(pageId);
+
+    store().updateCard(cardId, { drawPageId: undefined });
+    expect(ws().cards[cardId].drawPageId).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(ws().cards[cardId])).drawPageId).toBeUndefined();
+  });
+
+  it('페이지를 지워도 카드의 연결은 남는다 (삭제 실행취소가 되살린다)', () => {
+    const tripId = store().addTrip('오사카');
+    const columnId = ws().trips[tripId].columnOrder[0];
+    const pageId = store().addDrawPage(tripId)!;
+    const cardId = store().addCard(tripId, columnId, { title: '난바', drawPageId: pageId })!;
+
+    store().deleteDrawPage(pageId);
+    expect(ws().cards[cardId].drawPageId).toBe(pageId);
+    expect(ws().drawPages![pageId].deletedAt).toBeGreaterThan(0);
+  });
+});

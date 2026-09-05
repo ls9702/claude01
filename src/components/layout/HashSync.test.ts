@@ -58,3 +58,28 @@ describe('hashFor', () => {
     expect(parseDrawPageId(hashFor('draw', 'xyz'))).toBe('xyz');
   });
 });
+
+/**
+ * 딥링크가 한 번의 상태 갱신으로 반영된다 (M52a-fix ②).
+ *
+ * 예전에는 `setTab('draw')` → (구독자가 주소를 `#/draw`로 고쳐 씀) →
+ * `parseDrawPageId`가 그 고쳐진 주소를 읽는 순서라, 다른 탭에서 딥링크를 밟으면
+ * id가 사라졌다(D6). 여기서는 그 한 걸음을 스토어 쪽에서 못 박는다: 탭과 페이지가
+ * **같은 `set`**으로 바뀌므로 구독자가 그 사이에 깨어날 자리가 없다.
+ */
+describe('openDrawPage (M52a-fix ②)', () => {
+  it('탭과 페이지를 한 번에 바꾼다 — 구독자가 보는 상태는 언제나 둘 다 갖춰져 있다', async () => {
+    const { useUiStore } = await import('../../stores/uiStore');
+    useUiStore.setState({ activeTab: 'board', activeDrawPageId: undefined });
+
+    const seen: { tab: string; page?: string }[] = [];
+    const stop = useUiStore.subscribe((state) =>
+      seen.push({ tab: state.activeTab, page: state.activeDrawPageId }),
+    );
+    useUiStore.getState().openDrawPage('abc123');
+    stop();
+
+    expect(seen).toEqual([{ tab: 'draw', page: 'abc123' }]);
+    expect(hashFor('draw', useUiStore.getState().activeDrawPageId)).toBe('#/draw/abc123');
+  });
+});

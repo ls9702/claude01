@@ -90,6 +90,21 @@ test('서비스 워커가 등록되고 활성화된다', async ({ page }) => {
 
   const state = await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
+    // `ready`는 워커가 **activating**인 순간에도 풀린다 — 전체 스위트 부하에서
+    // 그 찰나를 밟아 `activating`을 읽은 적이 있다(M52b 게이트). 활성화가
+    // 끝날 때까지 statechange를 기다린다 — 기다림이지 건너뜀이 아니다.
+    const worker = registration.active;
+    if (worker && worker.state !== 'activated') {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 10_000);
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'activated') {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+    }
     return {
       scope: registration.scope,
       active: registration.active?.state ?? null,
