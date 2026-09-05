@@ -68,7 +68,7 @@ describe('drawSizeWarning', () => {
 
   it('넘으면 크기를 사람 말로 담은 한 줄을 준다', () => {
     const text = drawSizeWarning(DRAW_WARN_BYTES + 1);
-    expect(text).toContain('1.5MB');
+    expect(text).toContain('8.0MB');
     // 막는 말이 아니라 권하는 말이다.
     expect(text).toContain('지우면');
   });
