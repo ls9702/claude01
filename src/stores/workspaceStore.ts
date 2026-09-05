@@ -726,6 +726,14 @@ export interface WorkspaceState {
     background: { photoId: Id; opacity?: number } | undefined,
   ) => void;
   /**
+   * 종이 무늬를 고른다 (M53-2) — 모눈·점·무지.
+   *
+   * 제목·배경과 **같은 층**의 껍데기다(`putPageShell`): 종이는 페이지의 성질이지
+   * 그 위에 그린 것이 아니다. `'plain'`은 필드를 **지운다** — 없는 것이 곧 무지라
+   * 이 앱을 모르던 워크스페이스와 같은 모양으로 남는다.
+   */
+  setDrawPagePaper: (id: Id, paper: 'plain' | 'grid' | 'dot') => void;
+  /**
    * 페이지 하나를 통째로 베낀다 — 요소마다 **새 id**를 받고 순서는 그대로다.
    *
    * 사본이 원본의 요소 id를 그대로 쓰면 두 페이지가 같은 요소를 가리키게 되고,
@@ -762,6 +770,20 @@ export interface WorkspaceState {
   updateDrawElement: (pageId: Id, elementId: Id, patch: DrawElementPatch) => void;
   /** 요소 하나를 지운다 — 페이지와 같은 `deletedAt` 도장. */
   deleteDrawElement: (pageId: Id, elementId: Id) => void;
+  /**
+   * 겹침 순서를 통째로 갈아 끼운다 (M53-1) — 「맨 앞으로」·「한 칸 뒤로」.
+   *
+   * 껍데기의 시각은 **찍지 않는다**(`putPageBody`): `elementOrder`가 껍데기 필드이긴
+   * 하지만, 그 도장을 찍으면 겹침 하나 바꾼 것이 상대의 이름 변경을 덮는다
+   * (M52a-fix ①이 획 하나에서 겪은 그 일).
+   *
+   * **동시 편집에서는 늦게 저장한 쪽이 이긴다.** 병합의 순서 재조정
+   * (`sync/merge.mergeSequences`)은 두 배열의 **상대 순서**를 이어 붙일 뿐이라
+   * 재배열을 확정적으로 보존하지 않는다 — 둘이 같은 순간 같은 페이지에서 층을
+   * 바꾸면 한쪽의 재배열이 남는다. 요소는 하나도 잃지 않는다(모르는 id는 뒤에
+   * 붙는다).
+   */
+  setDrawElementOrder: (pageId: Id, order: readonly Id[]) => void;
 
   /* --- 일정 (timeline) — M2a ------------------------------------------ */
 
@@ -1470,6 +1492,20 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           });
         },
 
+        setDrawPagePaper: (id, paper) => {
+          run((draft, now) => {
+            const page = livePage(draft, id);
+            if (!page) return null;
+            const current = page.paper ?? 'plain';
+            if (current === paper) return null;
+            if (paper === 'plain') {
+              const { paper: _gone, ...rest } = page;
+              return putPageShell(draft, rest as DrawPage, now);
+            }
+            return putPageShell(draft, { ...page, paper }, now);
+          });
+        },
+
         duplicateDrawPage: (id) =>
           run((draft, now) => {
             const source = livePage(draft, id);
@@ -1499,6 +1535,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 tripId: trip.id,
                 title: copyPageTitle(source.title, existing),
                 ...(source.background ? { background: { ...source.background } } : {}),
+                ...(source.paper ? { paper: source.paper } : {}),
                 elements,
                 elementOrder,
                 createdAt: now,
@@ -1601,6 +1638,38 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             if (!page || !current || current.deletedAt) return null;
             const next = { ...current, ...patch, updatedAt: now } as DrawElement;
             putPageBody(draft, { ...page, elements: { ...page.elements, [elementId]: next } });
+            return true;
+          });
+        },
+
+        setDrawElementOrder: (pageId, order) => {
+          run((draft) => {
+            const page = livePage(draft, pageId);
+            if (!page) return null;
+
+            // 온 배열을 그대로 믿지 않는다: 모르는 id는 버리고, 빠진 id는 원래
+            // 자리 순서대로 **뒤에** 붙인다. 화면이 순서를 계산하는 사이에 상대의
+            // 획 하나가 폴링으로 도착할 수 있고, 그 획이 층 바꾸기 한 번에
+            // 사라지면 안 된다.
+            const seen = new Set<Id>();
+            const next: Id[] = [];
+            for (const id of order) {
+              if (seen.has(id) || !page.elements[id]) continue;
+              seen.add(id);
+              next.push(id);
+            }
+            for (const id of page.elementOrder) {
+              if (seen.has(id) || !page.elements[id]) continue;
+              seen.add(id);
+              next.push(id);
+            }
+            if (
+              next.length === page.elementOrder.length &&
+              next.every((id, index) => id === page.elementOrder[index])
+            ) {
+              return null;
+            }
+            putPageBody(draft, { ...page, elementOrder: next });
             return true;
           });
         },

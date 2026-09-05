@@ -447,6 +447,18 @@ export interface DrawElementBase {
   updatedAt: Millis;
   /** 지운 시각. 있으면 화면에도 병합에도 없는 것으로 친다. */
   deletedAt?: Millis;
+  /**
+   * 잠긴 요소 (M53-2) — 보이지만 **손에 잡히지 않는다**.
+   *
+   * 큰 사진을 종이처럼 깔고 그 위에 낙서할 때를 위한 것이다: 잠그지 않으면 획을
+   * 그으려던 손이 사진을 끌고 다닌다. 잠긴 것은 맞힘·이동·리사이즈·삭제·마퀴에서
+   * 전부 빠지고, 푸는 길은 둘이다 — 컴퓨터에서는 **Shift+클릭**, 폰에서는 그것을
+   * **탭했을 때 뜨는 한 줄**(M53-fix ②).
+   *
+   * `additive optional`이라 이 필드를 모르는 옛 빌드에서는 그냥 안 잠긴 요소다 —
+   * 잠금은 데이터의 성질이 아니라 편집의 편의이므로 그 결말이 안전하다.
+   */
+  locked?: boolean;
 }
 
 /**
@@ -478,6 +490,8 @@ export interface DrawBox extends DrawElementBase {
   width: number;
   /** 채움 색. 없으면 테두리만 그린다. */
   fill?: string;
+  /** 테두리를 점선으로 (M53-2). 없으면 실선. */
+  dash?: boolean;
 }
 
 /** 직선·화살표 — 두 끝점. 화살표는 끝점에 머리가 붙는다. */
@@ -489,6 +503,15 @@ export interface DrawSegment extends DrawElementBase {
   y2: number;
   color: string;
   width: number;
+  /** 점선으로 (M53-2) — 「아직 정하지 않은 동선」. */
+  dash?: boolean;
+  /**
+   * 화살촉이 붙는 자리 (M53-2) — 없으면 `'end'`(끝점 하나).
+   *
+   * `'both'`는 「가는 길과 오는 길」이다. `line`에는 뜻이 없다(촉이 없다) —
+   * 필드가 유니온 하나에 함께 사는 것은 두 타입이 좌표를 공유하기 때문이다.
+   */
+  heads?: 'end' | 'both';
 }
 
 /** 탭한 자리에 앉는 글자 한 줄. */
@@ -511,13 +534,45 @@ export interface DrawSticker extends DrawElementBase {
 }
 
 /**
+ * 페이지 위에 붙인 사진 한 장 (M53-2).
+ *
+ * 배경({@link DrawPage.background})과 **다른 물건**이다: 배경은 페이지의 껍데기라
+ * 한 장뿐이고 자리를 옮길 수 없는 「종이」이고, 이것은 옮기고 키우고 겹치고
+ * 복사되는 평범한 요소다. 그래서 여러 장을 나란히 놓거나 낙서 밑에 깔거나 위에
+ * 얹을 수 있다.
+ *
+ * 바이트는 여기 없다 — 배경·카드 사진과 **완전히 같은 길**로 들어온다
+ * (`utils/photos.preparePhoto` → `stores/photoBlobs` → `sync/photoSync`). 요소가
+ * 드는 것은 {@link photoId} 하나뿐이라 워크스페이스 JSON은 요소당 100바이트도
+ * 늘지 않는다. 그 대신 **GC가 이 요소를 알아야 한다**
+ * (`utils/photos.referencedPhotoIds`) — 모르면 30초 뒤에 사진이 사라진다.
+ */
+export interface DrawImage extends DrawElementBase {
+  type: 'image';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** {@link CardPhoto.id}와 같은 자리의 id — 바이트는 idb + `image.php`에 있다. */
+  photoId: Id;
+  /** 0.2~1. 없으면 1 (`tools.clampOpacity`와 같은 문). */
+  opacity?: number;
+}
+
+/**
  * 드로우 페이지 위의 한 요소 (M52a) — `type`으로 갈리는 판별 유니온.
  *
  * 판별자가 획의 `kind`가 아니라 `type`인 이유는 둘이 서로 다른 질문에 답하기
  * 때문이다: `type`은 「무엇으로 그렸나」이고 `kind`는 획 하나 안에서 「펜인가
  * 형광펜인가」다.
  */
-export type DrawElement = DrawStroke | DrawBox | DrawSegment | DrawText | DrawSticker;
+export type DrawElement =
+  | DrawStroke
+  | DrawBox
+  | DrawSegment
+  | DrawText
+  | DrawSticker
+  | DrawImage;
 
 /** {@link DrawElement}의 판별자 — 도구 하나가 곧 하나씩이다. */
 export type DrawElementType = DrawElement['type'];
@@ -555,6 +610,14 @@ export interface DrawPage {
     /** 0~1. 없으면 렌더러의 기본값. */
     opacity?: number;
   };
+  /**
+   * 종이 무늬 (M53-2) — 없으면 `'plain'`(무지).
+   *
+   * 제목·배경과 **같은 층**의 껍데기 필드라 평범한 엔티티 LWW로 갈린다. 격자와
+   * 점은 그림이 아니라 종이라서 요소로 두지 않았다: 요소였다면 지우개에 지워지고
+   * 마퀴에 잡히고 PNG의 경계 계산에 끼어든다.
+   */
+  paper?: 'plain' | 'grid' | 'dot';
   elements: Record<Id, DrawElement>;
   /** 그리는 순서 = 겹치는 순서. 뒤에 있는 것이 위에 그려진다. */
   elementOrder: Id[];

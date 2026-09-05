@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { DrawBox, DrawElement, DrawStroke, DrawText } from '../types/models';
+import type { DrawBox, DrawElement, DrawImage, DrawStroke, DrawText } from '../types/models';
 import {
   arrowHead,
   boxHit,
+  dashArray,
   distanceToPolyline,
   distanceToSegment,
   elementBounds,
@@ -10,6 +11,8 @@ import {
   moveElementPatch,
   normalizeBox,
   pickTopElement,
+  snapPoint,
+  strokePath,
 } from './geometry';
 
 const stroke = (over: Partial<DrawStroke> = {}): DrawElement => ({
@@ -245,5 +248,117 @@ describe('글자 요소의 상자', () => {
 
   it('빈 글자도 상자를 잃지 않는다 (한 글자 폭이 하한)', () => {
     expect(elementBounds(text('')).w).toBe(24);
+  });
+});
+
+describe('모르는 요소 타입 (M53-1) — 안 보이고 안 맞는다', () => {
+  // 다음 회차가 요소 타입을 하나 늘린다. 그 요소가 든 워크스페이스가 이 빌드에
+  // 닿았을 때 화면이 죽지 않는 것이 여기서 지켜진다.
+  //
+  // M53-2에서 `'image'`가 **진짜 타입이 되면서** 이 자리의 낯선 이름을 백로그의
+  // 다음 후보(`'card'`, 보드 카드 미리보기)로 옮겼다 — 이 시험이 지키는 것은
+  // 특정 이름이 아니라 「모르는 이름」이라는 성질이다.
+  const alien = { id: 'x1', updatedAt: 1, type: 'card', x: 0, y: 0 } as unknown as DrawElement;
+
+  it('경계 상자는 0이다', () => {
+    expect(elementBounds(alien)).toEqual({ x: 0, y: 0, w: 0, h: 0 });
+  });
+
+  it('아무것도 맞히지 못한다', () => {
+    expect(hitTest(alien, 0, 0)).toBe(false);
+    expect(pickTopElement({ x1: alien }, ['x1'], 0, 0)).toBeNull();
+  });
+
+  it('움직이지 않는다 (빈 패치)', () => {
+    expect(moveElementPatch(alien, 10, 10)).toEqual({});
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * M53-2 — 붙인 사진 · 잠금 · 스냅 · 점선 · 스무딩
+ * ------------------------------------------------------------------ */
+
+const image = (over: Partial<DrawImage> = {}): DrawElement => ({
+  id: 'i1',
+  updatedAt: 1,
+  type: 'image',
+  x: 100,
+  y: 100,
+  w: 200,
+  h: 120,
+  photoId: 'ph1',
+  ...over,
+});
+
+describe('붙인 사진 요소 (B2)', () => {
+  it('경계 상자는 네 수 그대로다', () => {
+    expect(elementBounds(image())).toEqual({ x: 100, y: 100, w: 200, h: 120 });
+  });
+
+  it('안쪽까지 맞는다 — 사진은 채워진 것이다', () => {
+    expect(hitTest(image(), 200, 160)).toBe(true);
+    expect(hitTest(image(), 101, 101)).toBe(true);
+    // 여유를 더 주지 않는다: 사진은 대개 크고, 여유가 넓으면 옆의 획을 못 짚는다.
+    expect(hitTest(image(), 320, 160)).toBe(false);
+  });
+
+  it('옮기면 x·y만 바뀐다 (크기는 그대로)', () => {
+    expect(moveElementPatch(image(), 12.4, -3.2)).toEqual({ x: 112, y: 97 });
+  });
+});
+
+describe('잠금 (#10)', () => {
+  it('잠긴 것은 없는 것처럼 통과한다 — Shift+클릭만 예외다', () => {
+    const locked = image({ id: 'lock1', locked: true });
+    const under = rect({ id: 'under', x: 100, y: 100, w: 200, h: 120, fill: '#eee' });
+    const elements = { under, lock1: locked };
+    const order = ['under', 'lock1'];
+
+    // 위에 있는 것은 잠긴 사진인데, 집히는 것은 밑의 도형이다.
+    expect(pickTopElement(elements, order, 200, 160)?.id).toBe('under');
+    // Shift는 그것을 본다 — 그 한 가지가 없으면 잠근 것을 못 푼다.
+    expect(pickTopElement(elements, order, 200, 160, 8, true)?.id).toBe('lock1');
+  });
+});
+
+describe('snapPoint (#5)', () => {
+  it('가까운 격자선에 붙는다 (내림이 아니라 반올림)', () => {
+    expect(snapPoint(11, 13, 8)).toEqual({ x: 8, y: 16 });
+    expect(snapPoint(-3, -5, 8)).toEqual({ x: -0, y: -8 });
+  });
+
+  it('꺼져 있거나 격자가 없으면 그대로다', () => {
+    expect(snapPoint(11, 13, 8, false)).toEqual({ x: 11, y: 13 });
+    expect(snapPoint(11, 13, 0)).toEqual({ x: 11, y: 13 });
+  });
+});
+
+describe('dashArray (#4)', () => {
+  it('굵기를 따라간다 — 고정 픽셀은 굵은 선에서 「이가 빠진 선」이 된다', () => {
+    expect(dashArray(4, true)).toBe('10 8');
+    expect(dashArray(8, true)).toBe('20 16');
+  });
+
+  it('실선은 속성 자체가 없다 (PNG에 쓸데없는 속성을 싣지 않는다)', () => {
+    expect(dashArray(4)).toBeUndefined();
+    expect(dashArray(4, false)).toBeUndefined();
+  });
+});
+
+describe('strokePath (#7) — 렌더만 바꾼다', () => {
+  it('첫 점에서 시작해 마지막 점에서 끝난다', () => {
+    const d = strokePath([0, 0, 10, 10, 20, 0]);
+    expect(d.startsWith('M 0 0')).toBe(true);
+    expect(d.endsWith('20 0')).toBe(true);
+    // 점 셋이면 곡선 구간은 둘이다.
+    expect(d.match(/C/g)).toHaveLength(2);
+  });
+
+  it('점 하나는 점으로 남는다 (선이 아니다)', () => {
+    expect(strokePath([5, 7])).toBe('M 5 7 L 5 7');
+  });
+
+  it('빈 획은 빈 문자열이다', () => {
+    expect(strokePath([])).toBe('');
   });
 });

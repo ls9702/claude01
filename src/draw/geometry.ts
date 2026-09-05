@@ -176,6 +176,10 @@ export function elementBounds(element: DrawElement): Box {
         h: element.size * LINE_HEIGHT * lines.length,
       };
     }
+    case 'image':
+      // 붙인 사진 (M53-2) — 도형과 같은 네 수다. 「같은 규칙을 다시 쓴다」가
+      // 이 요소 타입을 고른 이유이기도 하다.
+      return { x: element.x, y: element.y, w: element.w, h: element.h };
     case 'sticker':
       // 스티커의 `x`/`y`는 **가운데**다 — 붙이는 손가락이 가리키는 곳이 가운데다.
       return {
@@ -184,6 +188,13 @@ export function elementBounds(element: DrawElement): Box {
         w: element.size,
         h: element.size,
       };
+    default:
+      // 모르는 타입은 **자리를 차지하지 않는다** (M53-1). 이 `default`가 필요한
+      // 이유는 다음 회차가 요소 타입을 하나 늘리기 때문이다: 그 요소가 든
+      // 워크스페이스가 옛 빌드에 닿았을 때 여기가 `undefined`를 돌려주면 다음 줄이
+      // `.x`를 읽다 죽는다. 「모르는 요소는 안 보이고 안 맞는다」가 최선의 결말이고,
+      // 그것은 `DrawElementBase`가 톰스톤을 쓰지 않는 이유와 같은 논증이다.
+      return { x: 0, y: 0, w: 0, h: 0 };
   }
 }
 
@@ -223,9 +234,16 @@ export function hitTest(element: DrawElement, x: number, y: number, tolerance = 
       };
       return !(inner.w > 0 && inner.h > 0 && boxHit(inner, x, y));
     }
+    case 'image':
+      // 사진은 **채워진 것**이라 안쪽도 맞은 것이다 — 여백을 더 주지 않는 이유는
+      // 사진이 대개 크고, 여유가 넓으면 옆의 획을 짚을 수 없기 때문이다.
+      return boxHit(elementBounds(element), x, y, 0);
     case 'text':
     case 'sticker':
       return boxHit(elementBounds(element), x, y, tolerance / 2);
+    default:
+      // 모르는 타입은 아무것도 맞히지 못한다 (M53-1) — `elementBounds`의 그 이유.
+      return false;
   }
 }
 
@@ -241,10 +259,16 @@ export function pickTopElement(
   x: number,
   y: number,
   tolerance = 8,
+  includeLocked = false,
 ): DrawElement | null {
   for (let i = order.length - 1; i >= 0; i -= 1) {
     const element = elements[order[i]];
     if (!element || element.deletedAt) continue;
+    // 잠긴 것은 **없는 것처럼** 통과한다 (M53-2): 그것이 잠금의 뜻이고, 그래서
+    // 잠긴 사진 위에 그은 획을 지우개가 제대로 집는다. `includeLocked`는 **다시 풀
+    // 길**을 위해서만 있다 — 컴퓨터의 Shift+클릭과, 폰에서 잠긴 것을 탭했을 때 뜨는
+    // 한 줄(M53-fix ②). 둘 다 없으면 한 번 잠근 것은 영영 잠긴 채다.
+    if (element.locked && !includeLocked) continue;
     if (hitTest(element, x, y, tolerance)) return element;
   }
   return null;
@@ -271,6 +295,7 @@ export function moveElementPatch(
     }
     case 'rect':
     case 'ellipse':
+    case 'image':
       return { x: round(element.x + dx), y: round(element.y + dy) } as Partial<DrawElement>;
     case 'line':
     case 'arrow':
@@ -283,5 +308,82 @@ export function moveElementPatch(
     case 'text':
     case 'sticker':
       return { x: round(element.x + dx), y: round(element.y + dy) } as Partial<DrawElement>;
+    default:
+      // 모르는 타입은 움직이지 않는다 (M53-1) — 빈 패치는 「아무 일도 없었다」다.
+      return {};
   }
 }
+
+
+/* ------------------------------------------------------------------ *
+ * 격자 스냅 · 선 스타일 · 손글씨 스무딩 (M53-2)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 격자에 붙인 점 (#5) — 켜져 있지 않으면 원래 자리 그대로.
+ *
+ * 반올림인 이유는 내림이 언제나 왼쪽 위로 끌기 때문이다: 사람은 격자의 **가까운**
+ * 선에 붙기를 기대하고, 내림은 칸의 오른쪽 끝을 짚었을 때 한 칸을 되돌린다.
+ * `grid`가 0 이하면 스냅은 없는 것이다(0으로 나누지 않는다).
+ */
+export function snapPoint(
+  x: number,
+  y: number,
+  grid: number,
+  on = true,
+): { x: number; y: number } {
+  if (!on || !Number.isFinite(grid) || grid <= 0) return { x, y };
+  return { x: Math.round(x / grid) * grid, y: Math.round(y / grid) * grid };
+}
+
+/**
+ * 점선의 `stroke-dasharray` — 굵기를 따라간다.
+ *
+ * 고정 픽셀 값(`8 6`)을 쓰지 않는 이유는 굵기 8짜리 선에서 그것이 점선이 아니라
+ * 「이가 빠진 선」으로 보이기 때문이다. 실선이면 `undefined`를 준다 —
+ * `stroke-dasharray="none"`을 쓰면 PNG로 나갈 때 속성이 하나 더 붙는다.
+ */
+export const dashArray = (width: number, dash?: boolean): string | undefined =>
+  dash ? `${Math.max(2, width * 2.5)} ${Math.max(2, width * 2)}` : undefined;
+
+/**
+ * 손글씨 한 획을 **매끄러운 path**로 (#7) — Catmull-Rom을 3차 베지에로 옮긴 것.
+ *
+ * **렌더만 바꾼다.** 저장되는 것은 여전히 점 배열이고, 맞힘 판정도 PNG도 그
+ * 배열을 본다. 그래서 이 함수가 틀려도 잃는 것은 「보기 좋음」뿐이고, 이미 그린
+ * 그림의 데이터는 한 바이트도 달라지지 않는다 — 화질을 올리는 가장 싼 자리가
+ * 정확히 여기다.
+ *
+ * 장력 1/6은 표준 Catmull-Rom(균일 매개변수)의 값이다. 끝점은 자기 자신을 이웃으로
+ * 삼아(복제) 곡선이 밖으로 튀지 않게 한다.
+ */
+export function strokePath(points: readonly number[]): string {
+  const count = Math.floor(points.length / 2);
+  if (count === 0) return '';
+  const at = (i: number): { x: number; y: number } => {
+    const clamped = Math.min(count - 1, Math.max(0, i));
+    return { x: points[clamped * 2], y: points[clamped * 2 + 1] };
+  };
+  if (count === 1) {
+    const only = at(0);
+    // 점 하나는 선이 아니다 — 길이 0짜리 선분이 `stroke-linecap="round"`로 점이 된다.
+    return `M ${only.x} ${only.y} L ${only.x} ${only.y}`;
+  }
+
+  let d = `M ${at(0).x} ${at(0).y}`;
+  for (let i = 0; i + 1 < count; i += 1) {
+    const p0 = at(i - 1);
+    const p1 = at(i);
+    const p2 = at(i + 1);
+    const p3 = at(i + 2);
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${round2(c1x)} ${round2(c1y)} ${round2(c2x)} ${round2(c2y)} ${p2.x} ${p2.y}`;
+  }
+  return d;
+}
+
+/** path 문자열이 쓸데없이 길어지지 않게 — 소수 둘째 자리면 눈이 못 본다. */
+const round2 = (value: number): number => Math.round(value * 100) / 100;

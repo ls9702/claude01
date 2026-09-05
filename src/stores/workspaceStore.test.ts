@@ -2054,6 +2054,33 @@ describe('드로우 요소', () => {
     expect(useWorkspaceStore.getState().dirty).toBe(false);
   });
 
+  it('겹침 순서를 갈아 끼운다 — 껍데기 시각은 그대로다 (M53-1)', () => {
+    const { pageId } = seedPage();
+    const a = store().addDrawElement(pageId, { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 })!;
+    const b = store().addDrawElement(pageId, { type: 'sticker', x: 1, y: 1, emoji: '⭐', size: 48 })!;
+    const stamp = ws().drawPages![pageId].updatedAt;
+
+    store().setDrawElementOrder(pageId, [b, a]);
+    expect(ws().drawPages![pageId].elementOrder).toEqual([b, a]);
+    // 겹침 하나 바꾼 것이 상대의 이름 변경을 덮으면 안 된다 (M52a-fix ①).
+    expect(ws().drawPages![pageId].updatedAt).toBe(stamp);
+  });
+
+  it('순서 배열은 모르는 id를 버리고 빠진 id를 뒤에 붙인다', () => {
+    const { pageId } = seedPage();
+    const a = store().addDrawElement(pageId, { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 })!;
+    const b = store().addDrawElement(pageId, { type: 'sticker', x: 1, y: 1, emoji: '⭐', size: 48 })!;
+
+    // 화면이 순서를 세는 사이에 도착한 상대의 요소(b)를 잃지 않는다.
+    store().setDrawElementOrder(pageId, [a, '유령', a]);
+    expect(ws().drawPages![pageId].elementOrder).toEqual([a, b]);
+
+    // 같은 순서를 다시 쓰면 아무 일도 일어나지 않는다.
+    useWorkspaceStore.setState({ dirty: false });
+    store().setDrawElementOrder(pageId, [a, b]);
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
   it('없는 페이지·없는 요소는 no-op', () => {
     const { pageId } = seedPage();
     expect(store().addDrawElement('없음', { type: 'sticker', x: 0, y: 0, emoji: '📍', size: 48 })).toBeNull();
@@ -2157,6 +2184,92 @@ describe('드로우 배경 사진 (M52b)', () => {
 
     const copy = store().duplicateDrawPage(pageId)!;
     expect(ws().drawPages![copy].background).toEqual({ photoId: 'ph1', opacity: 1 });
+  });
+});
+
+describe('드로우 종이 무늬 (M53-2, #5)', () => {
+  it('무지는 필드를 지운다 — 없는 것이 곧 무지다', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+
+    store().setDrawPagePaper(pageId, 'grid');
+    expect(ws().drawPages![pageId].paper).toBe('grid');
+
+    store().setDrawPagePaper(pageId, 'plain');
+    expect('paper' in ws().drawPages![pageId]).toBe(false);
+
+    // 같은 값을 또 고르는 것은 아무 일도 아니다.
+    useWorkspaceStore.setState({ dirty: false });
+    store().setDrawPagePaper(pageId, 'plain');
+    expect(useWorkspaceStore.getState().dirty).toBe(false);
+  });
+
+  it('제목·배경과 **같은 층**이다 — 껍데기 도장을 찍는다', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+    const born = ws().drawPages![pageId].updatedAt;
+
+    store().setDrawPagePaper(pageId, 'dot');
+    expect(ws().drawPages![pageId].updatedAt).toBeGreaterThanOrEqual(born);
+  });
+
+  it('복제한 페이지는 같은 종이를 쓴다', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+    store().setDrawPagePaper(pageId, 'dot');
+    const copy = store().duplicateDrawPage(pageId)!;
+    expect(ws().drawPages![copy].paper).toBe('dot');
+  });
+});
+
+describe('드로우 사진 요소 (M53-2, B2)', () => {
+  it('요소는 photoId만 든다 — 바이트는 워크스페이스 밖이다', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+    const id = store().addDrawElement(pageId, {
+      type: 'image',
+      x: 10,
+      y: 20,
+      w: 100,
+      h: 50,
+      photoId: 'ph1',
+    })!;
+    const element = ws().drawPages![pageId].elements[id];
+    expect(element).toMatchObject({ type: 'image', photoId: 'ph1', w: 100, h: 50 });
+    // 워크스페이스 JSON이 요소 하나로 늘어나는 양은 백 바이트 언저리다 —
+    // 그것이 「사진을 요소로 넣어도 용량 경고가 안 움직이는」 이유다.
+    expect(JSON.stringify(element).length).toBeLessThan(200);
+  });
+
+  it('복제한 페이지는 같은 사진을 나눠 쓴다 (블롭은 불변이다)', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+    store().addDrawElement(pageId, {
+      type: 'image',
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      photoId: 'ph1',
+    });
+    const copy = store().duplicateDrawPage(pageId)!;
+    const copied = Object.values(ws().drawPages![copy].elements)[0];
+    expect(copied).toMatchObject({ type: 'image', photoId: 'ph1' });
+  });
+
+  it('잠금은 평범한 요소 수정이다 (additive optional 필드)', () => {
+    const tripId = store().addTrip('오사카');
+    const pageId = store().addDrawPage(tripId)!;
+    const id = store().addDrawElement(pageId, {
+      type: 'image',
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      photoId: 'ph1',
+    })!;
+    store().updateDrawElement(pageId, id, { locked: true });
+    expect(ws().drawPages![pageId].elements[id].locked).toBe(true);
   });
 });
 

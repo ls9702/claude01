@@ -16,9 +16,10 @@
  *
  * 1. **CSS 변수**(`var(--color-surface)`)는 `<img>` 안에서 풀리지 않는다 —
  *    떨어져 나온 SVG는 문서의 스타일시트를 모른다. 종이 색을 날 값으로 박는다.
- * 2. **blob: URL**도 `<img>` 안에서는 막힌다(불투명 출처). 배경 사진은 바이트를
- *    data URI로 실어 보낸다.
- * 3. **선택 테두리**는 화면의 것이지 그림의 것이 아니다 — 걷어 낸다.
+ * 2. **blob: URL**도 `<img>` 안에서는 막힌다(불투명 출처). 사진(배경이든 붙인
+ *    요소든)은 바이트를 data URI로 실어 보낸다 — `[data-photo-id]` 하나로.
+ * 3. **화면의 표식**(선택 테두리·리사이즈 핸들·마퀴)은 화면의 것이지 그림의 것이
+ *    아니다 — `[data-draw-chrome]`이 달린 것은 전부 걷어 낸다.
  *
  * 순수한 부분(경계 계산·파일 이름)은 브라우저 없이 시험된다.
  */
@@ -158,8 +159,18 @@ export function bufferToDataUrl(buf: ArrayBuffer, mime = 'image/jpeg'): string {
 }
 
 export interface PngOptions {
-  /** 배경 사진의 바이트를 실은 data URI (있으면 복제본의 `<image>`에 꽂는다). */
-  backgroundDataUrl?: string;
+  /**
+   * `photoId → data URI` (M53-2) — 복제본의 `<image data-photo-id>`에 꽂는다.
+   *
+   * M52b는 `backgroundDataUrl` 하나였다. 붙인 사진 요소가 생기면서 그 모양으로는
+   * 「배경은 특수 경우, 요소는 또 다른 경우」가 되는데, **배경을 이 맵의 한
+   * 항목으로 만들면 특수 경우가 사라진다** — 파일 만들기가 아는 것은 이제
+   * 「`data-photo-id`가 달린 것들」 하나뿐이다.
+   *
+   * 맵에 없는 id는 그 자리에서 **지운다**: blob: URL은 떨어져 나온 SVG 안에서
+   * 막히므로, 남겨 두면 파일에 깨진 그림 표시가 찍힌다.
+   */
+  imageDataUrls?: Record<string, string>;
   scale?: number;
 }
 
@@ -191,18 +202,24 @@ export async function svgToPngBlob(
     paper.setAttribute('fill', PAPER);
     paper.setAttribute('stroke', 'none');
   }
-  // ② 배경 사진 — blob: URL은 떨어져 나온 SVG 안에서 막힌다.
-  const image = clone.querySelector('[data-testid="draw-background"]');
-  if (image) {
-    if (options.backgroundDataUrl) {
-      image.setAttribute('href', options.backgroundDataUrl);
-      image.removeAttribute('xlink:href');
+  // ② 사진들 — blob: URL은 떨어져 나온 SVG 안에서 막힌다. 배경이든 붙인
+  //    사진이든 **같은 규칙 하나**로 바이트를 갈아 끼운다 (M53-2).
+  const urls = options.imageDataUrls ?? {};
+  for (const node of clone.querySelectorAll('[data-photo-id]')) {
+    const id = node.getAttribute('data-photo-id') ?? '';
+    const dataUrl = urls[id];
+    if (dataUrl) {
+      node.setAttribute('href', dataUrl);
+      node.removeAttribute('xlink:href');
     } else {
-      image.remove();
+      node.remove();
     }
   }
-  // ③ 화면의 표식들은 그림이 아니다.
-  for (const node of clone.querySelectorAll('[data-testid="draw-selection"]')) node.remove();
+  // ③ 화면의 표식들은 그림이 아니다 — **속성 하나로** 걷는다 (M53-1).
+  //    testid를 하나씩 세던 자리였는데, 선택 테두리에 이어 핸들·마퀴가 생기면서
+  //    「빠뜨리면 파일에 파란 점 여덟 개가 찍힌다」가 됐다. 표식 쪽이 스스로
+  //    `data-draw-chrome`을 달게 하면 다음에 무엇이 늘어도 자동으로 빠진다.
+  for (const node of clone.querySelectorAll('[data-draw-chrome]')) node.remove();
 
   const markup = new XMLSerializer().serializeToString(clone);
   const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;

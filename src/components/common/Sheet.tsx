@@ -6,6 +6,17 @@ import { raiseTapShield, watchPointerType } from './tapShield';
 /** 그래버를 이만큼 끌어내리면 닫는다. */
 const CLOSE_DRAG_PX = 80;
 
+/**
+ * 방금 열린 시트의 오버레이가 클릭을 무시하는 창 (M53-fix ③).
+ *
+ * 시트를 여는 손짓이 pointerdown이면, 브라우저는 그 뒤에 호환용 click을 하나 더
+ * 쏜다 — 그때 시트는 이미 떠 있으므로 그 click은 오버레이(=닫기) 위에 떨어지고,
+ * 사람에게는 「눌렀는데 아무 반응이 없다」로 보인다. 여는 손짓의 뒤끝은 열림
+ * 애니메이션(240ms)보다 오래 걸리지 않으므로 그 창만 닫아 둔다 — 사람이 밖을
+ * 눌러 닫는 일은 그보다 늦고, 그래서 「밖을 누르면 닫힌다」는 그대로 산다.
+ */
+const OVERLAY_GUARD_MS = 300;
+
 interface SheetProps {
   /** Title rendered in the sticky header and used as the dialog label. */
   title: string;
@@ -30,6 +41,8 @@ interface SheetProps {
  */
 export default function Sheet({ title, onClose, children, footer, testId }: SheetProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  /** 이 시트가 열린 시각 — 오버레이의 300ms 가드가 본다. */
+  const openedAt = useRef(Date.now());
   const [scrolled, setScrolled] = useState(false);
   /** Is there anything left below the fold? The fade lies unless we ask. */
   const [moreBelow, setMoreBelow] = useState(false);
@@ -144,7 +157,12 @@ export default function Sheet({ title, onClose, children, footer, testId }: Shee
         type="button"
         aria-label="닫기"
         data-testid="sheet-overlay"
-        onClick={onClose}
+        onClick={() => {
+          // 열자마자 떨어지는 click은 여는 손짓의 뒤끝이지 「밖을 눌렀다」가
+          // 아니다 (M53-fix ③).
+          if (Date.now() - openedAt.current < OVERLAY_GUARD_MS) return;
+          onClose();
+        }}
         className="tb-overlay absolute inset-0 h-full w-full cursor-default bg-ink/45 backdrop-blur-[2px]"
       />
       <div

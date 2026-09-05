@@ -7,6 +7,7 @@ import {
   liveElementCount,
   nextPageTitle,
   pageTouchedAt,
+  reorderIds,
   tripPages,
   visibleElements,
 } from './pages';
@@ -169,5 +170,43 @@ describe('pageTouchedAt', () => {
 
   it('요소가 없으면 껍데기의 시각이다', () => {
     expect(pageTouchedAt(page('a', { updatedAt: 4200 }))).toBe(4200);
+  });
+});
+
+describe('reorderIds — 겹침 순서 (M53-1)', () => {
+  const order = ['a', 'b', 'c', 'd'];
+
+  it('맨 앞은 배열의 **끝**이다 (뒤가 위에 그려진다)', () => {
+    expect(reorderIds(order, ['b'], 'front')).toEqual(['a', 'c', 'd', 'b']);
+    expect(reorderIds(order, ['b'], 'back')).toEqual(['b', 'a', 'c', 'd']);
+  });
+
+  it('한 칸씩 오간다', () => {
+    expect(reorderIds(order, ['b'], 'forward')).toEqual(['a', 'c', 'b', 'd']);
+    expect(reorderIds(order, ['b'], 'backward')).toEqual(['b', 'a', 'c', 'd']);
+  });
+
+  it('여럿을 골랐으면 서로를 밀지 않고 함께 움직인다', () => {
+    expect(reorderIds(order, ['a', 'b'], 'forward')).toEqual(['c', 'a', 'b', 'd']);
+    expect(reorderIds(order, ['c', 'd'], 'backward')).toEqual(['a', 'c', 'd', 'b']);
+    // 골라 놓은 것들의 상대 순서는 어디로 가든 유지된다.
+    expect(reorderIds(order, ['d', 'a'], 'front')).toEqual(['b', 'c', 'a', 'd']);
+  });
+
+  it('끝에 닿으면 더 가지 않는다', () => {
+    expect(reorderIds(order, ['d'], 'forward')).toEqual(order);
+    expect(reorderIds(order, ['a'], 'backward')).toEqual(order);
+  });
+
+  it('보이지 않는 이웃은 자리를 세지 않는다 (지운 요소와 바꿔 봤자 표가 안 난다)', () => {
+    const withGhost = ['a', 'ghost', 'b'];
+    const visible = (id: Id) => id !== 'ghost';
+    expect(reorderIds(withGhost, ['b'], 'backward', visible)).toEqual(['b', 'a', 'ghost']);
+  });
+
+  it('고른 게 없으면 그대로 둔다 (새 배열이되 같은 내용)', () => {
+    const same = reorderIds(order, [], 'front');
+    expect(same).toEqual(order);
+    expect(same).not.toBe(order);
   });
 });

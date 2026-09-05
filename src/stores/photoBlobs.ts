@@ -180,6 +180,53 @@ export function loadPhotoUrl(id: Id): Promise<string | null> {
  * strip back and forth never flashes a placeholder. A miss sets state when the
  * read lands, guarded by a `live` flag so a fast unmount cannot warn.
  */
+/**
+ * 여러 사진의 URL을 한 번에 — `photoId → url` 맵 (M53-2).
+ *
+ * 드로우 캔버스가 이것을 부르는 이유는 렌더러의 규칙 때문이다: `DrawElementView`는
+ * 훅이 없는 순수 프레젠테이션이라(그래야 draft 미리보기와 PNG가 같은 함수를 쓴다)
+ * 자기 사진을 스스로 못 읽는다. 그래서 **부모가 한 번 읽어 맵으로 내려 준다** —
+ * 요소마다 훅을 하나씩 두면 획 300개짜리 페이지가 리렌더마다 구독 300개를 만든다.
+ *
+ * 캐시에 이미 있는 것은 **첫 렌더에 동기로** 들어간다(`usePhotoUrl`과 같은 배려):
+ * 탭을 다녀올 때마다 사진이 한 프레임 깜빡이면 그건 그림이 아니라 고장으로 보인다.
+ * 목록은 **정렬한 문자열**로 비교한다 — 배열의 정체성으로 비교하면 부모의 매
+ * 렌더가 곧 새 효과다.
+ */
+export function usePhotoUrls(ids: readonly Id[]): Record<Id, string> {
+  const key = [...new Set(ids)].sort().join(',');
+  const fromCache = (): Record<Id, string> => {
+    const map: Record<Id, string> = {};
+    for (const id of key === '' ? [] : key.split(',')) {
+      const cached = cachedPhotoUrl(id);
+      if (cached) map[id] = cached;
+    }
+    return map;
+  };
+  const [urls, setUrls] = useState<Record<Id, string>>(fromCache);
+
+  useEffect(() => {
+    const list = key === '' ? [] : key.split(',');
+    let live = true;
+    // 캐시에 있는 것으로 먼저 갈아 끼운다 — 사라진 id는 여기서 함께 빠진다.
+    const seeded = fromCache();
+    setUrls(seeded);
+    for (const id of list) {
+      if (seeded[id]) continue;
+      void loadPhotoUrl(id).then((url) => {
+        if (!live || !url) return;
+        setUrls((current) => (current[id] === url ? current : { ...current, [id]: url }));
+      });
+    }
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return urls;
+}
+
 export function usePhotoUrl(id: Id | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(() => (id ? cachedPhotoUrl(id) : null));
 

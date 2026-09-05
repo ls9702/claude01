@@ -223,3 +223,49 @@ describe('referencedPhotoIds — 드로우 배경 (M52b)', () => {
     expect([...referencedPhotoIds({ cards: { c1: { photos: [{ id: 'p1' }] } } })]).toEqual(['p1']);
   });
 });
+
+describe('referencedPhotoIds — 붙인 사진 요소 (M53-2)', () => {
+  it('요소가 든 photoId도 「누군가 가리키는 바이트」다', () => {
+    // 이 세 줄이 없으면 붙여넣은 사진은 **30초 뒤에 사라진다**(화면에는 남아
+    // 있다가 새로고침에서 깨진다 — 가장 나쁜 실패 모양).
+    const ids = referencedPhotoIds({
+      cards: {},
+      drawPages: {
+        d1: {
+          background: { photoId: 'bg1' },
+          elements: {
+            e1: { type: 'image', photoId: 'im1' },
+            e2: { type: 'stroke' },
+            e3: { type: 'image', photoId: 'im2' },
+          },
+        },
+      },
+    });
+    expect([...ids].sort()).toEqual(['bg1', 'im1', 'im2']);
+  });
+
+  it('지운 요소도 센다 — 되살아날 수 있는 30일 동안 바이트가 있어야 한다', () => {
+    const ids = referencedPhotoIds({
+      cards: {},
+      drawPages: {
+        d1: { elements: { e1: { type: 'image', photoId: 'im1', deletedAt: 1 } } },
+      },
+    });
+    expect([...ids]).toEqual(['im1']);
+  });
+
+  it('복사한 요소가 같은 사진을 나눠 써도 하나다', () => {
+    const ids = referencedPhotoIds({
+      cards: {},
+      drawPages: {
+        d1: {
+          elements: {
+            e1: { type: 'image', photoId: 'im1' },
+            e2: { type: 'image', photoId: 'im1' },
+          },
+        },
+      },
+    });
+    expect([...ids]).toEqual(['im1']);
+  });
+});

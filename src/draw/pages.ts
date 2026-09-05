@@ -91,6 +91,59 @@ export const visibleElements = (page: DrawPage) =>
     .map((id) => page.elements[id])
     .filter((element) => Boolean(element) && !element.deletedAt);
 
+/** 겹침 순서를 바꾸는 네 가지 손짓. */
+export type DrawReorder = 'front' | 'back' | 'forward' | 'backward';
+
+/**
+ * 겹침 순서를 다시 쓴다 (M53-1) — 「맨 앞으로」·「한 칸 뒤로」.
+ *
+ * 배열의 **뒤가 위**다(`DrawPage.elementOrder`). 그래서 「앞으로」는 뒤로 가는
+ * 것이고, 이 이름의 어긋남은 여기 한 곳에 가둔다.
+ *
+ * 한 칸 옮기기가 단순한 자리 맞바꾸기가 아닌 이유는 둘이다. (a) 여럿을 골랐으면
+ * **고른 것끼리는 서로를 밀지 않는다** — 셋을 한 칸 올리면 셋이 함께 한 칸
+ * 올라가야지 앞의 하나만 올라가면 안 된다. (b) 지운 요소는 배열에 남아 있지만
+ * 화면에 없다 — 그것과 자리를 바꾸면 사람 눈에는 아무 일도 일어나지 않는다.
+ * 그래서 「보이는, 고르지 않은 이웃」을 찾아 그 너머로 넘는다.
+ */
+export function reorderIds(
+  order: readonly Id[],
+  ids: Iterable<Id>,
+  where: DrawReorder,
+  visible: (id: Id) => boolean = () => true,
+): Id[] {
+  const chosen = new Set(ids);
+  const picked = order.filter((id) => chosen.has(id));
+  if (picked.length === 0) return [...order];
+
+  if (where === 'front') return [...order.filter((id) => !chosen.has(id)), ...picked];
+  if (where === 'back') return [...picked, ...order.filter((id) => !chosen.has(id))];
+
+  const list = [...order];
+  if (where === 'forward') {
+    // 오른쪽(위)부터 옮긴다 — 왼쪽부터 옮기면 앞의 것이 뒤의 것을 타고 넘는다.
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      if (!chosen.has(list[i])) continue;
+      let j = i + 1;
+      while (j < list.length && (chosen.has(list[j]) || !visible(list[j]))) j += 1;
+      if (j >= list.length) continue;
+      const [moved] = list.splice(i, 1);
+      list.splice(j, 0, moved);
+    }
+    return list;
+  }
+
+  for (let i = 0; i < list.length; i += 1) {
+    if (!chosen.has(list[i])) continue;
+    let j = i - 1;
+    while (j >= 0 && (chosen.has(list[j]) || !visible(list[j]))) j -= 1;
+    if (j < 0) continue;
+    const [moved] = list.splice(i, 1);
+    list.splice(j, 0, moved);
+  }
+  return list;
+}
+
 /**
  * 목록이 보여 주는 「수정 시각」 (M52a-fix ①) — 껍데기와 요소 중 가장 늦은 것.
  *

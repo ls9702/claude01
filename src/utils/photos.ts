@@ -249,7 +249,16 @@ export async function preparePhoto(file: Blob): Promise<PreparedPhoto> {
 export function referencedPhotoIds(workspace: {
   cards: Record<string, { photos?: { id: string }[] }>;
   memos?: Record<string, { photos?: { id: string }[] }>;
-  drawPages?: Record<string, { background?: { photoId: string } }>;
+  drawPages?: Record<
+    string,
+    {
+      background?: { photoId: string };
+      // `deletedAt`은 **읽지 않는다** — 지운 요소의 바이트도 지켜야 하기
+      // 때문이다(아래 주석). 타입에만 적어 두는 이유는 부르는 쪽이 진짜 요소를
+      // 그대로 넘길 수 있게 하기 위해서다.
+      elements?: Record<string, { type: string; photoId?: string; deletedAt?: number }>;
+    }
+  >;
 }): Set<string> {
   const ids = new Set<string>();
   for (const card of Object.values(workspace.cards)) {
@@ -264,6 +273,14 @@ export function referencedPhotoIds(workspace: {
   // 업로드(`sync/photoSync`)와 사진 포함 백업도 같은 답을 여기서 받는다.
   for (const page of Object.values(workspace.drawPages ?? {})) {
     if (page.background?.photoId) ids.add(page.background.photoId);
+    // 붙인 사진 요소 (M53-2) — 배경과 **같은 이유로** 여기 있어야 한다. 다른
+    // 점은 하나뿐이다: 지운 요소도 센다. 요소의 삭제는 도장일 뿐이라 30일 동안
+    // 되살아날 수 있고(실행취소·상대 기기의 병합), 그 사이에 바이트가 쓸려 가면
+    // 되살아난 것은 깨진 사진이다. 진짜로 아무도 안 가리키게 되는 것은 병합의
+    // TTL이 요소를 걷어 간 뒤다.
+    for (const element of Object.values(page.elements ?? {})) {
+      if (element.type === 'image' && element.photoId) ids.add(element.photoId);
+    }
   }
   return ids;
 }

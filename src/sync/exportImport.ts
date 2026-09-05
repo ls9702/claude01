@@ -219,6 +219,11 @@ function referencedIds(workspace: Workspace): Id[] {
   // 드로우 페이지의 배경 (M52b) — 사진 포함 백업이 그림의 바닥을 함께 싣는다.
   for (const page of Object.values(workspace.drawPages ?? {})) {
     if (page.background?.photoId) ids.add(page.background.photoId);
+    // 붙인 사진 요소 (M53-2) — 백업이 배경만 싣고 이것을 빠뜨리면, 되살린
+    // 페이지에서 사진 요소만 빈 사각형이 된다.
+    for (const element of Object.values(page.elements ?? {})) {
+      if (element.type === 'image' && element.photoId) ids.add(element.photoId);
+    }
   }
   return [...ids];
 }

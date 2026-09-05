@@ -116,3 +116,25 @@ describe('pngFileName', () => {
     expect(pngFileName('///')).toBe('드로우.png');
   });
 });
+
+describe('exportBounds — 붙인 사진 (M53-2)', () => {
+  it('사진 요소도 자동으로 감싼다 (`elementBounds`를 지나므로)', () => {
+    const photo: DrawElement = {
+      id: 'i1',
+      updatedAt: 1,
+      type: 'image',
+      x: 1000,
+      y: 1000,
+      w: 400,
+      h: 300,
+      photoId: 'ph1',
+    };
+    const box = exportBounds(page([photo]));
+    expect(box).toEqual({
+      x: 1000 - PNG_MARGIN,
+      y: 1000 - PNG_MARGIN,
+      w: 400 + PNG_MARGIN * 2,
+      h: 300 + PNG_MARGIN * 2,
+    });
+  });
+});
