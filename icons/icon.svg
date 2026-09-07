@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Trip Board">
+  <title>Trip Board</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#57534e"/>
+      <stop offset="1" stop-color="#1c1917"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
+  <path
+    fill="#fcd34d"
+    d="M256 56
+       C244 56 234 84 232 120
+       L230 170
+       L60 300
+       L60 348
+       L226 316
+       L218 392
+       L176 432
+       L176 464
+       L256 442
+       L336 464
+       L336 432
+       L294 392
+       L286 316
+       L452 348
+       L452 300
+       L282 170
+       L280 120
+       C278 84 268 56 256 56
+       Z"/>
+</svg>
