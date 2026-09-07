@@ -301,11 +301,52 @@ test('상대가 쓴 메시지는 아바타를 달고 왼쪽에 선다', async ({
   await expect(theirs).toHaveAttribute('data-own', 'false');
   await expect(theirs.getByTestId('avatar')).toHaveAttribute('data-profile', 'song');
   await expect(theirs.getByTestId('memo-msg-author')).toHaveText('songlee');
-  // 남의 말풍선에는 삭제 메뉴가 없다.
-  await expect(theirs.getByTestId('memo-msg-menu')).toHaveCount(0);
+  // 남의 말풍선에도 메뉴는 있지만(복사, M55) 삭제 줄은 없다.
+  await theirs.getByTestId('memo-msg-menu').click();
+  await expect(page.getByTestId('memo-msg-menu-panel')).toBeVisible();
+  await expect(page.getByTestId('memo-msg-copy')).toBeVisible();
+  await expect(page.getByTestId('memo-msg-delete')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('memo-msg-menu-panel')).toHaveCount(0);
 
   await send(page, '나도');
   const mine = page.getByTestId('memo-msg').nth(1);
   await expect(mine).toHaveAttribute('data-own', 'true');
   await expect(mine.getByTestId('avatar')).toHaveCount(0);
+});
+
+test('메시지를 복사한다 — 내 것도 상대 것도, 사진만 있는 줄은 빼고 (M55)', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await expect(page.getByTestId('tab-bar')).toBeVisible();
+
+  await createTrip(page, '후쿠오카');
+  await openMemo(page);
+  await send(page, '하카타역 앞 이치란 21:30');
+
+  // 내 줄: 메뉴에 복사 줄이 서고, 누르면 클립보드에 글이 들어간다.
+  await page.getByTestId('memo-msg-menu').first().click();
+  await page.getByTestId('memo-msg-copy').click();
+  await expect(page.getByTestId('memo-copied')).toHaveAttribute('data-result', 'ok');
+  await expect(page.getByTestId('memo-copied')).toHaveText('복사했어요');
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('하카타역 앞 이치란 21:30');
+  // 안내는 스스로 내려간다.
+  await expect(page.getByTestId('memo-copied')).toHaveCount(0);
+
+  // 상대의 줄도 같은 길이다.
+  await switchProfile(page, 'hoyabom');
+  await openMemo(page);
+  const theirs = page.getByTestId('memo-msg').first();
+  await expect(theirs).toHaveAttribute('data-own', 'false');
+  await page.evaluate(() => navigator.clipboard.writeText(''));
+  await theirs.getByTestId('memo-msg-menu').click();
+  await page.getByTestId('memo-msg-copy').click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('하카타역 앞 이치란 21:30');
 });

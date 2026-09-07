@@ -50,7 +50,7 @@ docs/                    ← deploy-synology.md(NAS 가이드)·HANDOFF.md(이 �
 2. **Playwright 1.56.1 고정** — 컨테이너의 chromium 빌드(1194)와 맞물림. 업그레이드·`playwright install` 금지.
 3. **하루 경계는 05시** (`timeline/dayWindow.ts`): 새벽(00~05시) 엔트리는 전날 창에 표시·집계. 일자 단위 UI는 반드시 windowed 트윈(daySpendWindowed 등) 사용, 달력 트윈은 결산/여행 범위용.
 4. 병합은 엔티티 LWW + 톰스톤(30일 TTL) + 정렬배열 재조정 (`sync/merge.ts`). 사진 바이트는 워크스페이스 JSON 밖(별도 idb + image.php).
-5. 완료 기준: `npm run typecheck && npm run build && npm run test && npm run e2e` **전부 그린** 후에만 커밋. 현재 기준선: **단위 1628 / e2e 315** (M54 — `draw6.spec` 5건 추가, 단위는 그대로(기대값만 `pen`→`hand`). 그 전 M53-fix가 1628/310, M53-2가 1625/305, M53-1이 1590/293, M52b가 1544/282). (e2e는 `npm run preview`가 `dist/`를 그대로 내주므로 **돌리기 전에 반드시 `npm run build`** — 안 하면 옛 화면을 검사한다.)
+5. 완료 기준: `npm run typecheck && npm run build && npm run test && npm run e2e` **전부 그린** 후에만 커밋. 현재 기준선: **단위 1632 / e2e 316** (M55 — `clipboard.test` 4건, `memo.spec` 복사 1건. M54가 1628/315 — `draw6.spec` 5건 추가, 단위는 그대로(기대값만 `pen`→`hand`). 그 전 M53-fix가 1628/310, M53-2가 1625/305, M53-1이 1590/293, M52b가 1544/282). (e2e는 `npm run preview`가 `dist/`를 그대로 내주므로 **돌리기 전에 반드시 `npm run build`** — 안 하면 옛 화면을 검사한다.)
 6. 테스트ID·문구는 추가만(기존 것 변경 시 해당 스펙 최소 수정 + 커밋 메시지에 기록). 드래그 e2e는 스텝 이동+`--repeat-each` 재확인.
 7. 커밋은 마일스톤 단위, 브랜치 `claude/mobile-macbook-session-sync-xs40tt`, PR 안 만듦. 모델명·세션 링크 외 AI 흔적을 저장소에 남기지 않음(커밋 트레일러는 기존 형식 유지).
 8. 사용자 워크플로우 선호: **블록 단위로 Opus 서브에이전트에 위임**, 메인 세션이 검증·커밋. 큰 변경엔 적대적 검수 패스 추가. 완료 시 NAS 덮어쓰기용 zip 패키지 제공(사용자가 File Station으로 올림).
@@ -594,6 +594,31 @@ Shift+클릭이 있고, 팝오버를 띄우면 그 다음 클릭이 팝오버 �
 스펙의 `addPage` 헬퍼에 「펜 고르기」 한 줄(열자마자 그리는 스펙들이라), 두 기기 병합 둘의
 2번째 기기에도 같은 한 줄, 그리고 `draw2`의 단축키 숫자(3→4, 4→5, 1이 이제 손)와 새로고침
 뒤의 기본 도구(`pen`→`hand`) 기대값. 패치노트는 **v27** 두 줄.
+
+### M55 — 메모 「메시지 복사」 (2026-09-07)
+
+사용자의 한 마디(「메모에서 메세지 복사 기능」)에서 나온 소형 회차. 메인 세션이 직접 구현했다.
+
+**말풍선 메뉴에 「메시지 복사」 줄**(`memo-msg-copy`, 아이콘 `copy`, `POPOVER_ROW_CLASS`)이
+삭제 줄 위에 선다. 메뉴의 **주인이 바뀌었다**: M23~M54는 「내 살아 있는 줄」에만 ⋯과
+롱프레스가 있었는데(지울 것이 그것뿐이라), 복사는 반대로 **상대가 보낸 주소·가게 이름**이
+필요한 일이다. 그래서 `hasMenu = deletable || copyable`(`copyable = !removed && text`) —
+글이 있는 살아 있는 줄이면 누구의 것이든 메뉴가 열리고, 그 안의 줄이 사람에 따라 다르다
+(내 것: 복사+삭제, 상대 것: 복사만, 사진만 있는 내 줄: 삭제만). `select-none`도 메뉴가 있는
+말풍선 전부로 옮겼다 — 길게 누르면 브라우저 글자 선택이 아니라 우리 메뉴가 떠야 하니까.
+
+**클립보드 헬퍼** `utils/clipboard.copyText(text): Promise<boolean>` — `navigator.clipboard.writeText`
+먼저, 실패·부재 시 숨긴 textarea + `execCommand('copy')`. 돌려주는 값은 **실제로 들어갔는가**이고
+말풍선은 그에 따라 「복사했어요」/「복사하지 못했어요」(`memo-copied`, `data-result=ok|fail`,
+`COPIED_MS` 1.6초 뒤 자동 소멸)를 시간 도장 아래 한 줄로 띄운다. 토스트가 아닌 이유: 어느 줄을
+복사했는지가 그 줄 곁에 있어야 보인다.
+
+**플레이크 한 건 보강**: 게이트에서 `draw5.spec:92`(한가운데에서 열린다)가 한 번 졌다 — `viewOf`가 캔버스가 크기를 재기 전 `viewBox 0 0 0 0`을 읽어 (0,0)으로 오독(격리 ×3 통과). 헬퍼가 폭이 잡힐 때까지 `expect.poll`로 기다린 뒤 읽도록 보강. M55 diff는 드로우를 건드리지 않았다.
+
+**스펙 한 곳 의미 보존 수정**: `memo.spec` 「남의 말풍선에는 삭제 메뉴가 없다」의
+`memo-msg-menu` count 0 → 메뉴를 열어 `memo-msg-copy`는 있고 `memo-msg-delete`는 없음을 확인.
+⋯ 버튼의 aria-label이 「메시지 메뉴 (삭제)」에서 「메시지 메뉴 (복사·삭제)」/「(복사)」로
+바뀌었다(e2e가 읽지 않는 문자열). 패치노트 **v28** 한 줄.
 
 ## 6. 보류/백로그 (토론·검수에서 합의된 순서)
 

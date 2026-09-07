@@ -78,11 +78,17 @@ async function dragOnCanvas(
 async function viewOf(
   page: Page,
 ): Promise<{ x: number; y: number; w: number; h: number }> {
-  return page.evaluate(() => {
-    const svg = document.querySelector('[data-testid="draw-canvas"]');
-    const [x, y, w, h] = (svg?.getAttribute('viewBox') ?? '0 0 0 0').split(' ').map(Number);
-    return { x, y, w, h };
-  });
+  const read = () =>
+    page.evaluate(() => {
+      const svg = document.querySelector('[data-testid="draw-canvas"]');
+      const [x, y, w, h] = (svg?.getAttribute('viewBox') ?? '0 0 0 0').split(' ').map(Number);
+      return { x, y, w, h };
+    });
+  // 캔버스가 아직 크기를 재기 전이면 viewBox가 `0 0 0 0`이다 — 그 한 프레임을
+  // 읽으면 「(0,0)에서 열렸다」로 오독한다(M55 게이트에서 한 번, 부하 아래).
+  // 폭이 잡힐 때까지 기다린 뒤에 읽는다.
+  await expect.poll(async () => (await read()).w, { timeout: 5000 }).toBeGreaterThan(0);
+  return read();
 }
 
 /* ------------------------------------------------------------------ *

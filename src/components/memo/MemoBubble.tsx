@@ -7,10 +7,13 @@ import AnchoredMenu from '../common/AnchoredMenu';
 import Avatar from '../common/Avatar';
 import Icon from '../common/Icon';
 import PhotoLightbox from '../common/PhotoLightbox';
-import { POPOVER_ROW_DANGER_CLASS } from '../common/formStyles';
+import { POPOVER_ROW_CLASS, POPOVER_ROW_DANGER_CLASS } from '../common/formStyles';
+import { copyText } from '../../utils/clipboard';
 
 /** Frozen copy the e2e suite reads. */
 export const REMOVED_TEXT = '삭제된 메시지예요';
+export const COPIED_TEXT = '복사했어요';
+export const COPY_FAILED_TEXT = '복사하지 못했어요';
 
 /**
  * How long a finger has to rest on one's own bubble before the delete menu
@@ -18,6 +21,9 @@ export const REMOVED_TEXT = '삭제된 메시지예요';
  * here — 500ms is what messengers have trained thumbs to expect.
  */
 export const LONG_PRESS_MS = 500;
+
+/** 「복사했어요」가 떠 있는 시간 (M55) — 읽을 만큼, 방해하지 않을 만큼. */
+export const COPIED_MS = 1600;
 
 interface MemoBubbleProps {
   memo: MemoMessage;
@@ -92,8 +98,37 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
   const photos = memo.photos ?? [];
   const author = useProfileDef(isProfileId(memo.by) ? memo.by : 'song');
   const authorLabel = isProfileId(memo.by) ? author.label : null;
-  /** Only one's own live message has a menu to offer. */
+  /** 지울 수 있는 것은 **내** 살아 있는 메시지뿐이다. */
   const deletable = own && !removed;
+  /**
+   * 복사할 수 있는 것은 글이 있는 살아 있는 메시지 — **누구의 것이든** (M55).
+   *
+   * M23~M54까지 메뉴는 내 말풍선에만 있었다(지울 것이 그것뿐이라). 복사는
+   * 반대다: 옮겨 적고 싶은 것은 대개 상대가 보낸 주소·가게 이름이다. 그래서
+   * 메뉴 자체는 글이 있는 모든 줄에 열리고, 그 안의 줄이 사람에 따라 다르다.
+   * 사진만 있는 줄은 복사할 글이 없으니 내 것일 때만(삭제) 메뉴가 선다.
+   */
+  const copyable = !removed && Boolean(memo.text);
+  const hasMenu = deletable || copyable;
+
+  /** 방금 복사가 됐는가 — 잠깐 「복사했어요」를 띄우고 스스로 내려간다. */
+  const [copied, setCopied] = useState<'ok' | 'fail' | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+  const copyMessage = async (): Promise<void> => {
+    const ok = await copyText(memo.text ?? '');
+    setCopied(ok ? 'ok' : 'fail');
+    if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => {
+      copiedTimer.current = null;
+      setCopied(null);
+    }, COPIED_MS);
+  };
 
   /**
    * 이번 누름이 **길게 눌러 메뉴를 연** 누름인가 (M50, 헌터M2 #2).
@@ -126,10 +161,13 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
 
   const bubbleClass = [
     'w-fit max-w-[16rem] rounded-lg px-3 py-2 text-label font-normal sm:max-w-md',
+    // 메뉴가 있는 말풍선은 `select-none`이다 — 길게 누르면 브라우저의 글자
+    // 선택이 아니라 **우리 메뉴**가 떠야 하니까(M55부터는 상대의 말풍선도).
+    hasMenu ? 'select-none' : '',
     removed
       ? 'border border-dashed border-line bg-transparent text-ink-faint'
       : own
-        ? 'select-none bg-inverse text-surface'
+        ? 'bg-inverse text-surface'
         : 'bg-surface text-ink shadow-raise',
   ].join(' ');
 
@@ -163,7 +201,7 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
             ref={bubbleRef}
             data-testid="memo-bubble"
             className={bubbleClass}
-            {...(deletable
+            {...(hasMenu
               ? {
                   onTouchStart: startPress,
                   onTouchMove: cancelPress,
@@ -221,13 +259,13 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
             </span>
           )}
 
-          {deletable ? (
+          {hasMenu ? (
             <button
               type="button"
               ref={buttonRef}
               data-testid="memo-msg-menu"
               data-memo-id={memo.id}
-              aria-label="메시지 메뉴 (삭제)"
+              aria-label={deletable ? '메시지 메뉴 (복사·삭제)' : '메시지 메뉴 (복사)'}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               onClick={() => setMenuAnchor((open) => (open ? null : buttonRef.current))}
@@ -238,6 +276,19 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
             </button>
           ) : null}
         </div>
+
+        {/* 복사 결과 — 시간 도장 아래 한 줄, 잠깐 (M55). 토스트로 띄우지 않는
+            이유는 어느 줄을 복사했는지가 그 줄 곁에 있어야 보이기 때문이다. */}
+        {copied ? (
+          <span
+            role="status"
+            data-testid="memo-copied"
+            data-result={copied}
+            className={`mt-1 text-micro ${copied === 'ok' ? 'text-ink-muted' : 'text-danger'}`}
+          >
+            {copied === 'ok' ? COPIED_TEXT : COPY_FAILED_TEXT}
+          </span>
+        ) : null}
       </div>
 
       {menuOpen ? (
@@ -246,18 +297,34 @@ export default function MemoBubble({ memo, own, onDelete }: MemoBubbleProps) {
           testId="memo-msg-menu-panel"
           onClose={() => setMenuAnchor(null)}
         >
-          <button
-            type="button"
-            data-testid="memo-msg-delete"
-            onClick={() => {
-              setMenuAnchor(null);
-              onDelete(memo);
-            }}
-            className={POPOVER_ROW_DANGER_CLASS}
-          >
-            <Icon name="trash" size={16} />
-            메시지 삭제
-          </button>
+          {copyable ? (
+            <button
+              type="button"
+              data-testid="memo-msg-copy"
+              onClick={() => {
+                setMenuAnchor(null);
+                void copyMessage();
+              }}
+              className={POPOVER_ROW_CLASS}
+            >
+              <Icon name="copy" size={16} />
+              메시지 복사
+            </button>
+          ) : null}
+          {deletable ? (
+            <button
+              type="button"
+              data-testid="memo-msg-delete"
+              onClick={() => {
+                setMenuAnchor(null);
+                onDelete(memo);
+              }}
+              className={POPOVER_ROW_DANGER_CLASS}
+            >
+              <Icon name="trash" size={16} />
+              메시지 삭제
+            </button>
+          ) : null}
         </AnchoredMenu>
       ) : null}
 
